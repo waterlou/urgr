@@ -1,0 +1,635 @@
+mod schema;
+
+use rusqlite::{params, Connection};
+
+use crate::error::Result;
+use crate::models::*;
+
+pub struct Database {
+    conn: Connection,
+}
+
+impl Database {
+    pub fn open(path: &str) -> Result<Self> {
+        let conn = Connection::open(path)?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+        conn.execute_batch(schema::CREATE_TABLES)?;
+        conn.execute_batch(schema::INDEXES)?;
+        Ok(Self { conn })
+    }
+
+    pub fn open_in_memory() -> Result<Self> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+        conn.execute_batch(schema::CREATE_TABLES)?;
+        conn.execute_batch(schema::INDEXES)?;
+        Ok(Self { conn })
+    }
+
+    // ── Set Versions ──
+
+    pub fn import_version(
+        &self,
+        source: &str,
+        version: &str,
+        dir: Option<&str>,
+    ) -> Result<i64> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT OR IGNORE INTO set_versions (source, version, dir) VALUES (?1, ?2, ?3)",
+            params![source, version, dir],
+        )?;
+        let id: i64 = tx.query_row(
+            "SELECT id FROM set_versions WHERE source = ?1 AND version = ?2",
+            params![source, version],
+            |r| r.get(0),
+        )?;
+        tx.commit()?;
+        Ok(id)
+    }
+
+    pub fn list_versions(&self) -> Result<Vec<SetVersion>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT sv.id, sv.source, sv.version, sv.dir,
+                    (SELECT COUNT(*) FROM game_entries WHERE version_id = sv.id) as total_games,
+                    (SELECT COUNT(*) FROM rom_entries re
+                     JOIN game_entries ge ON re.game_entry_id = ge.id
+                     WHERE ge.version_id = sv.id) as total_roms
+             FROM set_versions sv
+             ORDER BY sv.source, sv.version",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(SetVersion {
+                id: r.get(0)?,
+                source: r.get(1)?,
+                version: r.get(2)?,
+                dir: r.get(3)?,
+                total_games: r.get(4)?,
+                total_roms: r.get(5)?,
+            })
+        })?;
+        let mut versions = Vec::new();
+        for row in rows {
+            versions.push(row?);
+        }
+        Ok(versions)
+    }
+
+    pub fn get_version(&self, id: i64) -> Result<Option<SetVersion>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT sv.id, sv.source, sv.version, sv.dir,
+                    (SELECT COUNT(*) FROM game_entries WHERE version_id = sv.id) as total_games,
+                    (SELECT COUNT(*) FROM rom_entries re
+                     JOIN game_entries ge ON re.game_entry_id = ge.id
+                     WHERE ge.version_id = sv.id) as total_roms
+             FROM set_versions sv WHERE sv.id = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![id], |r| {
+            Ok(SetVersion {
+                id: r.get(0)?,
+                source: r.get(1)?,
+                version: r.get(2)?,
+                dir: r.get(3)?,
+                total_games: r.get(4)?,
+                total_roms: r.get(5)?,
+            })
+        })?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn delete_version(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM set_versions WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    // ── Game Entries ──
+
+    pub fn insert_game(&self, version_id: i64, game: &GameEntry) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO game_entries (version_id, name, description, year, manufacturer, cloneof)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(version_id, name) DO UPDATE SET
+               description = excluded.description,
+               year = excluded.year,
+               manufacturer = excluded.manufacturer,
+               cloneof = excluded.cloneof",
+            params![
+                version_id,
+                game.name,
+                game.description,
+                game.year,
+                game.manufacturer,
+                game.cloneof,
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn insert_games_batch(&self, version_id: i64, games: &[GameEntry]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        for game in games {
+            tx.execute(
+                "INSERT INTO game_entries (version_id, name, description, year, manufacturer, cloneof)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(version_id, name) DO UPDATE SET
+                   description = excluded.description,
+                   year = excluded.year,
+                   manufacturer = excluded.manufacturer,
+                   cloneof = excluded.cloneof",
+                params![
+                    version_id,
+                    game.name,
+                    game.description,
+                    game.year,
+                    game.manufacturer,
+                    game.cloneof,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn list_games(&self, version_id: i64) -> Result<Vec<GameEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, version_id, name, description, year, manufacturer, cloneof
+             FROM game_entries WHERE version_id = ?1 ORDER BY name",
+        )?;
+        let rows = stmt.query_map(params![version_id], |r| {
+            Ok(GameEntry {
+                id: r.get(0)?,
+                version_id: r.get(1)?,
+                name: r.get(2)?,
+                description: r.get(3)?,
+                year: r.get(4)?,
+                manufacturer: r.get(5)?,
+                cloneof: r.get(6)?,
+            })
+        })?;
+        let mut games = Vec::new();
+        for row in rows {
+            games.push(row?);
+        }
+        Ok(games)
+    }
+
+    pub fn get_game_count(&self, version_id: i64) -> Result<i64> {
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*) FROM game_entries WHERE version_id = ?1",
+            params![version_id],
+            |r| r.get(0),
+        )?)
+    }
+
+    // ── ROM Entries ──
+
+    pub fn insert_rom(&self, game_entry_id: i64, rom: &RomEntry) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO rom_entries (game_entry_id, filename, size, crc32, md5, sha1, status, merge_target)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(game_entry_id, filename) DO UPDATE SET
+               size = excluded.size, crc32 = excluded.crc32,
+               md5 = excluded.md5, sha1 = excluded.sha1,
+               status = excluded.status, merge_target = excluded.merge_target",
+            params![
+                game_entry_id,
+                rom.filename,
+                rom.size,
+                rom.crc32,
+                rom.md5,
+                rom.sha1,
+                rom.status,
+                rom.merge_target,
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn insert_roms_batch(&self, game_entry_id: i64, roms: &[RomEntry]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        for rom in roms {
+            tx.execute(
+                "INSERT INTO rom_entries (game_entry_id, filename, size, crc32, md5, sha1, status, merge_target)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(game_entry_id, filename) DO UPDATE SET
+                   size = excluded.size, crc32 = excluded.crc32,
+                   md5 = excluded.md5, sha1 = excluded.sha1,
+                   status = excluded.status, merge_target = excluded.merge_target",
+                params![
+                    game_entry_id,
+                    rom.filename,
+                    rom.size,
+                    rom.crc32,
+                    rom.md5,
+                    rom.sha1,
+                    rom.status,
+                    rom.merge_target,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn list_roms_for_game(&self, game_entry_id: i64) -> Result<Vec<RomEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, game_entry_id, filename, size, crc32, md5, sha1, status, merge_target
+             FROM rom_entries WHERE game_entry_id = ?1 ORDER BY filename",
+        )?;
+        let rows = stmt.query_map(params![game_entry_id], |r| {
+            Ok(RomEntry {
+                id: r.get(0)?,
+                game_entry_id: r.get(1)?,
+                filename: r.get(2)?,
+                size: r.get(3)?,
+                crc32: r.get(4)?,
+                md5: r.get(5)?,
+                sha1: r.get(6)?,
+                status: r.get(7)?,
+                merge_target: r.get(8)?,
+            })
+        })?;
+        let mut roms = Vec::new();
+        for row in rows {
+            roms.push(row?);
+        }
+        Ok(roms)
+    }
+
+    // ── Scanned Games ──
+
+    pub fn upsert_scanned_game(
+        &self,
+        version_id: i64,
+        name: &str,
+        filename: &str,
+        sha1: Option<&str>,
+        size: Option<i64>,
+        status: &str,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO scanned_games (version_id, name, filename, sha1, size, status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(version_id, name) DO UPDATE SET
+               filename = excluded.filename, sha1 = excluded.sha1,
+               size = excluded.size, status = excluded.status",
+            params![version_id, name, filename, sha1, size, status],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_scanned_games(&self, version_id: i64) -> Result<Vec<ScannedGame>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, version_id, name, filename, sha1, size, status
+             FROM scanned_games WHERE version_id = ?1 ORDER BY name",
+        )?;
+        let rows = stmt.query_map(params![version_id], |r| {
+            Ok(ScannedGame {
+                id: r.get(0)?,
+                version_id: r.get(1)?,
+                name: r.get(2)?,
+                filename: r.get(3)?,
+                sha1: r.get(4)?,
+                size: r.get(5)?,
+                status: r.get(6)?,
+            })
+        })?;
+        let mut games = Vec::new();
+        for row in rows {
+            games.push(row?);
+        }
+        Ok(games)
+    }
+
+    pub fn clear_scanned_games(&self, version_id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM scanned_games WHERE version_id = ?1", params![version_id])?;
+        Ok(())
+    }
+
+    // ── Queries ──
+
+    pub fn get_version_game_count(&self, version_id: i64) -> Result<(i64, i64)> {
+        let scanned: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM scanned_games WHERE version_id = ?1",
+            params![version_id],
+            |r| r.get(0),
+        )?;
+        let expected: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM game_entries WHERE version_id = ?1",
+            params![version_id],
+            |r| r.get(0),
+        )?;
+        Ok((scanned, expected))
+    }
+
+    pub fn find_older_versions(&self, source: &str, version: &str) -> Result<Vec<SetVersion>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, source, version, dir, 0 as tg, 0 as tr
+             FROM set_versions
+             WHERE source = ?1 AND version < ?2
+             ORDER BY version DESC",
+        )?;
+        let rows = stmt.query_map(params![source, version], |r| {
+            Ok(SetVersion {
+                id: r.get(0)?,
+                source: r.get(1)?,
+                version: r.get(2)?,
+                dir: r.get(3)?,
+                total_games: 0,
+                total_roms: 0,
+            })
+        })?;
+        let mut versions = Vec::new();
+        for row in rows {
+            versions.push(row?);
+        }
+        Ok(versions)
+    }
+
+    pub fn diff_versions(
+        &self,
+        version_id_a: i64,
+        version_id_b: i64,
+    ) -> Result<VersionDiff> {
+        let va = self.get_version(version_id_a)?.unwrap();
+        let vb = self.get_version(version_id_b)?.unwrap();
+
+        let mut stmt = self.conn.prepare(
+            "SELECT name FROM game_entries WHERE version_id = ?1 ORDER BY name",
+        )?;
+
+        let games_a: std::collections::BTreeSet<String> = stmt
+            .query_map(params![version_id_a], |r| r.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        let games_b: std::collections::BTreeSet<String> = stmt
+            .query_map(params![version_id_b], |r| r.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let added: Vec<String> = games_b.difference(&games_a).cloned().collect();
+        let removed: Vec<String> = games_a.difference(&games_b).cloned().collect();
+        let common: Vec<&String> = games_a.intersection(&games_b).collect();
+
+        let mut changed = Vec::new();
+        for name in &common {
+            let ge_a: i64 = self.conn.query_row(
+                "SELECT id FROM game_entries WHERE version_id = ?1 AND name = ?2",
+                params![version_id_a, name],
+                |r| r.get(0),
+            )?;
+            let ge_b: i64 = self.conn.query_row(
+                "SELECT id FROM game_entries WHERE version_id = ?1 AND name = ?2",
+                params![version_id_b, name],
+                |r| r.get(0),
+            )?;
+
+            let hashes_a: std::collections::BTreeSet<String> = {
+                let mut s = self.conn.prepare(
+                    "SELECT sha1 FROM rom_entries WHERE game_entry_id = ?1 AND sha1 IS NOT NULL",
+                )?;
+                let rows: std::collections::BTreeSet<String> = s
+                    .query_map(params![ge_a], |r| r.get::<_, String>(0))?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                rows
+            };
+            let hashes_b: std::collections::BTreeSet<String> = {
+                let mut s = self.conn.prepare(
+                    "SELECT sha1 FROM rom_entries WHERE game_entry_id = ?1 AND sha1 IS NOT NULL",
+                )?;
+                let rows: std::collections::BTreeSet<String> = s
+                    .query_map(params![ge_b], |r| r.get::<_, String>(0))?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                rows
+            };
+
+            if hashes_a != hashes_b {
+                changed.push(name.to_string());
+            }
+        }
+
+        let unchanged = common.len() as i64 - changed.len() as i64;
+
+        Ok(VersionDiff {
+            version_a: va.version,
+            version_b: vb.version,
+            added,
+            removed,
+            changed,
+            unchanged,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_db() -> Database {
+        Database::open_in_memory().expect("in-memory db")
+    }
+
+    fn sample_game(name: &str) -> GameEntry {
+        GameEntry {
+            id: 0,
+            version_id: 0,
+            name: name.to_string(),
+            description: format!("desc_{}", name),
+            year: Some("1990".to_string()),
+            manufacturer: Some("Capcom".to_string()),
+            cloneof: None,
+        }
+    }
+
+    fn sample_rom(name: &str, sha1: &str) -> RomEntry {
+        RomEntry {
+            id: 0,
+            game_entry_id: 0,
+            filename: format!("{}.bin", name),
+            size: Some(1024),
+            crc32: Some("ABCD1234".to_string()),
+            md5: Some("d41d8cd98f00b204e9800998ecf8427e".to_string()),
+            sha1: Some(sha1.to_string()),
+            status: "good".to_string(),
+            merge_target: None,
+        }
+    }
+
+    #[test]
+    fn test_open_in_memory() {
+        let db = make_db();
+        let versions = db.list_versions().unwrap();
+        assert!(versions.is_empty());
+    }
+
+    #[test]
+    fn test_import_version() {
+        let db = make_db();
+        let id = db.import_version("mame", "0.261", Some("/roms/mame261")).unwrap();
+        assert!(id > 0);
+
+        let versions = db.list_versions().unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].source, "mame");
+        assert_eq!(versions[0].version, "0.261");
+    }
+
+    #[test]
+    fn test_import_duplicate_version() {
+        let db = make_db();
+        let id1 = db.import_version("mame", "0.261", None).unwrap();
+        let id2 = db.import_version("mame", "0.261", None).unwrap();
+        assert_eq!(id1, id2);
+    }
+
+    #[test]
+    fn test_get_version() {
+        let db = make_db();
+        let id = db.import_version("mame", "0.261", None).unwrap();
+        let v = db.get_version(id).unwrap().expect("version exists");
+        assert_eq!(v.version, "0.261");
+        assert_eq!(v.source, "mame");
+    }
+
+    #[test]
+    fn test_get_version_not_found() {
+        let db = make_db();
+        let v = db.get_version(999).unwrap();
+        assert!(v.is_none());
+    }
+
+    #[test]
+    fn test_delete_version() {
+        let db = make_db();
+        let id = db.import_version("mame", "0.261", None).unwrap();
+        db.delete_version(id).unwrap();
+        let v = db.get_version(id).unwrap();
+        assert!(v.is_none());
+    }
+
+    #[test]
+    fn test_insert_game() {
+        let db = make_db();
+        let vid = db.import_version("mame", "0.261", None).unwrap();
+        let gid = db.insert_game(vid, &sample_game("sf2")).unwrap();
+        assert!(gid > 0);
+
+        let games = db.list_games(vid).unwrap();
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].name, "sf2");
+    }
+
+    #[test]
+    fn test_insert_games_batch() {
+        let db = make_db();
+        let vid = db.import_version("mame", "0.261", None).unwrap();
+        let games = vec![sample_game("game_a"), sample_game("game_b")];
+        db.insert_games_batch(vid, &games).unwrap();
+        assert_eq!(db.get_game_count(vid).unwrap(), 2);
+    }
+
+    #[test]
+    fn test_rom_crud() {
+        let db = make_db();
+        let vid = db.import_version("mame", "0.261", None).unwrap();
+        let gid = db.insert_game(vid, &sample_game("sf2")).unwrap();
+
+        let roms = vec![sample_rom("ic1", &"A".repeat(40))];
+        db.insert_roms_batch(gid, &roms).unwrap();
+
+        let stored = db.list_roms_for_game(gid).unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].filename, "ic1.bin");
+
+        let rid = db.insert_rom(gid, &sample_rom("ic2", &"B".repeat(40))).unwrap();
+        assert!(rid > 0);
+        assert_eq!(db.list_roms_for_game(gid).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_scanned_games() {
+        let db = make_db();
+        let vid = db.import_version("mame", "0.261", None).unwrap();
+
+        db.upsert_scanned_game(vid, "sf2", "/roms/sf2.zip", Some("AAAA"), Some(4096), "ok").unwrap();
+        let scanned = db.list_scanned_games(vid).unwrap();
+        assert_eq!(scanned.len(), 1);
+        assert_eq!(scanned[0].name, "sf2");
+        assert_eq!(scanned[0].status, "ok");
+
+        db.upsert_scanned_game(vid, "sf2", "/roms/sf2.zip", Some("BBBB"), Some(4096), "mismatch").unwrap();
+        let scanned = db.list_scanned_games(vid).unwrap();
+        assert_eq!(scanned[0].status, "mismatch");
+
+        db.clear_scanned_games(vid).unwrap();
+        assert!(db.list_scanned_games(vid).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_get_version_game_count() {
+        let db = make_db();
+        let vid = db.import_version("mame", "0.261", None).unwrap();
+        db.insert_game(vid, &sample_game("sf2")).unwrap();
+        db.insert_game(vid, &sample_game("sf3")).unwrap();
+        db.upsert_scanned_game(vid, "sf2", "/roms/sf2.zip", None, None, "ok").unwrap();
+
+        let (scanned, expected) = db.get_version_game_count(vid).unwrap();
+        assert_eq!(scanned, 1);
+        assert_eq!(expected, 2);
+    }
+
+    #[test]
+    fn test_find_older_versions() {
+        let db = make_db();
+        db.import_version("mame", "0.250", None).unwrap();
+        db.import_version("mame", "0.260", None).unwrap();
+        db.import_version("mame", "0.261", None).unwrap();
+
+        let older = db.find_older_versions("mame", "0.261").unwrap();
+        assert_eq!(older.len(), 2);
+        assert_eq!(older[0].version, "0.260");
+        assert_eq!(older[1].version, "0.250");
+    }
+
+    #[test]
+    fn test_diff_versions_add_remove() {
+        let db = make_db();
+        let va = db.import_version("mame", "0.250", None).unwrap();
+        let vb = db.import_version("mame", "0.261", None).unwrap();
+
+        db.insert_game(va, &sample_game("shared")).unwrap();
+        db.insert_game(va, &sample_game("removed")).unwrap();
+
+        db.insert_game(vb, &sample_game("shared")).unwrap();
+        db.insert_game(vb, &sample_game("added")).unwrap();
+
+        let diff = db.diff_versions(va, vb).unwrap();
+        assert_eq!(diff.added, vec!["added"]);
+        assert_eq!(diff.removed, vec!["removed"]);
+        assert_eq!(diff.unchanged, 1);
+    }
+
+    #[test]
+    fn test_diff_versions_changed_roms() {
+        let db = make_db();
+        let va = db.import_version("mame", "0.250", None).unwrap();
+        let vb = db.import_version("mame", "0.261", None).unwrap();
+
+        let ga_id = db.insert_game(va, &sample_game("sf2")).unwrap();
+        let gb_id = db.insert_game(vb, &sample_game("sf2")).unwrap();
+
+        db.insert_rom(ga_id, &sample_rom("rom1", &"A".repeat(40))).unwrap();
+        db.insert_rom(gb_id, &sample_rom("rom1", &"B".repeat(40))).unwrap();
+
+        let diff = db.diff_versions(va, vb).unwrap();
+        assert_eq!(diff.changed, vec!["sf2"]);
+        assert_eq!(diff.unchanged, 0);
+    }
+}

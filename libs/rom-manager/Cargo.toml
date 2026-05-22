@@ -1,0 +1,18 @@
+[package]
+name = "rom-manager"
+version = "0.1.0"
+edition = "2021"
+description = "ROM file management — DAT parsing, versioned sets, verification"
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+quick-xml = { version = "0.36", features = ["serialize"] }
+rom-scraper = { path = "../rom-scraper" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
