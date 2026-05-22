@@ -1,0 +1,17 @@
+services:
+  rom-manager:
+    build: .
+    container_name: gamemanager
+    restart: unless-stopped
+    environment:
+      - SS_DEVID=${SS_DEVID:-}
+      - SS_DEVPASSWORD=${SS_DEVPASSWORD:-}
+      - SS_USERNAME=${SS_USERNAME:-}
+      - SS_PASSWORD=${SS_PASSWORD:-}
+      - RUST_LOG=${RUST_LOG:-info}
+    volumes:
+      - ./roms:/roms:rw
+      - ./config:/config:rw
+    working_dir: /roms
+    stdin_open: true
+    tty: true

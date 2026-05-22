@@ -1,0 +1,3 @@
+[workspace]
+members = ["libs/rom-scraper", "apps/rom-scraper-cli"]
+resolver = "2"

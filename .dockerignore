@@ -1,0 +1,7 @@
+.git/
+target/
+*.swp
+*.swo
+.DS_Store
+docker-compose.yml
+docs/

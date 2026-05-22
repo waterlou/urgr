@@ -1,0 +1,18 @@
+[package]
+name = "rom-scraper"
+version = "0.1.0"
+edition = "2021"
+description = "Retro game ROM metadata scraper — hash-based matching, multi-source scraping, media download"
+
+[dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+quick-xml = { version = "0.31", features = ["serialize"] }
+crc32fast = "1"
+md-5 = "0.10"
+sha1 = "0.10"
+thiserror = "2"
+tracing = "0.1"
+async-trait = "0.1"
