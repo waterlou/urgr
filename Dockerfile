@@ -6,6 +6,7 @@ RUN apk add --no-cache musl-dev
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY libs/rom-scraper libs/rom-scraper
+COPY libs/rom-manager libs/rom-manager
 COPY apps/rom-scraper-cli apps/rom-scraper-cli
 
 RUN cargo build --release -p rom-scraper-cli && \
