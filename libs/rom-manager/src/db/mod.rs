@@ -632,4 +632,93 @@ mod tests {
         assert_eq!(diff.changed, vec!["sf2"]);
         assert_eq!(diff.unchanged, 0);
     }
+
+    // ── Performance tests ──
+
+    fn bulk_games(prefix: &str, count: i64) -> Vec<GameEntry> {
+        (0..count).map(|i| GameEntry {
+            id: 0,
+            version_id: 0,
+            name: format!("{}_{}", prefix, i),
+            description: format!("Game {}", i),
+            year: Some("1991".into()),
+            manufacturer: Some("TestCorp".into()),
+            cloneof: None,
+        }).collect()
+    }
+
+    #[test]
+    fn test_db_perf_bulk_insert() {
+        use std::time::Instant;
+        let db = make_db();
+        let vid = db.import_version("perf", "v1", None).unwrap();
+        let games = bulk_games("g", 5_000);
+        let start = Instant::now();
+        db.insert_games_batch(vid, &games).unwrap();
+        let elapsed = start.elapsed();
+        eprintln!(
+            "  DB bulk insert: {} games in {:.3}s ({:.0} games/s)",
+            5_000, elapsed.as_secs_f64(), 5_000_f64 / elapsed.as_secs_f64()
+        );
+        let count = db.get_game_count(vid).unwrap();
+        assert_eq!(count, 5_000);
+    }
+
+    #[test]
+    fn test_db_perf_bulk_insert_with_roms() {
+        use std::time::Instant;
+        let db = make_db();
+        let vid = db.import_version("perf", "v2", None).unwrap();
+        let games = bulk_games("gr", 2_000);
+        db.insert_games_batch(vid, &games).unwrap();
+
+        let start = Instant::now();
+        for game in &games {
+            let ge_id = db.conn.query_row(
+                "SELECT id FROM game_entries WHERE version_id = ?1 AND name = ?2",
+                rusqlite::params![vid, game.name],
+                |r| r.get::<_, i64>(0),
+            ).unwrap();
+            let rom = RomEntry {
+                id: 0,
+                game_entry_id: 0,
+                filename: format!("{}.bin", game.name),
+                size: Some(524288),
+                crc32: Some("ABCD1234".into()),
+                md5: None,
+                sha1: Some("A".repeat(40)),
+                status: "good".into(),
+                merge_target: None,
+            };
+            db.insert_rom(ge_id, &rom).unwrap();
+        }
+        let elapsed = start.elapsed();
+        eprintln!(
+            "  DB bulk insert with ROMs: {} games + ROMs in {:.3}s ({:.0} games+roms/s)",
+            2_000, elapsed.as_secs_f64(), 2_000_f64 / elapsed.as_secs_f64()
+        );
+        let game_count = db.get_game_count(vid).unwrap();
+        assert_eq!(game_count, 2_000);
+    }
+
+    #[test]
+    fn test_db_perf_diff_large() {
+        use std::time::Instant;
+        let db = make_db();
+        let va = db.import_version("perf", "A", None).unwrap();
+        let vb = db.import_version("perf", "B", None).unwrap();
+
+        let games_a = bulk_games("a", 3_000);
+        let games_b = bulk_games("a", 3_000); // same names
+        db.insert_games_batch(va, &games_a).unwrap();
+        db.insert_games_batch(vb, &games_b).unwrap();
+
+        let start = Instant::now();
+        let diff = db.diff_versions(va, vb).unwrap();
+        let elapsed = start.elapsed();
+        eprintln!(
+            "  DB diff (3K games, identical): {:.3}s", elapsed.as_secs_f64()
+        );
+        assert_eq!(diff.unchanged, 3_000);
+    }
 }

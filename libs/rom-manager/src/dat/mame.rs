@@ -221,9 +221,63 @@ fn parse_rom_attrs(e: &quick_xml::events::BytesStart<'_>, roms: &mut Vec<RomReco
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     fn parse(xml: &str) -> (Vec<GameEntry>, Vec<RomEntry>, ParseStats) {
         parse_mame_reader(std::io::Cursor::new(xml.as_bytes())).expect("mame parse")
+    }
+
+    fn generate_mame_xml(num_games: usize) -> String {
+        let mut xml = String::with_capacity(num_games * 250);
+        xml.push_str(r#"<?xml version="1.0"?><mame>"#);
+        for i in 0..num_games {
+            xml.push_str(&format!(
+                r#"<machine name="g{i}" sourcefile="src/g{i}.cpp"><description>Game {i}</description><year>199{i}0</year><manufacturer>TestCorp</manufacturer><rom name="r{i}.bin" size="524288" crc="{crc:08X}" sha1="{sha1}"/></machine>"#,
+                i = i,
+                crc = (i as u32).wrapping_mul(0x9E3779B9),
+                sha1 = format!("{:040X}", i.wrapping_mul(0x9E3779B9)),
+            ));
+        }
+        xml.push_str(r#"</mame>"#);
+        xml
+    }
+
+    #[test]
+    fn test_mame_perf_1k() { perf_mame(1_000); }
+    #[test]
+    fn test_mame_perf_10k() { perf_mame(10_000); }
+    #[test]
+    fn test_mame_perf_50k() { perf_mame(50_000); }
+
+    fn perf_mame(num_games: usize) {
+        let xml = generate_mame_xml(num_games);
+        let xml_size = xml.len();
+        let start = Instant::now();
+        let (games, roms, stats) = parse(&xml);
+        let elapsed = start.elapsed();
+
+        let games_per_sec = num_games as f64 / elapsed.as_secs_f64();
+        let mb_per_sec = (xml_size as f64 / 1_048_576.0) / elapsed.as_secs_f64();
+
+        eprintln!(
+            "  MAME perf: {} games, {} ROMs, {:.2} MB XML, {:.2}s, {:.0} games/s, {:.1} MB/s",
+            stats.total_games,
+            stats.total_roms,
+            xml_size as f64 / 1_048_576.0,
+            elapsed.as_secs_f64(),
+            games_per_sec,
+            mb_per_sec,
+        );
+
+        assert_eq!(games.len(), num_games);
+        assert_eq!(roms.len(), num_games);
+        assert!(stats.errors.is_empty());
+        let max_allowed = (num_games as u128) * 10_000;
+        assert!(
+            elapsed.as_micros() < max_allowed,
+            "Parse took {}µs (limit was {}µs for {} games)",
+            elapsed.as_micros(), max_allowed, num_games
+        );
     }
 
     #[test]
