@@ -3,15 +3,16 @@ services:
     build: .
     container_name: gamemanager
     restart: unless-stopped
+    ports:
+      - "3001:3001"
     environment:
+      - ROM_DB=/data/roms.db
+      - CLI_BINARY=rom-scraper-cli
       - SS_DEVID=${SS_DEVID:-}
       - SS_DEVPASSWORD=${SS_DEVPASSWORD:-}
       - SS_USERNAME=${SS_USERNAME:-}
       - SS_PASSWORD=${SS_PASSWORD:-}
-      - RUST_LOG=${RUST_LOG:-info}
     volumes:
+      - ./roms.db:/data/roms.db:rw
       - ./roms:/roms:rw
       - ./config:/config:rw
-    working_dir: /roms
-    stdin_open: true
-    tty: true

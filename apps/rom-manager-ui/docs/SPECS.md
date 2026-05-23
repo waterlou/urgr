@@ -203,8 +203,8 @@ CSS custom properties on `:root` and `[data-theme="light"]`.
 
 ## Docker
 
-- **`Dockerfile.ui`**: 2‑stage Alpine build (npm ci → vite build → copy to node:26-alpine). 18.9MB final image.
-- **`docker-compose.yml`**: `rom-manager-ui` service on port 3001, mounts `roms.db` read‑only.
+- **`Dockerfile`**: 3‑stage Alpine build (Rust cross‑compile → npm ci → vite build → copy to node:26-alpine).
+- **`docker-compose.yml`**: `rom-manager-ui` service on port 3001, mounts `roms.db` read‑write.
 
 ---
 

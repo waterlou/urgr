@@ -1,7 +1,13 @@
 .git/
 target/
+node_modules/
 *.swp
 *.swo
 .DS_Store
 docker-compose.yml
 docs/
+roms.db
+roms.db-shm
+roms.db-wal
+roms/
+~/
