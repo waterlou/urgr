@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { initDb, getDb, closeDb, saveDb } from './db.js';
 import { execCli } from './cli.js';
@@ -88,8 +89,8 @@ app.post('/api/collections', async (req, res) => {
     while (get('SELECT id FROM collections WHERE slug = ?', [finalSlug])) {
       finalSlug = `${slug}-${counter++}`;
     }
-    run('INSERT INTO collections (name, slug, platform, logo, folder, has_dataset) VALUES (?, ?, ?, ?, ?, ?)',
-      [name, finalSlug, platform || null, logo || '', folder || slug, has_dataset ? 1 : 0]);
+    run('INSERT INTO collections (name, slug, platform, logo, folder, has_dataset, dataset_preset) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [name, finalSlug, platform || null, logo || '', folder || slug, has_dataset ? 1 : 0, dataset_preset || null]);
     const col = get('SELECT * FROM collections WHERE slug = ?', [finalSlug]);
     if (uploaded_version_id) {
       run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)',
@@ -856,7 +857,12 @@ app.post('/api/cli/hash', async (req, res) => {
 app.use('/assets', express.static(path.join(distPath, 'assets')));
 
 app.use((req, res) => {
-  res.sendFile(path.join(distPath, 'index.html'));
+  const filePath = path.join(distPath, 'index.html');
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
+  } else {
+    res.status(200).json({ message: 'ROM Manager API' });
+  }
 });
 
 // =============================================================================

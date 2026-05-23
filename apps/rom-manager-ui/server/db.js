@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS collections (
     logo        TEXT DEFAULT '',
     folder      TEXT,
     has_dataset INTEGER NOT NULL DEFAULT 0,
+    dataset_preset TEXT,
     created_at  TEXT DEFAULT (datetime('now')),
     updated_at  TEXT DEFAULT (datetime('now'))
 );
