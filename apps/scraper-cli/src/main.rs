@@ -107,6 +107,13 @@ fn game_to_match(game: &rom_scraper::Game) -> ScrapeMatch {
     }
 }
 
+async fn enrich_game(registry: &ScraperRegistry, game: rom_scraper::Game) -> rom_scraper::Game {
+    match registry.get_game_detail(&game.id, &game.source).await {
+        Ok(Some(detail)) => detail,
+        _ => game,
+    }
+}
+
 fn slugify(s: &str) -> String {
     s.to_lowercase().chars()
         .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
@@ -343,13 +350,13 @@ async fn cmd_scrape(args: &[String]) -> ExitCode {
     match source {
         Some(ref src) => {
             if let Ok(Some(game)) = registry.search_by_hashes_from_source(&hashes, src, None).await {
-                matched = Some(game_to_match(&game));
+                matched = Some(game_to_match(&enrich_game(&registry, game).await));
             }
             if matched.is_none() {
                 if let Some(ref title) = parsed_title {
                     if let Ok(games) = registry.search_by_name_from_source(title, src, None).await {
                         if let Some(game) = games.into_iter().next() {
-                            matched = Some(game_to_match(&game));
+                            matched = Some(game_to_match(&enrich_game(&registry, game).await));
                         }
                     }
                 }
@@ -357,13 +364,13 @@ async fn cmd_scrape(args: &[String]) -> ExitCode {
         }
         None => {
             if let Ok(Some(game)) = registry.search_by_hashes(&hashes, None).await {
-                matched = Some(game_to_match(&game));
+                matched = Some(game_to_match(&enrich_game(&registry, game).await));
             }
             if matched.is_none() {
                 if let Some(ref title) = parsed_title {
                     if let Ok(games) = registry.search_by_name(title, None).await {
                         if let Some(game) = games.into_iter().next() {
-                            matched = Some(game_to_match(&game));
+                            matched = Some(game_to_match(&enrich_game(&registry, game).await));
                         }
                     }
                 }
