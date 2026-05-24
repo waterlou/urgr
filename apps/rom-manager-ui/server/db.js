@@ -151,6 +151,8 @@ export async function initDb(dbPath) {
 
   // No default seed data — start empty
 
+  // No default seed data — start empty
+
   return db;
 }
 

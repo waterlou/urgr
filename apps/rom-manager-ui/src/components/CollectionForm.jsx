@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
 import { importDat } from '../api.js'
+import IconDisplay from './IconDisplay.jsx'
 
 export default function CollectionForm({ datasets, platforms, versions, editTarget, onSave, onClose }) {
   const isEdit = !!editTarget
@@ -102,7 +103,7 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
         name,
         slug,
         platform,
-        logo: logo || '📁',
+        logo: logo || 'folder',
         folder: slug,
         has_dataset: hasDataset,
         dataset_preset: datasetPreset,
@@ -114,7 +115,7 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
     }
   }
 
-  const LOGO_OPTIONS = ['🎮', '🕹️', '💿', '🔥', '📀', '🖥️', '🎯', '⭐', '👾', '🏆']
+  const LOGO_OPTIONS = ['sports_esports', 'videogame_asset', 'stadia_controller', 'album', 'local_fire_department', 'desktop_windows', 'ads_click', 'star', 'smart_toy', 'emoji_events']
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -215,7 +216,7 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
               {LOGO_OPTIONS.map(ic => (
                 <button type="button" key={ic}
                   className={`logo-option ${logo === ic ? 'active' : ''}`}
-                  onClick={() => setLogo(ic)}>{ic}</button>
+                  onClick={() => setLogo(ic)}><IconDisplay name={ic} className="" /></button>
               ))}
             </div>
           </div>

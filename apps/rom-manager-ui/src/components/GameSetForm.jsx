@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import IconDisplay from './IconDisplay.jsx'
 
 export default function GameSetForm({ platforms, editTarget, onSave, onClose }) {
   const isEdit = !!editTarget
@@ -22,11 +23,11 @@ export default function GameSetForm({ platforms, editTarget, onSave, onClose }) 
       name,
       description,
       platforms: selectedPlatforms.join(','),
-      icon: icon || '📦',
+      icon: icon || 'inventory_2',
     })
   }
 
-  const ICON_OPTIONS = ['📦', '🎯', '🏆', '⭐', '💎', '🔥', '🎪', '🎨', '🃏', '🌈']
+  const ICON_OPTIONS = ['inventory_2', 'ads_click', 'emoji_events', 'star', 'diamond', 'local_fire_department', 'diversity_3', 'palette', 'playing_cards', 'rainbow']
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -68,7 +69,7 @@ export default function GameSetForm({ platforms, editTarget, onSave, onClose }) 
                   key={ic}
                   className={`logo-option ${icon === ic ? 'active' : ''}`}
                   onClick={() => setIcon(ic)}
-                >{ic}</button>
+                ><IconDisplay name={ic} className="" /></button>
               ))}
             </div>
           </div>

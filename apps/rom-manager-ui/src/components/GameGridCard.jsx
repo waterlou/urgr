@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { coverUrl } from '../api.js'
+import IconDisplay from './IconDisplay.jsx'
 
 export default function GameGridCard({ game, onSelect, onRating, onFavourite, onAddToGameSet, gameSets, currentGameSetId }) {
   const [showMenu, setShowMenu] = useState(false)
@@ -31,7 +32,7 @@ export default function GameGridCard({ game, onSelect, onRating, onFavourite, on
                   <div className="add-to-set-menu">
                     {gameSets.filter(gs => gs.id !== currentGameSetId).map(gs => (
                       <button key={gs.id} onClick={() => onAddToGameSet(game.id, gs.id)}>
-                        <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:4}}>{gs.icon === '📦' ? 'inventory_2' : gs.icon}</span> {gs.name}
+                        <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:4}}><IconDisplay name={gs.icon} fallback="inventory_2" /></span> {gs.name}
                       </button>
                     ))}
                   </div>

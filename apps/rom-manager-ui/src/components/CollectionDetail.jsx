@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import IconDisplay from './IconDisplay.jsx'
 import {
   getAvailableVersions, getCollectionBuilds, startCollectionBuild, updateCollectionBuild,
   exportCollection, getVersions, addCollectionVersion, getCollectionGames,
@@ -205,7 +206,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
     <div className="browser">
       <div className="browser-header">
         <div className="browser-title-row">
-          <span className="browser-title-icon">{collection?.logo || '📁'}</span>
+          <span className="browser-title-icon"><IconDisplay name={collection?.logo} fallback="folder" /></span>
           <h1 className="browser-title">{collection?.name || 'Collection'}</h1>
           <span className="browser-count">{gameCount} games</span>
           {collection?.platform && <span className="platform-badge">{collection.platform}</span>}

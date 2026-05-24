@@ -1,3 +1,5 @@
+import IconDisplay from './IconDisplay.jsx'
+
 export default function Sidebar({
   collections, gameSets, activeView, activeId,
   onSelect, onNewCollection, onNewGameSet,
@@ -33,7 +35,7 @@ export default function Sidebar({
               className={`sidebar-item ${activeView === 'collection' && activeId === col.id ? 'active' : ''}`}
             >
               <button className="sidebar-item-main" onClick={() => onSelect('collection', col.id)}>
-                <span className="sidebar-item-icon">{col.logo || '📁'}</span>
+                <span className="sidebar-item-icon"><IconDisplay name={col.logo} fallback="folder" /></span>
                 <span className="sidebar-item-name">{col.name || 'Unnamed'}</span>
                 <span className="sidebar-item-count">{col.total_games ?? 0}</span>
               </button>
@@ -57,7 +59,7 @@ export default function Sidebar({
               className={`sidebar-item ${activeView === 'game-set' && activeId === gs.id ? 'active' : ''}`}
             >
               <button className="sidebar-item-main" onClick={() => onSelect('game-set', gs.id)}>
-                <span className="sidebar-item-icon">{gs.icon || '📦'}</span>
+                <span className="sidebar-item-icon"><IconDisplay name={gs.icon} fallback="inventory_2" /></span>
                 <span className="sidebar-item-name">{gs.name}</span>
                 <span className="sidebar-item-count">{gs.total_games}</span>
               </button>

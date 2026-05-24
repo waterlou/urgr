@@ -271,7 +271,13 @@ html, body, #root {
 .sidebar-item-icon {
   font-size: 16px;
   flex-shrink: 0;
+  width: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
+
+.sidebar-item-icon .icon { font-size: 20px; }
 
 .sidebar-item-name {
   flex: 1;
@@ -985,13 +991,14 @@ html, body, #root {
   border: 2px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
-  font-size: 20px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.15s;
 }
+
+.logo-option .icon { font-size: 22px; }
 
 .logo-option.active {
   border-color: var(--accent);
