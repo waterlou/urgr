@@ -80,6 +80,7 @@ dependencies = [
 name = "build-cli"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "rom-manager",
  "serde",
  "serde_json",

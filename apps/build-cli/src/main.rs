@@ -1,11 +1,29 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rom_manager::builder::build_version;
 use rom_manager::scanner::scan_directory;
 use rom_manager::verifier::{verify_version, GameStatus};
 use rom_manager::Database;
 use serde::Serialize;
+
+static CANCEL_FLAG: AtomicBool = AtomicBool::new(false);
+
+#[cfg(unix)]
+unsafe extern "C" fn handle_signal(_sig: libc::c_int) {
+    CANCEL_FLAG.store(true, Ordering::Relaxed);
+}
+
+#[cfg(windows)]
+fn install_signal_handlers() {}
+#[cfg(unix)]
+fn install_signal_handlers() {
+    unsafe {
+        libc::signal(libc::SIGTERM, handle_signal as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGINT, handle_signal as *const () as libc::sighandler_t);
+    }
+}
 
 #[derive(Serialize)]
 struct VersionEntry {
@@ -331,7 +349,7 @@ fn cmd_diff(args: &[String], json: bool) -> ExitCode {
 
 fn cmd_build(args: &[String], json: bool) -> ExitCode {
     if args.len() < 3 {
-        eprintln!("Usage: build-cli build <source> <import-dir> [--update] [--base-dir <dir>]");
+        eprintln!("Usage: build-cli build <source> <import-dir> [--update] [--base-dir <dir>] [--progress]");
         return ExitCode::FAILURE;
     }
     let source = &args[1];
@@ -342,6 +360,7 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
     }
 
     let update = args.iter().any(|a| a == "--update");
+    let show_progress = args.iter().any(|a| a == "--progress");
     let base_dir = args.iter().position(|a| a == "--base-dir")
         .and_then(|p| args.get(p + 1))
         .map(|s| std::path::PathBuf::from(s))
@@ -349,7 +368,19 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
 
     let db = match open_db() { Ok(d) => d, Err(e) => { eprintln!("{}", e); return ExitCode::FAILURE; } };
 
-    match build_version(&db, source, import_dir, &base_dir, update) {
+    if show_progress {
+        CANCEL_FLAG.store(false, Ordering::Relaxed);
+        install_signal_handlers();
+    }
+
+    let progress_cb = |p: &rom_manager::builder::BuildProgress| {
+        if show_progress {
+            // JSON line to stderr for the server to parse
+            eprintln!("{}", serde_json::to_string(p).unwrap_or_default());
+        }
+    };
+
+    match build_version(&db, source, import_dir, &base_dir, update, &progress_cb, &CANCEL_FLAG) {
         Ok(result) => {
             if json {
                 print_json(&BuildOutput {

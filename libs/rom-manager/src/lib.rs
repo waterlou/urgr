@@ -11,4 +11,4 @@ pub use error::{Error, Result};
 pub use models::*;
 pub use scanner::scan_directory;
 pub use verifier::verify_version;
-pub use builder::{build_version, BuildResult};
+pub use builder::{build_version, BuildProgress, BuildResult};

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
@@ -10,6 +11,7 @@ use crate::models::{GameEntry, RomEntry, SetVersion};
 
 const STATUS_FILENAME: &str = "_build_status.json";
 const MODE_FILENAME: &str = "_build_mode.json";
+const PROGRESS_FILENAME: &str = "_build_progress.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildStatus {
@@ -28,6 +30,16 @@ pub struct BuildStatus {
     pub cleaned: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_run: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuildProgress {
+    pub phase: String,
+    pub pct: u32,
+    pub msg: String,
+    pub matched: usize,
+    pub missing: usize,
+    pub total: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -80,14 +92,46 @@ pub fn build_version(
     import_dir: &Path,
     base_dir: &Path,
     force_update: bool,
+    on_progress: &dyn Fn(&BuildProgress),
+    cancelled: &AtomicBool,
 ) -> Result<BuildResult> {
+    fn check_cancelled(cancelled: &AtomicBool) -> Result<()> {
+        if cancelled.load(Ordering::Relaxed) {
+            Err(Error::Source("Build cancelled".into()))
+        } else {
+            Ok(())
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn progress(
+        on: &dyn Fn(&BuildProgress),
+        phase: &str,
+        pct: u32,
+        msg: &str,
+        matched: usize,
+        missing: usize,
+        total: usize,
+        progress_path: &Path,
+    ) {
+        let p = BuildProgress { phase: phase.to_string(), pct, msg: msg.to_string(), matched, missing, total };
+        on(&p);
+        let _ = write_progress(progress_path, &p);
+    }
+
+    let progress_path = base_dir.join(source).join(PROGRESS_FILENAME);
+
     // ── Phase 0: Load versions ──
+    progress(on_progress, "loading", 0, "Loading versions...", 0, 0, 0, &progress_path);
     let latest = db.latest_version(source)?.ok_or_else(|| {
         Error::Source(format!("No version found for source '{}'", source))
     })?;
 
     let older = db.find_older_versions(source, &latest.version)?;
     let prev = older.first();
+
+    check_cancelled(cancelled)?;
+    progress(on_progress, "loading", 5, &format!("Version {} loaded", latest.version), 0, 0, latest.total_games as usize, &progress_path);
 
     let collection_dir = base_dir.join(source).join(&latest.version);
     let deleted_dir = base_dir.join("deleted_roms");
@@ -147,6 +191,9 @@ pub fn build_version(
         (all, 0, Vec::new())
     };
 
+    check_cancelled(cancelled)?;
+    progress(on_progress, "diff", 10, "Diff computed", 0, 0, need_copy.len() + unchanged, &progress_path);
+
     // ── Phase 2: Folder setup ──
     if force_update {
         if let Some(ref p) = prev {
@@ -160,6 +207,8 @@ pub fn build_version(
     }
     std::fs::create_dir_all(&collection_dir)?;
     std::fs::create_dir_all(&deleted_dir)?;
+
+    progress(on_progress, "setup", 15, "Folders ready", 0, 0, need_copy.len() + unchanged, &progress_path);
 
     // ── Phase 3: Cleanup ──
     let all_games = db.list_games(latest.id)?;
@@ -198,8 +247,14 @@ pub fn build_version(
         }
     }
 
+    check_cancelled(cancelled)?;
+    progress(on_progress, "cleanup", 20, "Cleanup complete", status.matched, need_copy.len(), need_copy.len() + unchanged, &progress_path);
+
     // ── Phase 4: Build import index ──
     let index = ImportIndex::scan(import_dir)?;
+
+    check_cancelled(cancelled)?;
+    progress(on_progress, "index", 30, "Import index built", 0, need_copy.len(), need_copy.len() + unchanged, &progress_path);
 
     // ── Phase 5: Copy matching ROMs ──
     let game_map: HashMap<String, &GameEntry> = all_games.iter().map(|g| (g.name.clone(), g)).collect();
@@ -209,6 +264,13 @@ pub fn build_version(
 
     for game_name in &need_copy {
         let dest = collection_dir.join(format!("{}.zip", game_name));
+
+        // Periodic progress + cancellation check
+        if matched % 50 == 0 {
+            check_cancelled(cancelled)?;
+            let pct = 30 + ((matched as u64 * 60) / need_copy.len().max(1) as u64) as u32;
+            progress(on_progress, "copying", pct, &format!("Copying ROMs ({}/{})", matched, need_copy.len()), matched, missing.len(), need_copy.len() + unchanged, &progress_path);
+        }
 
         // Skip if already correctly in place
         if dest.exists() && verify_game_zip(db, latest.id, game_name, &dest)? {
@@ -234,6 +296,9 @@ pub fn build_version(
         }
     }
 
+    check_cancelled(cancelled)?;
+    progress(on_progress, "copying", 95, &format!("Copy complete ({}/{})", matched, need_copy.len()), matched, missing.len(), need_copy.len() + unchanged, &progress_path);
+
     // ── Phase 6: Replace old version (update mode) ──
     if force_update {
         if let Some(p) = prev {
@@ -244,13 +309,15 @@ pub fn build_version(
 
     // ── Phase 7: Save status + report ──
     status.matched = matched + status.matched;
+
+    progress(on_progress, "saving", 98, "Saving status...", status.matched, missing.len(), need_copy.len() + unchanged, &progress_path);
     status.missing = missing.len();
     status.missing_games = missing.clone();
     status.unchanged = unchanged;
     status.last_run = Some(chrono_now());
     write_status(&status_path, &status)?;
 
-    Ok(BuildResult {
+    let result = BuildResult {
         total_games: need_copy.len() + unchanged,
         matched,
         unchanged,
@@ -260,7 +327,11 @@ pub fn build_version(
         mode: status.mode.clone(),
         version: latest.version.clone(),
         prev_version: prev.map(|p| p.version.clone()),
-    })
+    };
+
+    progress(on_progress, "done", 100, "Build complete", result.matched, result.missing, result.total_games, &progress_path);
+
+    Ok(result)
 }
 
 // ── Helpers ──
@@ -268,6 +339,16 @@ pub fn build_version(
 fn read_status(path: &Path) -> Option<BuildStatus> {
     let data = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&data).ok()
+}
+
+fn write_progress(path: &Path, progress: &BuildProgress) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string(progress)
+        .map_err(|e| Error::Parse(format!("Failed to serialize progress: {}", e)))?;
+    std::fs::write(path, json)?;
+    Ok(())
 }
 
 fn write_status(path: &Path, status: &BuildStatus) -> Result<()> {

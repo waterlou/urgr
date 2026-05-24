@@ -5,7 +5,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import crypto, { createHash } from 'crypto';
 import { initDb, getDb, closeDb, saveDb } from './db.js';
-import { execCli } from './cli.js';
+import { execCli, execCliStream } from './cli.js';
 import { createJob, getJob, updateProgress, doneJob, failJob, cancelJob } from './jobs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -303,6 +303,54 @@ app.put('/api/collections/:id/builds/:buildId', async (req, res) => {
       run(`UPDATE collection_builds SET ${sets.join(', ')} WHERE id = ? AND collection_id = ?`, vals);
     }
     res.json(get('SELECT cb.*, sv.version, sv.source FROM collection_builds cb JOIN set_versions sv ON sv.id = cb.version_id WHERE cb.id = ?', [req.params.buildId]));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/collections/:id/builds/:buildId/run', async (req, res) => {
+  await dbReady;
+  try {
+    const { source, import_dir, base_dir, update } = req.body;
+    if (!source || !import_dir) {
+      return res.status(400).json({ error: 'source and import_dir are required' });
+    }
+    const buildId = req.params.buildId;
+    const build = get('SELECT cb.*, sv.version, sv.source FROM collection_builds cb JOIN set_versions sv ON sv.id = cb.version_id WHERE cb.id = ? AND cb.collection_id = ?', [buildId, req.params.id]);
+    if (!build) return res.status(404).json({ error: 'Build not found' });
+
+    run("UPDATE collection_builds SET status = 'building' WHERE id = ?", [buildId]);
+
+    const jobId = buildId;
+    const job = createJob(jobId);
+
+    const abort = new AbortController();
+    job.child = { killed: false };
+
+    const args = ['build', source, import_dir];
+    if (base_dir) args.push('--base-dir', base_dir);
+    if (update) args.push('--update');
+
+    execCliStream(args, {
+      binary: 'build',
+      onProgress: (progress) => {
+        updateProgress(jobId, progress.pct, `${progress.phase}: ${progress.msg} (${progress.matched}/${progress.total})`);
+      },
+      signal: abort.signal,
+    }).then((result) => {
+      run("UPDATE collection_builds SET status = 'complete', games_built = ?, games_missing = ?, completed_at = datetime('now') WHERE id = ?",
+        [result.matched || 0, result.missing || 0, buildId]);
+      doneJob(jobId, result);
+    }).catch((err) => {
+      const msg = err.message || String(err);
+      if (msg.includes('cancelled') || msg.includes('Build cancelled')) {
+        run("UPDATE collection_builds SET status = 'failed' WHERE id = ?", [buildId]);
+        failJob(jobId, 'Build cancelled');
+      } else {
+        run("UPDATE collection_builds SET status = 'failed' WHERE id = ?", [buildId]);
+        failJob(jobId, `Build failed: ${msg}`);
+      }
+    });
+
+    res.status(202).json({ jobId });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
