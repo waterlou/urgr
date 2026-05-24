@@ -72,6 +72,14 @@ struct RomEntry {
     crc: Option<String>,
 }
 
+fn normalize_url(u: &str) -> String {
+    if u.starts_with("//") {
+        format!("https:{}", u)
+    } else {
+        u.to_string()
+    }
+}
+
 fn print_json<T: Serialize>(value: &T) {
     println!("{}", serde_json::to_string_pretty(value).unwrap());
 }
@@ -110,13 +118,6 @@ fn slugify(s: &str) -> String {
 }
 
 async fn download_media(urls: &[String], platform: &str, release_date: &Option<String>, title: &str, client: &HttpClient) -> Vec<String> {
-    fn normalize_url(u: &str) -> String {
-        if u.starts_with("//") {
-            format!("https:{}", u)
-        } else {
-            u.to_string()
-        }
-    }
     let platform_slug = if platform.is_empty() { "unknown" } else { platform };
     let year = release_date.as_ref().and_then(|d| d.get(..4)).unwrap_or("0000");
     let dir_name = format!("{}-{}-{}", slugify(platform_slug), year, slugify(title));
@@ -488,5 +489,283 @@ fn truncate(s: &str, max: usize) -> String {
         s.to_string()
     } else {
         format!("{}...", &s[..max])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rom_scraper::{Game, Platform, Media, MediaItem, MediaType, RomInfo, ScrapeSource};
+
+    fn make_game(id: &str, title: &str, platform_name: &str, platform_short: &str) -> Game {
+        Game {
+            id: id.to_string(),
+            title: title.to_string(),
+            alternative_titles: Vec::new(),
+            platform: Platform {
+                id: String::new(),
+                name: platform_name.to_string(),
+                short_name: platform_short.to_string(),
+            },
+            description: String::new(),
+            publisher: None,
+            developer: None,
+            release_date: None,
+            genres: Vec::new(),
+            players: None,
+            rating: None,
+            roms: Vec::new(),
+            media: Media::default(),
+            source: ScrapeSource::TheGamesDb,
+        }
+    }
+
+    // ---- slugify ----
+
+    #[test]
+    fn test_slugify_basic() {
+        assert_eq!(slugify("hello world"), "hello_world");
+    }
+
+    #[test]
+    fn test_slugify_uppercase() {
+        assert_eq!(slugify("Super Mario World"), "super_mario_world");
+    }
+
+    #[test]
+    fn test_slugify_special_chars() {
+        assert_eq!(slugify("Donkey Kong 64!"), "donkey_kong_64");
+    }
+
+    #[test]
+    fn test_slugify_already_slug() {
+        assert_eq!(slugify("the-legend-of-zelda"), "the-legend-of-zelda");
+    }
+
+    #[test]
+    fn test_slugify_truncates() {
+        let long = "a".repeat(100);
+        assert!(slugify(&long).len() <= 64);
+    }
+
+    #[test]
+    fn test_slugify_leading_trailing_underscores() {
+        assert_eq!(slugify("___hello___"), "hello");
+    }
+
+    // ---- normalize_url ----
+
+    #[test]
+    fn test_normalize_url_https() {
+        assert_eq!(normalize_url("https://example.com/img.jpg"), "https://example.com/img.jpg");
+    }
+
+    #[test]
+    fn test_normalize_url_protocol_relative() {
+        assert_eq!(normalize_url("//images.igdb.com/img.jpg"), "https://images.igdb.com/img.jpg");
+    }
+
+    #[test]
+    fn test_normalize_url_http() {
+        assert_eq!(normalize_url("http://cdn.example.com/img.jpg"), "http://cdn.example.com/img.jpg");
+    }
+
+    // ---- truncate ----
+
+    #[test]
+    fn test_truncate_short() {
+        assert_eq!(truncate("hello", 10), "hello");
+    }
+
+    #[test]
+    fn test_truncate_exact() {
+        assert_eq!(truncate("hello", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_long() {
+        assert_eq!(truncate("hello world", 5), "hello...");
+    }
+
+    #[test]
+    fn test_truncate_empty() {
+        assert_eq!(truncate("", 5), "");
+    }
+
+    #[test]
+    fn test_truncate_zero_max() {
+        assert_eq!(truncate("abc", 0), "...");
+    }
+
+    // ---- parse_source ----
+
+    #[test]
+    fn test_parse_source_flag_thegamesdb() {
+        let args = vec!["scrape".to_string(), "rom.zip".to_string(), "--source".to_string(), "thegamesdb".to_string()];
+        assert_eq!(parse_source(&args), Some(ScrapeSource::TheGamesDb));
+    }
+
+    #[test]
+    fn test_parse_source_flag_igdb() {
+        let args = vec!["search".to_string(), "game".to_string(), "--source".to_string(), "igdb".to_string()];
+        assert_eq!(parse_source(&args), Some(ScrapeSource::Igdb));
+    }
+
+    #[test]
+    fn test_parse_source_flag_screenscraper() {
+        let args = vec!["detail".to_string(), "123".to_string(), "--source".to_string(), "screenscraper".to_string()];
+        assert_eq!(parse_source(&args), Some(ScrapeSource::ScreenScraper));
+    }
+
+    #[test]
+    fn test_parse_source_flag_unknown() {
+        let args = vec!["scrape".to_string(), "rom.zip".to_string(), "--source".to_string(), "invalid".to_string()];
+        assert_eq!(parse_source(&args), None);
+    }
+
+    #[test]
+    fn test_parse_source_no_flag_defaults_to_thegamesdb() {
+        let args = vec!["search".to_string(), "game".to_string()];
+        assert_eq!(parse_source(&args), Some(ScrapeSource::TheGamesDb));
+    }
+
+    #[test]
+    fn test_parse_source_flag_without_value_returns_none() {
+        let args = vec!["scrape".to_string(), "rom.zip".to_string(), "--source".to_string()];
+        assert_eq!(parse_source(&args), None);
+    }
+
+    #[test]
+    fn test_parse_source_env_igdb() {
+        let args = vec!["search".to_string(), "game".to_string()];
+        std::env::set_var("SCRAPER_SOURCE", "igdb");
+        assert_eq!(parse_source(&args), Some(ScrapeSource::Igdb));
+        std::env::remove_var("SCRAPER_SOURCE");
+    }
+
+    #[test]
+    fn test_parse_source_flag_overrides_env() {
+        let args = vec!["search".to_string(), "game".to_string(), "--source".to_string(), "screenscraper".to_string()];
+        std::env::set_var("SCRAPER_SOURCE", "igdb");
+        assert_eq!(parse_source(&args), Some(ScrapeSource::ScreenScraper));
+        std::env::remove_var("SCRAPER_SOURCE");
+    }
+
+    // ---- game_to_match ----
+
+    #[test]
+    fn test_game_to_match_basic() {
+        let game = make_game("123", "Test Game", "Nintendo Switch", "NSW");
+        let m = game_to_match(&game);
+        assert_eq!(m.id, "123");
+        assert_eq!(m.title, "Test Game");
+        assert_eq!(m.platform, "Nintendo Switch");
+        assert_eq!(m.platform_short, "NSW");
+    }
+
+    #[test]
+    fn test_game_to_match_covers_and_screenshots() {
+        let mut game = make_game("456", "Game", "Arcade", "");
+        game.media.covers.push(MediaItem { url: "https://example.com/cover.jpg".into(), kind: MediaType::Cover2D });
+        game.media.screenshots.push(MediaItem { url: "//example.com/shot.jpg".into(), kind: MediaType::Screenshot });
+        let m = game_to_match(&game);
+        assert_eq!(m.covers, vec!["https://example.com/cover.jpg"]);
+        assert_eq!(m.screenshots, vec!["//example.com/shot.jpg"]);
+    }
+
+    #[test]
+    fn test_game_to_match_roms() {
+        let mut game = make_game("789", "Game", "PC", "");
+        game.roms.push(RomInfo {
+            filename: Some("rom.zip".into()),
+            size: Some(1024),
+            crc32: Some("AABBCCDD".into()),
+            md5: None,
+            sha1: None,
+            region: None,
+            version: None,
+        });
+        let m = game_to_match(&game);
+        assert_eq!(m.roms.len(), 1);
+        assert_eq!(m.roms[0].filename, Some("rom.zip".into()));
+        assert_eq!(m.roms[0].crc, Some("AABBCCDD".into()));
+    }
+
+    #[test]
+    fn test_game_to_match_downloaded_none() {
+        let game = make_game("0", "No Download", "NES", "");
+        let m = game_to_match(&game);
+        assert!(m.downloaded.is_none());
+    }
+
+    #[test]
+    fn test_game_to_match_metadata() {
+        let mut game = make_game("1", "Metroid", "SNES", "snes");
+        game.description = "A classic game.".to_string();
+        game.publisher = Some("Nintendo".into());
+        game.developer = Some("Nintendo R&D1".into());
+        game.release_date = Some("1994-03-19".into());
+        game.genres = vec!["Action".into(), "Adventure".into()];
+        game.players = Some(1);
+        game.rating = Some(85.5);
+        let m = game_to_match(&game);
+        assert_eq!(m.description, "A classic game.");
+        assert_eq!(m.publisher, Some("Nintendo".into()));
+        assert_eq!(m.developer, Some("Nintendo R&D1".into()));
+        assert_eq!(m.release_date, Some("1994-03-19".into()));
+        assert_eq!(m.players, Some(1));
+        assert_eq!(m.genres, vec!["Action", "Adventure"]);
+        assert_eq!(m.rating, Some(85.5));
+    }
+
+    // ---- Composite ----
+
+    #[test]
+    fn test_scrapematch_serialization() {
+        let game = make_game("1", "Test", "SNES", "snes");
+        let m = game_to_match(&game);
+        let json = serde_json::to_value(&m).unwrap();
+        assert_eq!(json["id"], "1");
+        assert_eq!(json["title"], "Test");
+        assert_eq!(json["platform"], "SNES");
+        assert_eq!(json["platform_short"], "snes");
+        assert!(json.get("downloaded").is_none());
+    }
+
+    #[test]
+    fn test_detailoutput_serialization() {
+        let out = DetailOutput {
+            id: "42".into(),
+            title: "Zelda".into(),
+            platform: "NES".into(),
+            platform_short: "nes".into(),
+            synopsis: "An adventure".into(),
+            publisher: Some("Nintendo".into()),
+            developer: None,
+            release_date: None,
+            players: None,
+            genres: vec!["Adventure".into()],
+            covers: vec![],
+            screenshots: vec![],
+            roms: vec![],
+        };
+        let json = serde_json::to_value(&out).unwrap();
+        assert_eq!(json["id"], "42");
+        assert_eq!(json["title"], "Zelda");
+        assert_eq!(json["synopsis"], "An adventure");
+        assert_eq!(json["publisher"], "Nintendo");
+    }
+
+    #[test]
+    fn test_searchresult_serialization() {
+        let r = SearchResult {
+            id: "7".into(),
+            title: "Mario".into(),
+            platform: "SNES".into(),
+            release_date: Some("1990-11-21".into()),
+        };
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["id"], "7");
+        assert_eq!(json["release_date"], "1990-11-21");
     }
 }

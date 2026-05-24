@@ -46,6 +46,12 @@ struct TgdbGame {
     platform: Option<u64>,
     #[serde(default)]
     rating: Option<String>,
+    #[serde(default)]
+    genres: Option<Vec<u64>>,
+    #[serde(default)]
+    developers: Option<Vec<u64>>,
+    #[serde(default)]
+    publishers: Option<Vec<u64>>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -63,6 +69,12 @@ struct TgdbGameDetail {
     platform: Option<u64>,
     #[serde(default)]
     players: Option<String>,
+    #[serde(default)]
+    genres: Option<Vec<u64>>,
+    #[serde(default)]
+    developers: Option<Vec<u64>>,
+    #[serde(default)]
+    publishers: Option<Vec<u64>>,
 }
 
 impl TheGamesDb {
@@ -139,22 +151,36 @@ impl TheGamesDb {
 
     fn extract_platform(include: &Option<Value>, platform_id: Option<u64>) -> Platform {
         let id = platform_id.map(|p| p.to_string()).unwrap_or_default();
-        let (name, short_name) = match platform_id {
-            Some(pid) => {
-                if let Some(obj) = include.as_ref()
-                    .and_then(|inc| inc.get("platform"))
-                    .and_then(|p| p.get(pid.to_string()))
-                {
-                    let n = obj.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let s = obj.get("alias").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    (n, s)
-                } else {
-                    (String::new(), String::new())
-                }
-            }
-            None => (String::new(), String::new()),
+        let platform_section = |section: &Value| -> Option<(String, String)> {
+            let obj = if let Some(data) = section.get("data") {
+                data.get(&id)?
+            } else {
+                section.get(&id)?
+            };
+            let n = obj.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let s = obj.get("alias").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            Some((n, s))
         };
+        let (name, short_name) = include.as_ref()
+            .and_then(|inc| inc.get("platform"))
+            .and_then(|p| platform_section(p))
+            .unwrap_or_default();
         Platform { id, name, short_name }
+    }
+
+    fn extract_names(include: &Option<Value>, key: &str, ids: &Option<Vec<u64>>) -> Vec<String> {
+        let Some(ids) = ids else { return Vec::new() };
+        let section = include.as_ref().and_then(|inc| inc.get(key));
+        let Some(section) = section else { return Vec::new() };
+        ids.iter().filter_map(|id| {
+            let id_str = id.to_string();
+            let obj = if let Some(data) = section.get("data") {
+                data.get(&id_str)
+            } else {
+                section.get(&id_str)
+            }?;
+            obj.get("name").and_then(|v| v.as_str()).map(|s| s.to_string())
+        }).collect()
     }
 }
 
@@ -190,6 +216,9 @@ impl GameScraper for TheGamesDb {
         let mut results = Vec::new();
         for g in &games {
             let media = self.fetch_boxart(&g.id.to_string()).await;
+            let genres = Self::extract_names(&resp.include, "genres", &g.genres);
+            let developers = Self::extract_names(&resp.include, "developers", &g.developers);
+            let publishers = Self::extract_names(&resp.include, "publishers", &g.publishers);
 
             results.push(Game {
                 id: g.id.to_string(),
@@ -197,10 +226,10 @@ impl GameScraper for TheGamesDb {
                 alternative_titles: Vec::new(),
                 platform: Self::extract_platform(&resp.include, g.platform),
                 description: String::new(),
-                publisher: None,
-                developer: None,
+                publisher: publishers.into_iter().next(),
+                developer: developers.into_iter().next(),
                 release_date: g.release_date.clone(),
-                genres: Vec::new(),
+                genres,
                 players: None,
                 rating: g.rating.as_ref().and_then(|r| r.parse::<f32>().ok()),
                 roms: Vec::new(),
@@ -237,16 +266,20 @@ impl GameScraper for TheGamesDb {
         let players = g.players.as_ref()
             .and_then(|p| p.trim().parse::<u8>().ok());
 
+        let genres = Self::extract_names(&resp.include, "genres", &g.genres);
+        let developers = Self::extract_names(&resp.include, "developers", &g.developers);
+        let publishers = Self::extract_names(&resp.include, "publishers", &g.publishers);
+
         Ok(Game {
             id: g.id.to_string(),
             title: g.game_title,
             alternative_titles: Vec::new(),
             platform: Self::extract_platform(&resp.include, g.platform),
             description: g.overview.unwrap_or_default(),
-            publisher: None,
-            developer: None,
+            publisher: publishers.into_iter().next(),
+            developer: developers.into_iter().next(),
             release_date: g.release_date,
-            genres: Vec::new(),
+            genres,
             players,
             rating: g.rating.as_ref().and_then(|r| r.parse::<f32>().ok()),
             roms: Vec::new(),

@@ -78,6 +78,8 @@ struct IgdbGame {
     platforms: Option<Vec<IgdbPlatform>>,
     #[serde(default)]
     involved_companies: Option<Vec<IgdbCompany>>,
+    #[serde(default)]
+    screenshots: Option<Vec<IgdbScreenshot>>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -95,6 +97,8 @@ struct IgdbGenre {
 #[derive(Deserialize, Debug)]
 struct IgdbPlatform {
     name: String,
+    #[serde(default)]
+    abbreviation: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -107,6 +111,20 @@ struct IgdbCompany {
 #[derive(Deserialize, Debug)]
 struct IgdbCompanyName {
     name: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct IgdbScreenshot {
+    #[serde(default)]
+    url: Option<String>,
+}
+
+fn normalize_igdb_url(url: &str) -> String {
+    if url.starts_with("//") {
+        format!("https:{}", url)
+    } else {
+        url.to_string()
+    }
 }
 
 impl Igdb {
@@ -212,7 +230,7 @@ impl Igdb {
             .as_ref()
             .and_then(|c| {
                 if let Some(url) = &c.url {
-                    Some(url.clone())
+                    Some(normalize_igdb_url(url))
                 } else if let Some(id) = &c.image_id {
                     Some(format!("https://images.igdb.com/igdb/image/upload/t_cover_big/{}.jpg", id))
                 } else {
@@ -228,6 +246,16 @@ impl Igdb {
                 kind: MediaType::Cover2D,
             });
         }
+        if let Some(screenshots) = &g.screenshots {
+            for s in screenshots {
+                if let Some(url) = &s.url {
+                    media.screenshots.push(MediaItem {
+                        url: normalize_igdb_url(url),
+                        kind: MediaType::Screenshot,
+                    });
+                }
+            }
+        }
 
         Game {
             id: g.id.to_string(),
@@ -239,7 +267,11 @@ impl Igdb {
                     .and_then(|p| p.first().map(|p| p.name.clone()))
                     .unwrap_or_default(),
                 short_name: g.platforms.as_ref()
-                    .and_then(|p| p.first().map(|p| p.name.clone()))
+                    .and_then(|p| p.first())
+                    .and_then(|p| {
+                        let abbr = p.abbreviation.as_deref().unwrap_or("");
+                        if abbr.is_empty() || abbr == p.name { None } else { Some(abbr.to_string()) }
+                    })
                     .unwrap_or_default(),
             },
             description: g.summary.clone().unwrap_or_default(),
@@ -276,7 +308,7 @@ impl GameScraper for Igdb {
         _platform: Option<&str>,
     ) -> Result<Vec<Game>> {
         let body = format!(
-            "search \"{}\"; fields name,summary,first_release_date,cover.url,genres.name,platforms.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating; limit 20;",
+            "search \"{}\"; fields name,summary,first_release_date,cover.url,genres.name,platforms.name,platforms.abbreviation,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating,screenshots.url; limit 20;",
             query.replace('"', "\\\"")
         );
         let data = self.api_post("games", &body).await?;
@@ -295,7 +327,7 @@ impl GameScraper for Igdb {
 
     async fn get_game_detail(&self, game_id: &str) -> Result<Game> {
         let body = format!(
-            "where id = {}; fields name,summary,first_release_date,cover.url,genres.name,platforms.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating; limit 1;",
+            "where id = {}; fields name,summary,first_release_date,cover.url,genres.name,platforms.name,platforms.abbreviation,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,rating,screenshots.url; limit 1;",
             game_id
         );
         let data = self.api_post("games", &body).await?;
