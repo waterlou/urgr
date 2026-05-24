@@ -73,6 +73,9 @@ export function startCollectionBuild(id, version_id, format = 'split') {
 export function updateCollectionBuild(id, buildId, data) {
   return fetchWithBody(`/collections/${id}/builds/${buildId}`, 'PUT', data);
 }
+export function runCollectionBuild(id, buildId, { source, import_dir, base_dir, update } = {}) {
+  return fetchWithBody(`/collections/${id}/builds/${buildId}/run`, 'POST', { source, import_dir, base_dir, update });
+}
 
 // Exports
 export function exportCollection(id, { format = 'split', version_id } = {}) {

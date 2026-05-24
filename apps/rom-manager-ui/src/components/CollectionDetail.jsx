@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import IconDisplay from './IconDisplay.jsx'
 import {
   getAvailableVersions, getCollectionBuilds, startCollectionBuild, updateCollectionBuild,
   exportCollection, getVersions, addCollectionVersion, getCollectionGames,
   importOnlineVersion, scanCollection, verifyCollection, subscribeJobSSE,
+  runCollectionBuild, cancelJob,
 } from '../api.js'
 
 function waitForJob(jobId) {
@@ -36,6 +37,8 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
   const [verifyFallback, setVerifyFallback] = useState('')
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState(null)
+  const [buildProgress, setBuildProgress] = useState({})
+  const eventSourcesRef = useRef({})
 
   useEffect(() => {
     async function load() {
@@ -50,6 +53,12 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
         setVersions(vers)
         const games = await getCollectionGames(collectionId, { limit: 1 })
         setGameCount(games.total || 0)
+
+        // Auto-reconnect to any builds that are still running
+        const running = buildsData.filter(b => b.status === 'building')
+        for (const b of running) {
+          subscribeToRunningBuild(b.id)
+        }
       } catch (e) {
         console.error('Failed to load collection detail:', e)
       } finally {
@@ -57,28 +66,87 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
       }
     }
     load()
+
+    return () => {
+      // Cleanup all SSE connections on unmount
+      Object.values(eventSourcesRef.current).forEach(es => es.close())
+      eventSourcesRef.current = {}
+    }
   }, [collectionId])
 
+  function subscribeToRunningBuild(buildId) {
+    if (eventSourcesRef.current[buildId]) return
+    const es = subscribeJobSSE(buildId, {
+      onProgress: (msg) => {
+        setBuildProgress(prev => ({ ...prev, [buildId]: { pct: msg.pct, message: msg.msg } }))
+        if (msg.phase === 'copying') {
+          setBuilds(prev => prev.map(b => b.id === buildId ? { ...b, games_built: msg.matched, games_missing: msg.missing } : b))
+        }
+      },
+      onResult: (result) => {
+        setBuildProgress(prev => ({ ...prev, [buildId]: { pct: 100, message: 'Build complete' } }))
+        setBuilds(prev => prev.map(b => b.id === buildId ? { ...b, status: 'complete', games_built: result.matched, games_missing: result.missing } : b))
+        setInfo(`Build complete: ${result.matched} matched, ${result.missing} missing`)
+        delete eventSourcesRef.current[buildId]
+        setBuildInProgress(null)
+      },
+      onError: (err) => {
+        setBuildProgress(prev => ({ ...prev, [buildId]: { pct: 0, message: `Failed: ${err}` } }))
+        setBuilds(prev => prev.map(b => b.id === buildId ? { ...b, status: 'failed' } : b))
+        setError(`Build failed: ${err}`)
+        delete eventSourcesRef.current[buildId]
+        setBuildInProgress(null)
+      },
+      onDone: () => {
+        delete eventSourcesRef.current[buildId]
+      },
+    })
+    eventSourcesRef.current[buildId] = es
+  }
+
   async function handleBuild(versionId, format) {
+    const version = versions.find(v => v.id === versionId)
+    if (!version) return
     setBuildInProgress(versionId)
     setError(null)
     setInfo(null)
     try {
-      const result = await startCollectionBuild(collectionId, versionId, format)
+      const build = await startCollectionBuild(collectionId, versionId, format)
       setBuilds(prev => {
         const idx = prev.findIndex(b => b.version_id === versionId)
-        if (idx >= 0) {
-          const updated = [...prev]
-          updated[idx] = result
-          return updated
-        }
-        return [...prev, result]
+        if (idx >= 0) { const updated = [...prev]; updated[idx] = build; return updated }
+        return [...prev, build]
       })
-      setInfo(`Build started for ${result.version} (${format} format)`)
+      const { jobId } = await runCollectionBuild(collectionId, build.id, {
+        source: version.source,
+        import_dir: `${version.dir || '/roms/' + version.source}/${version.source}`,
+        base_dir: '/roms',
+        update: false,
+      })
+      subscribeToRunningBuild(jobId)
     } catch (e) {
       setError(e.message)
-    } finally {
       setBuildInProgress(null)
+    }
+  }
+
+  async function handleCancelBuild(buildId) {
+    try {
+      await cancelJob(buildId)
+      if (eventSourcesRef.current[buildId]) {
+        eventSourcesRef.current[buildId].close()
+        delete eventSourcesRef.current[buildId]
+      }
+      setBuildProgress(prev => ({ ...prev, [buildId]: { pct: 0, message: 'Cancelled' } }))
+      setTimeout(() => {
+        setBuildProgress(prev => {
+          const next = { ...prev }
+          delete next[buildId]; return next
+        })
+      }, 3000)
+      setBuilds(prev => prev.map(b => b.id === buildId ? { ...b, status: 'failed' } : b))
+    } catch (e) {
+      setError(e.message)
     }
   }
 
@@ -376,13 +444,24 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
                       <td><strong>{build.version}</strong></td>
                       <td><span className="tag">{build.format}</span></td>
                       <td>{statusBadge(build.status)}</td>
-                      <td>{build.games_total > 0 ? `${build.games_built || 0} / ${build.games_total}` : '-'}</td>
+                      <td>
+                        {build.status === 'building' && buildProgress[build.id] ? (
+                          <div className="progress-bar-wrapper" style={{minWidth:120}}>
+                            <div className="progress-bar" style={{width:`${buildProgress[build.id].pct}%`}} />
+                            <span className="progress-label">{buildProgress[build.id].pct}%</span>
+                          </div>
+                        ) : (
+                          build.games_total > 0 ? `${build.games_built || 0} / ${build.games_total}` : '-'
+                        )}
+                      </td>
                       <td className="text-muted">{build.started_at ? build.started_at.slice(0, 10) : '-'}</td>
                       <td>
                         {build.status === 'building' && (
-                          <button className="btn btn-sm btn-primary" onClick={() => handleComplete(build.id)}>
-                            Mark Complete
-                          </button>
+                          <div className="action-btn-group">
+                            <button className="btn btn-sm btn-danger" onClick={() => handleCancelBuild(build.id)}>
+                              Cancel
+                            </button>
+                          </div>
                         )}
                         {build.status === 'complete' && <span className="text-muted"><span className="icon icon-sm" style={{verticalAlign:'middle'}}>check</span> Built</span>}
                       </td>

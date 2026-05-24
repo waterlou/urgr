@@ -323,7 +323,7 @@ app.post('/api/collections/:id/builds/:buildId/run', async (req, res) => {
     const job = createJob(jobId);
 
     const abort = new AbortController();
-    job.child = { killed: false };
+    job._abort = abort; // store for cancellation
 
     const args = ['build', source, import_dir];
     if (base_dir) args.push('--base-dir', base_dir);
@@ -986,6 +986,17 @@ app.use((req, res) => {
 // =============================================================================
 // Start
 // =============================================================================
+// Startup cleanup: reset orphaned builds (server crashed/restarted)
+dbReady.then(() => {
+  const orphans = all("SELECT id FROM collection_builds WHERE status = 'building'");
+  if (orphans.length > 0) {
+    console.log(`Resetting ${orphans.length} orphaned build(s) to 'failed'`);
+    for (const o of orphans) {
+      run("UPDATE collection_builds SET status = 'failed' WHERE id = ?", [o.id]);
+    }
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`ROM Manager API running at http://localhost:${PORT}`);
 });

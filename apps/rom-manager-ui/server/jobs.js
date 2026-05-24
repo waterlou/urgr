@@ -37,6 +37,7 @@ export function cancelJob(id) {
   const job = jobs.get(id);
   if (!job || job.status !== 'running') return false;
   job.status = 'cancelled';
+  if (job._abort) { job._abort.abort(); }
   if (job.child) job.child.kill('SIGTERM');
   broadcast(job, `data: ${JSON.stringify({ type: 'cancelled' })}\n\n`);
   closeSubs(job);
