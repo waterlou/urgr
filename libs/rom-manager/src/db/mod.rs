@@ -106,6 +106,41 @@ impl Database {
         Ok(())
     }
 
+    pub fn get_version_count(&self) -> Result<i64> {
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*) FROM set_versions",
+            [],
+            |r| r.get(0),
+        )?)
+    }
+
+    pub fn latest_version(&self, source: &str) -> Result<Option<SetVersion>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT sv.id, sv.source, sv.version, sv.dir,
+                    (SELECT COUNT(*) FROM game_entries WHERE version_id = sv.id) as total_games,
+                    (SELECT COUNT(*) FROM rom_entries re
+                     JOIN game_entries ge ON re.game_entry_id = ge.id
+                     WHERE ge.version_id = sv.id) as total_roms
+             FROM set_versions sv
+             WHERE sv.source = ?1
+             ORDER BY sv.version DESC LIMIT 1",
+        )?;
+        let mut rows = stmt.query_map(params![source], |r| {
+            Ok(SetVersion {
+                id: r.get(0)?,
+                source: r.get(1)?,
+                version: r.get(2)?,
+                dir: r.get(3)?,
+                total_games: r.get(4)?,
+                total_roms: r.get(5)?,
+            })
+        })?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
     // ── Game Entries ──
 
     pub fn insert_game(&self, version_id: i64, game: &GameEntry) -> Result<i64> {

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use rom_manager::builder::build_version;
 use rom_manager::scanner::scan_directory;
 use rom_manager::verifier::{verify_version, GameStatus};
 use rom_manager::Database;
@@ -50,6 +51,20 @@ struct DiffOutput {
     unchanged: i64,
 }
 
+#[derive(Serialize)]
+struct BuildOutput {
+    source: String,
+    version: String,
+    mode: String,
+    prev_version: Option<String>,
+    total_games: usize,
+    matched: usize,
+    unchanged: usize,
+    missing: usize,
+    cleaned: usize,
+    missing_games: Vec<String>,
+}
+
 fn db_path() -> String {
     let args: Vec<String> = std::env::args().collect();
     if let Some(pos) = args.iter().position(|a| a == "--db") {
@@ -92,6 +107,11 @@ fn print_usage() {
     eprintln!("  scan <version-id> <dir>");
     eprintln!("  verify <version-id> <dir> [--fallback <id>]");
     eprintln!("  diff <version-id-a> <version-id-b>");
+    eprintln!("  build <source> <import-dir> [--update] [--base-dir <dir>]");
+    eprintln!();
+    eprintln!("  Build automatically detects the latest version for <source> from the");
+    eprintln!("  database. Use --update to upgrade in-place (renames old folder, deletes");
+    eprintln!("  old version from DB). Default mode creates a delta folder for each version.");
     eprintln!();
     eprintln!("Global flags:");
     eprintln!("  --json                 Output in JSON format");
@@ -118,6 +138,7 @@ fn main() -> ExitCode {
         "scan" => cmd_scan(&clean[1..], json),
         "verify" => cmd_verify(&clean[1..], json),
         "diff" => cmd_diff(&clean[1..], json),
+        "build" => cmd_build(&clean[1..], json),
         _ => {
             eprintln!("Unknown command: {}", clean[1]);
             ExitCode::FAILURE
@@ -306,4 +327,66 @@ fn cmd_diff(args: &[String], json: bool) -> ExitCode {
             diff.version_a, diff.version_b, diff.added.len(), diff.removed.len(), diff.changed.len(), diff.unchanged);
     }
     ExitCode::SUCCESS
+}
+
+fn cmd_build(args: &[String], json: bool) -> ExitCode {
+    if args.len() < 3 {
+        eprintln!("Usage: build-cli build <source> <import-dir> [--update] [--base-dir <dir>]");
+        return ExitCode::FAILURE;
+    }
+    let source = &args[1];
+    let import_dir = std::path::Path::new(&args[2]);
+    if !import_dir.is_dir() {
+        eprintln!("Import directory not found: {}", args[2]);
+        return ExitCode::FAILURE;
+    }
+
+    let update = args.iter().any(|a| a == "--update");
+    let base_dir = args.iter().position(|a| a == "--base-dir")
+        .and_then(|p| args.get(p + 1))
+        .map(|s| std::path::PathBuf::from(s))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let db = match open_db() { Ok(d) => d, Err(e) => { eprintln!("{}", e); return ExitCode::FAILURE; } };
+
+    match build_version(&db, source, import_dir, &base_dir, update) {
+        Ok(result) => {
+            if json {
+                print_json(&BuildOutput {
+                    source: source.to_string(),
+                    version: result.version,
+                    mode: result.mode,
+                    prev_version: result.prev_version,
+                    total_games: result.total_games,
+                    matched: result.matched,
+                    unchanged: result.unchanged,
+                    missing: result.missing,
+                    cleaned: result.cleaned,
+                    missing_games: result.missing_games,
+                });
+            } else {
+                let mode_label = if update { "update" } else { "delta" };
+                println!("Built {} {} ({} mode)", source, result.version, mode_label);
+                if let Some(ref pv) = result.prev_version {
+                    println!("  from v{} → v{}", pv, result.version);
+                }
+                println!("  total:     {}", result.total_games);
+                println!("  matched:   {} (copied)", result.matched);
+                if result.unchanged > 0 {
+                    println!("  unchanged: {} (kept from prev)", result.unchanged);
+                }
+                if result.missing > 0 {
+                    println!("  missing:   {}", result.missing);
+                }
+                if result.cleaned > 0 {
+                    println!("  cleaned:   {} (moved to deleted_roms)", result.cleaned);
+                }
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Build error: {}", e);
+            ExitCode::FAILURE
+        }
+    }
 }
