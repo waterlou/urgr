@@ -136,7 +136,7 @@ CREATE TABLE IF NOT EXISTS collection_builds (
 
 export async function initDb(dbPath) {
   const SQL = await initSqlJs();
-  const resolved = path.resolve(dbPath || path.join(__dirname, '..', '..', '..', 'roms.db'));
+  const resolved = path.resolve(dbPath || path.join(__dirname, '..', '..', '..', 'data', 'roms.db'));
   dbFilePath = resolved;
 
   if (fs.existsSync(resolved)) {

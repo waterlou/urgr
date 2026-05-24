@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import { importDat } from '../api.js'
 
 export default function CollectionForm({ datasets, platforms, versions, editTarget, onSave, onClose }) {
   const isEdit = !!editTarget
@@ -86,13 +87,7 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
       setUploading(true)
       try {
         const text = await datFile.text()
-        const res = await fetch('/api/dat/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain' },
-          body: text,
-        })
-        if (!res.ok) throw new Error('Upload failed')
-        const data = await res.json()
+        const data = await importDat(text)
         uploadedVersionId = data.version_id
         hasDataset = 1
       } catch (e) {

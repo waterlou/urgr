@@ -1,49 +1,60 @@
-import { execSync } from 'child_process'
-import path from 'path'
-import fs from 'fs'
-import { getDb, saveDb, initDb, getDbPath } from './db.js'
+import { execSync } from 'child_process';
+import path from 'path';
+import fs from 'fs';
+import { getDb, saveDb, initDb, getDbPath } from './db.js';
 
-function findBinary() {
-  const envBin = process.env.CLI_BINARY
-  if (envBin && (envBin.includes('/') || fs.existsSync(envBin))) return envBin
-  if (envBin) return envBin
+const __dirname = path.dirname(new URL(import.meta.url).pathname);
 
+const CLI_NAMES = {
+  scraper: 'scraper-cli',
+  parse: 'parse-cli',
+  build: 'build-cli',
+};
+
+function findBinary(binary) {
+  const envKey = binary === 'scraper' ? 'SCRAPER_CLI_BINARY'
+    : binary === 'parse' ? 'PARSE_CLI_BINARY'
+    : 'BUILD_CLI_BINARY';
+  const envBin = process.env[envKey];
+  if (envBin && (envBin.includes('/') || fs.existsSync(envBin))) return envBin;
+  if (envBin) return envBin;
+
+  const name = CLI_NAMES[binary];
   const candidates = [
-    'rom-scraper-cli',
-    path.join(__dirname, '..', '..', '..', 'target', 'release', 'rom-scraper-cli'),
-    path.join(__dirname, '..', '..', '..', 'target', 'debug', 'rom-scraper-cli'),
-    '/usr/local/bin/rom-scraper-cli',
-  ]
+    name,
+    path.join(__dirname, '..', '..', '..', 'target', 'release', name),
+    path.join(__dirname, '..', '..', '..', 'target', 'debug', name),
+    `/usr/local/bin/${name}`,
+  ];
   for (const c of candidates) {
-    if (fs.existsSync(c)) return c
-    try { execSync(`which ${c}`, { encoding: 'utf-8', stdio: 'ignore' }); return c }
-    catch {}
+    if (fs.existsSync(c)) return c;
+    try { execSync(`which ${c}`, { encoding: 'utf-8', stdio: 'ignore' }); return c; } catch {}
   }
-  return 'rom-scraper-cli'
+  return name;
 }
 
-const __dirname = path.dirname(new URL(import.meta.url).pathname)
-const CLI_BINARY = findBinary()
+export function execCli(args, { binary = 'build' } = {}) {
+  const bin = findBinary(binary);
+  const dbPath = getDbPath();
 
-export function execCli(args) {
-  saveDb()
+  const needsDb = binary === 'parse' || binary === 'build';
+  if (needsDb) saveDb();
 
-  const dbPath = getDbPath()
-  const cmd = [CLI_BINARY, ...args, '--json', '--db', dbPath].join(' ')
+  const cmd = [bin, ...args, '--json', '--db', dbPath].join(' ');
 
-  let stdout
+  let stdout;
   try {
-    stdout = execSync(cmd, { encoding: 'utf-8', timeout: 120000 })
+    stdout = execSync(cmd, { encoding: 'utf-8', timeout: 120000 });
   } catch (e) {
-    const msg = e.stderr?.trim() || e.message
-    throw new Error(`CLI error: ${msg}`)
+    const msg = e.stderr?.trim() || e.message;
+    throw new Error(`CLI error: ${msg}`);
   }
 
-  initDb(dbPath)
+  if (needsDb) initDb(dbPath);
 
   try {
-    return JSON.parse(stdout.trim())
+    return JSON.parse(stdout.trim());
   } catch {
-    return { raw: stdout.trim() }
+    return { raw: stdout.trim() };
   }
 }

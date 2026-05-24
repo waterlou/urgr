@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import GameGridCard from './GameGridCard.jsx'
 import GameListItem from './GameListItem.jsx'
-import { searchGames, coverUrl, updateGameRating } from '../api.js'
+import { getGames, coverUrl, updateGameRating } from '../api.js'
 
 export default function GameBrowser({
   games, loading, activeView, activeMeta, totalGames, platforms,
@@ -22,7 +22,7 @@ export default function GameBrowser({
       setSearchOpen(false)
       return
     }
-    const results = await searchGames(q)
+    const { games: results } = await getGames({ q, limit: 50 })
     setSearchResults(results)
     setSearchOpen(true)
   }

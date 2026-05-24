@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  getBrowseGames, getCollections, getGameSets, getDatasets, getPlatforms,
+  getGames, getCollections, getGameSets, getPlatforms, getVersions,
   getCollectionGames, getGameSetGames, createCollection, deleteCollection,
   updateCollection, addCollectionVersion, removeCollectionVersion,
   createGameSet, deleteGameSet, updateGameSet, addGameSetGames, removeGameSetGame,
-  getVersions,
 } from './api.js'
 import Sidebar from './components/Sidebar.jsx'
 import GameBrowser from './components/GameBrowser.jsx'
@@ -12,6 +11,7 @@ import GameDetail from './components/GameDetail.jsx'
 import CollectionDetail from './components/CollectionDetail.jsx'
 import CollectionForm from './components/CollectionForm.jsx'
 import GameSetForm from './components/GameSetForm.jsx'
+import Settings from './components/Settings.jsx'
 
 export default function App() {
   const [collections, setCollections] = useState([])
@@ -33,9 +33,14 @@ export default function App() {
   const [sortField, setSortField] = useState('name')
   const [sortOrder, setSortOrder] = useState('asc')
   const [searchQuery, setSearchQuery] = useState('')
-  const [datasets, setDatasets] = useState({ popular: [], imported: [] })
+  const POPULAR_DATASETS = [
+    { name: 'MAME', slug: 'mame', platform: 'Arcade' },
+    { name: 'Final Burn Neo', slug: 'fbneo', platform: 'Arcade' },
+  ]
+  const [datasets, setDatasets] = useState({ popular: POPULAR_DATASETS, imported: [] })
   const [knownPlatforms, setKnownPlatforms] = useState([])
   const [theme, setTheme] = useState(() => localStorage.getItem('rom-manager-theme') || 'dark')
+  const [showSettings, setShowSettings] = useState(false)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -48,16 +53,15 @@ export default function App() {
 
   const loadSidebar = useCallback(async () => {
     try {
-      const [cols, sets, vers, ds, plats] = await Promise.all([
+      const [cols, sets, vers, plats] = await Promise.all([
         getCollections(), getGameSets(), getVersions(),
-        getDatasets().catch(() => ({ popular: [], imported: [] })),
         getPlatforms().catch(() => []),
       ])
       console.log('[loadSidebar] collections:', cols.length, cols.map(c => c.name))
       setCollections(cols)
       setGameSets(sets)
       setVersions(vers)
-      setDatasets(ds)
+      setDatasets({ popular: POPULAR_DATASETS, imported: vers })
       setKnownPlatforms(plats)
     } catch (e) {
       console.error('[loadSidebar] FAILED:', e)
@@ -68,7 +72,7 @@ export default function App() {
     setLoading(true)
     try {
       if (view === 'browse') {
-        const data = await getBrowseGames({ limit: 500, sort, order, q })
+        const data = await getGames({ limit: 500, sort, order, q })
         setGames(data.games)
         setTotalGames(data.total)
         setActiveMeta(null)
@@ -203,6 +207,7 @@ export default function App() {
         onDeleteGameSet={handleDeleteGameSet}
         theme={theme}
         onToggleTheme={handleToggleTheme}
+        onOpenSettings={() => setShowSettings(true)}
       />
 
       <main className="main-pane">
@@ -259,6 +264,10 @@ export default function App() {
           onSave={handleSaveGameSet}
           onClose={() => { setShowGameSetForm(false); setEditTarget(null) }}
         />
+      )}
+
+      {showSettings && (
+        <Settings onClose={() => setShowSettings(false)} />
       )}
     </div>
   )

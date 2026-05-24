@@ -47,6 +47,7 @@ pub struct ScannedGame {
 pub enum DatFormat {
     MameListXml,
     Logiqx,
+    ClrmamePro,
 }
 
 #[derive(Debug, Clone)]

@@ -14,4 +14,4 @@ pub use matcher::{match_rom_by_hashes, match_rom_by_path, parse_filename, Filena
 pub use models::{
     Game, HashType, Media, MediaItem, MediaType, Platform, RomInfo, ScrapeSource,
 };
-pub use sources::{GameScraper, ScraperRegistry, ScreenScraper};
+pub use sources::{GameScraper, Igdb, ScraperRegistry, ScreenScraper, TheGamesDb};

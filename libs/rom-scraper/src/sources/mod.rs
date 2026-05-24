@@ -1,4 +1,6 @@
+mod igdb;
 mod screenscraper;
+mod thegamesdb;
 
 use async_trait::async_trait;
 
@@ -7,7 +9,9 @@ use crate::error::Result;
 use crate::hasher::RomHashes;
 use crate::models::{Game, HashType, ScrapeSource};
 
+pub use igdb::Igdb;
 pub use screenscraper::ScreenScraper;
+pub use thegamesdb::TheGamesDb;
 
 #[async_trait]
 pub trait GameScraper: Send + Sync {
@@ -41,6 +45,12 @@ impl ScraperRegistry {
 
         if config.screenscraper.is_some() {
             scrapers.push(Box::new(ScreenScraper::new(config)));
+        }
+        if config.igdb.is_some() {
+            scrapers.push(Box::new(Igdb::new(config)));
+        }
+        if config.thegamesdb.is_some() {
+            scrapers.push(Box::new(TheGamesDb::new(config)));
         }
 
         let mut registry = Self { scrapers };
@@ -116,6 +126,23 @@ impl ScraperRegistry {
         }
 
         Ok(None)
+    }
+
+    pub async fn search_by_name_from_source(
+        &self,
+        query: &str,
+        source: &ScrapeSource,
+        platform: Option<&str>,
+    ) -> Result<Vec<Game>> {
+        for scraper in &self.scrapers {
+            if &scraper.source_type() != source {
+                continue;
+            }
+            return scraper.search_by_name(query, platform).await;
+        }
+        Err(crate::Error::Config(format!(
+            "Scraper '{}' is not configured", source
+        )))
     }
 
     pub async fn get_game_detail(

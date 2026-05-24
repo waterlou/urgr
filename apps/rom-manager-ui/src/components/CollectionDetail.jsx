@@ -1,12 +1,22 @@
 import { useState, useEffect } from 'react'
 import {
-  getMameDats, getCollectionBuilds, startCollectionBuild, updateCollectionBuild,
+  getAvailableVersions, getCollectionBuilds, startCollectionBuild, updateCollectionBuild,
   exportCollection, getVersions, addCollectionVersion, getCollectionGames,
-  importMameVersion, cliScan, cliVerify,
+  importOnlineVersion, scanCollection, verifyCollection, subscribeJobSSE,
 } from '../api.js'
 
+function waitForJob(jobId) {
+  return new Promise((resolve, reject) => {
+    subscribeJobSSE(jobId, {
+      onResult: (data) => resolve(data),
+      onError: (err) => reject(new Error(err)),
+      onProgress: () => {},
+    })
+  })
+}
+
 export default function CollectionDetail({ collectionId, collection, onBrowseGames, onRefresh }) {
-  const [mameDats, setMameDats] = useState(null)
+  const [availableDats, setAvailableDats] = useState(null)
   const [builds, setBuilds] = useState([])
   const [versions, setVersions] = useState([])
   const [loading, setLoading] = useState(true)
@@ -30,15 +40,13 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
     async function load() {
       try {
         const [dats, buildsData, vers] = await Promise.all([
-          getMameDats().catch(() => null),
+          getAvailableVersions().catch(() => null),
           getCollectionBuilds(collectionId).catch(() => []),
           getVersions().catch(() => []),
         ])
-        setMameDats(dats)
+        setAvailableDats(dats)
         setBuilds(buildsData)
         setVersions(vers)
-
-        // Count games in collection
         const games = await getCollectionGames(collectionId, { limit: 1 })
         setGameCount(games.total || 0)
       } catch (e) {
@@ -98,19 +106,18 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
     }
   }
 
-  async function handleImportMame(version) {
+  async function handleImportOnline(version) {
     setImportingVer(version)
     setError(null)
     setInfo(null)
     try {
-      const result = await importMameVersion(collectionId, version)
+      const result = await importOnlineVersion(collectionId, version)
       setInfo(`Version ${version} imported!`)
-      // Refresh MAME DAT data + versions
       const [dats, vers] = await Promise.all([
-        getMameDats().catch(() => null),
+        getAvailableVersions().catch(() => null),
         getVersions().catch(() => []),
       ])
-      setMameDats(dats)
+      setAvailableDats(dats)
       setVersions(vers)
       onRefresh()
     } catch (e) {
@@ -136,7 +143,8 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
     setInfo(null)
     setScanResult(null)
     try {
-      const result = await cliScan(versionId, scanDir)
+      const { jobId } = await scanCollection(collectionId, versionId, scanDir)
+      const result = await waitForJob(jobId)
       setScanResult(result)
       setInfo(`Scan complete: ${result.matched_games} matched, ${result.missing_games} missing`)
     } catch (e) {
@@ -152,9 +160,10 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
     setInfo(null)
     setVerifyResult(null)
     try {
-      const opts = { version_id: versionId, dir: verifyDir }
+      const opts = {}
       if (verifyFallback) opts.fallback_id = parseInt(verifyFallback)
-      const result = await cliVerify(opts.version_id, opts.dir, opts.fallback_id)
+      const { jobId } = await verifyCollection(collectionId, versionId, verifyDir, opts.fallback_id)
+      const result = await waitForJob(jobId)
       setVerifyResult(result)
       setInfo(`Verify complete: ${result.present} present, ${result.missing} missing`)
     } catch (e) {
@@ -183,12 +192,12 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
 
   const latestImported = collectionVersions.length > 0
     ? collectionVersions.reduce((a, b) => {
-        const va = a.version.split('.').map(Number);
-        const vb = b.version.split('.').map(Number);
+        const va = a.version.split('.').map(Number)
+        const vb = b.version.split('.').map(Number)
         for (let i = 0; i < Math.max(va.length, vb.length); i++) {
-          if ((va[i]||0) !== (vb[i]||0)) return (va[i]||0) > (vb[i]||0) ? a : b;
+          if ((va[i]||0) !== (vb[i]||0)) return (va[i]||0) > (vb[i]||0) ? a : b
         }
-        return a;
+        return a
       })
     : null
 
@@ -212,34 +221,34 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
       </div>
 
       <div className="browser-content">
-        {/* MAME Version Check — only for MAME preset collections */}
-        {mameDats && collection?.folder === 'mame' && (
+        {/* Version Check — MAME preset collections */}
+        {availableDats && collection?.folder === 'mame' && (
           <section className="detail-section">
             <h2 className="detail-section-title">
               MAME DAT Versions
-              {mameDats.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>New version available! {mameDats.latest}</span>}
+              {availableDats.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>New version available! {availableDats.latest}</span>}
             </h2>
             <p className="detail-section-desc">
-              Latest available: <strong>{mameDats.latest}</strong>
-              {mameDats.imported.length > 0 && ` · ${mameDats.imported.length} version(s) imported`}
-              {mameDats.missing.length > 0 && ` · ${mameDats.missing.length} version(s) not yet imported`}
+              Latest available: <strong>{availableDats.latest}</strong>
+              {availableDats.imported.length > 0 && ` · ${availableDats.imported.length} version(s) imported`}
+              {availableDats.missing.length > 0 && ` · ${availableDats.missing.length} version(s) not yet imported`}
             </p>
 
-            {mameDats.missing.length > 0 && (
+            {availableDats.missing.length > 0 && (
               <div className="info-box warn">
                 <strong>Versions available to import:</strong>
                 <div className="tag-list">
-                  {mameDats.missing.slice(0, 10).map(d => (
+                  {availableDats.missing.slice(0, 10).map(d => (
                     <button
                       key={d.numeric}
                       className="tag tag-import"
-                      onClick={() => handleImportMame(d.numeric)}
+                      onClick={() => handleImportOnline(d.numeric)}
                       disabled={importingVer === d.numeric}
                     >
                       {importingVer === d.numeric ? '⏳' : '+'} {d.numeric} <span className="tag-date">{d.date}</span>
                     </button>
                   ))}
-                  {mameDats.missing.length > 10 && <span className="tag">+{mameDats.missing.length - 10} more</span>}
+                  {availableDats.missing.length > 10 && <span className="tag">+{availableDats.missing.length - 10} more</span>}
                 </div>
               </div>
             )}
@@ -271,8 +280,8 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
               <h3>Scan</h3>
               <div className="build-form-row">
                 <select className="build-select" defaultValue="" onChange={e => {
-                  const v = e.target.value;
-                  if (v && scanDir) handleScan(parseInt(v));
+                  const v = e.target.value
+                  if (v && scanDir) handleScan(parseInt(v))
                 }}>
                   <option value="">Select version...</option>
                   {versions.map(v => (
@@ -300,8 +309,8 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
               <h3>Verify</h3>
               <div className="build-form-row">
                 <select className="build-select" defaultValue="" onChange={e => {
-                  const v = e.target.value;
-                  if (v && verifyDir) handleVerify(parseInt(v));
+                  const v = e.target.value
+                  if (v && verifyDir) handleVerify(parseInt(v))
                 }}>
                   <option value="">Select version...</option>
                   {versions.map(v => (
@@ -383,24 +392,23 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
             </div>
           )}
 
-          {/* Start New Build */}
           <div className="build-form">
             <h3>Start New Build</h3>
             <div className="build-form-row">
               <select className="build-select" value="" onChange={e => {
-                const val = e.target.value;
-                if (val) handleBuild(val, 'split');
-                e.target.value = '';
+                const val = e.target.value
+                if (val) handleBuild(val, 'split')
+                e.target.value = ''
               }}>
                 <option value="">Select a version to build...</option>
                 {versions.map(v => {
-                  const existing = getBuildForVersion(v.id);
-                  const disabled = existing && existing.status === 'complete';
+                  const existing = getBuildForVersion(v.id)
+                  const disabled = existing && existing.status === 'complete'
                   return (
                     <option key={v.id} value={v.id} disabled={disabled}>
                       {v.source} — {v.version} ({v.total_games} games) {disabled ? '✓' : existing ? `(${existing.status})` : ''}
                     </option>
-                  );
+                  )
                 })}
               </select>
               <select className="build-select" value={exportFormat} onChange={e => setExportFormat(e.target.value)} style={{width:120}}>

@@ -6,8 +6,5 @@ node_modules/
 .DS_Store
 docker-compose.yml
 docs/
-roms.db
-roms.db-shm
-roms.db-wal
-roms/
+data/
 ~/

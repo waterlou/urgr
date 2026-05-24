@@ -1,3 +1,4 @@
+mod clrmamepro;
 mod logiqx;
 mod mame;
 
@@ -7,6 +8,7 @@ use std::path::Path;
 use crate::error::Result;
 use crate::models::{DatFormat, GameEntry, ParseStats, RomEntry};
 
+pub use clrmamepro::parse_clrmamepro_dat;
 pub use logiqx::parse_logiqx_dat;
 pub use mame::parse_mame_dat;
 
@@ -27,7 +29,6 @@ pub fn detect_format<P: AsRef<Path>>(path: P) -> Result<DatFormat> {
     let file = std::fs::File::open(path.as_ref())?;
     let mut reader = BufReader::new(file);
 
-    // Read first non-blank line
     let first = read_nonblank_line(&mut reader)?;
     if first.is_empty() {
         return Err(crate::error::Error::Parse(format!(
@@ -36,7 +37,6 @@ pub fn detect_format<P: AsRef<Path>>(path: P) -> Result<DatFormat> {
         )));
     }
 
-    // If first non-blank is an XML declaration, skip it
     let check_line = if first.trim_start().starts_with("<?xml") {
         read_nonblank_line(&mut reader)?
     } else {
@@ -47,8 +47,9 @@ pub fn detect_format<P: AsRef<Path>>(path: P) -> Result<DatFormat> {
         Ok(DatFormat::MameListXml)
     } else if check_line.contains("<datafile") {
         Ok(DatFormat::Logiqx)
+    } else if check_line.to_lowercase().contains("clrmamepro") {
+        Ok(DatFormat::ClrmamePro)
     } else {
-        // DOCTYPE lines contain "datafile" without angle brackets — read next
         let third = read_nonblank_line(&mut reader)?;
         if third.contains("<datafile") || third.contains("<mame") {
             if third.contains("<mame") {
@@ -56,6 +57,8 @@ pub fn detect_format<P: AsRef<Path>>(path: P) -> Result<DatFormat> {
             } else {
                 Ok(DatFormat::Logiqx)
             }
+        } else if third.to_lowercase().contains("clrmamepro") {
+            Ok(DatFormat::ClrmamePro)
         } else {
             Err(crate::error::Error::Parse(format!(
                 "Unknown DAT format: {}",
@@ -70,5 +73,6 @@ pub fn parse_dat<P: AsRef<Path>>(path: P) -> Result<(Vec<GameEntry>, Vec<RomEntr
     match fmt {
         DatFormat::MameListXml => parse_mame_dat(path),
         DatFormat::Logiqx => parse_logiqx_dat(path),
+        DatFormat::ClrmamePro => parse_clrmamepro_dat(path),
     }
 }

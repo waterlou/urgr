@@ -6,7 +6,7 @@ use crate::error::Result;
 use crate::models::*;
 
 pub struct Database {
-    conn: Connection,
+    pub conn: Connection,
 }
 
 impl Database {

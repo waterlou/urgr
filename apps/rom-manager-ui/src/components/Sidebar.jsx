@@ -3,7 +3,7 @@ export default function Sidebar({
   onSelect, onNewCollection, onNewGameSet,
   onEditCollection, onEditGameSet,
   onDeleteCollection, onDeleteGameSet,
-  theme, onToggleTheme,
+  theme, onToggleTheme, onOpenSettings,
 }) {
   return (
     <aside className="sidebar">
@@ -71,6 +71,9 @@ export default function Sidebar({
       </nav>
 
       <div className="sidebar-footer">
+        <button className="sidebar-settings-btn" onClick={onOpenSettings} title="Settings">
+          ⚙️
+        </button>
         <button className="theme-toggle" onClick={onToggleTheme} title="Toggle theme">
           {theme === 'dark' ? '☀️' : '🌙'}
         </button>

@@ -1,10 +1,8 @@
 # Rust build artifacts
 target/
 
-# SQLite database files
-roms.db
-roms.db-shm
-roms.db-wal
+# Local data (database, .env, ROM files)
+data/
 
 # Node.js
 node_modules/
