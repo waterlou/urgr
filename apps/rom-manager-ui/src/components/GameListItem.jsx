@@ -20,12 +20,12 @@ export default function GameListItem({ game, onSelect, onRating, onFavourite }) 
       <span className="list-col-rating" onClick={e => e.stopPropagation()}>
         <div className="stars stars-sm" onClick={handleClickStars}>
           {[1, 2, 3, 4, 5].map(i => (
-            <span key={i} className={`star ${i <= (game.rating || 0) ? 'filled' : ''}`}>★</span>
+            <span key={i} className={`icon star ${i <= (game.rating || 0) ? 'icon-fill' : ''}`}>star</span>
           ))}
         </div>
       </span>
       <span className="list-col-fav" onClick={e => { e.stopPropagation(); onFavourite() }}>
-        <span className={`fav-star ${game.favourite ? 'active' : ''}`}>{game.favourite ? '★' : '☆'}</span>
+        <span className={`icon fav-star ${game.favourite ? 'active icon-fill' : ''}`}>star</span>
       </span>
     </div>
   )

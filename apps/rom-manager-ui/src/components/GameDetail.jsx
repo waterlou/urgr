@@ -21,7 +21,7 @@ export default function GameDetail({ gameId, onClose }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-content" onClick={e => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}>✕</button>
+        <button className="modal-close" onClick={onClose}><span className="icon">close</span></button>
         <div className="modal-header" style={{
           backgroundImage: `linear-gradient(to top, #141414 0%, transparent 100%), url(${coverUrl(game.id)})`,
           backgroundSize: 'cover',
@@ -59,7 +59,7 @@ export default function GameDetail({ gameId, onClose }) {
                         <td className="rom-filename">{rom.filename}</td>
                         <td>{rom.size != null ? formatSize(rom.size) : '-'}</td>
                         <td><span className={`rom-status rom-status-${rom.status}`}>{rom.status}</span></td>
-                        <td className="rom-hash">{rom.sha1 ? rom.sha1.slice(0, 16) + '…' : '-'}</td>
+                        <td className="rom-hash">{rom.sha1 ? rom.sha1.slice(0, 16) + '...' : '-'}</td>
                       </tr>
                     ))}
                   </tbody>

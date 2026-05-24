@@ -37,7 +37,7 @@ const SOURCE_OPTIONS = [
 ]
 
 export default function Settings({ onClose }) {
-  const [values, setValues] = useState({})
+  const [values, setValues] = useState({ SCRAPER_SOURCE: 'screenscraper' })
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState(null)
   const [activeTab, setActiveTab] = useState('screenscraper')
@@ -75,7 +75,7 @@ export default function Settings({ onClose }) {
       <div className="settings-panel" onClick={e => e.stopPropagation()}>
         <div className="settings-header">
           <h2>Settings</h2>
-          <button className="settings-close-btn" onClick={onClose}>✕</button>
+          <button className="settings-close-btn" onClick={onClose}><span className="icon">close</span></button>
         </div>
 
         <div className="settings-tabs">

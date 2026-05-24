@@ -22,16 +22,16 @@ export default function GameGridCard({ game, onSelect, onRating, onFavourite, on
               onClick={onFavourite}
               title={game.favourite ? 'Unfavourite' : 'Favourite'}
             >
-              {game.favourite ? '★' : '☆'}
+              <span className={`icon ${game.favourite ? 'icon-fill' : ''}`}>star</span>
             </button>
             {onAddToGameSet && gameSets.length > 0 && (
               <div className="add-to-set-wrapper" onMouseEnter={() => setShowMenu(true)} onMouseLeave={() => setShowMenu(false)}>
-                <button className="add-set-btn" title="Add to Game Set">+</button>
+                <button className="add-set-btn" title="Add to Game Set"><span className="icon">playlist_add</span></button>
                 {showMenu && (
                   <div className="add-to-set-menu">
                     {gameSets.filter(gs => gs.id !== currentGameSetId).map(gs => (
                       <button key={gs.id} onClick={() => onAddToGameSet(game.id, gs.id)}>
-                        {gs.icon || '📦'} {gs.name}
+                        <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:4}}>{gs.icon === '📦' ? 'inventory_2' : gs.icon}</span> {gs.name}
                       </button>
                     ))}
                   </div>
@@ -50,7 +50,7 @@ export default function GameGridCard({ game, onSelect, onRating, onFavourite, on
         <div className="grid-card-rating" onClick={e => e.stopPropagation()}>
           <div className="stars" onClick={handleClickStars}>
             {[1, 2, 3, 4, 5].map(i => (
-              <span key={i} className={`star ${i <= (game.rating || 0) ? 'filled' : ''}`}>★</span>
+              <span key={i} className={`icon star ${i <= (game.rating || 0) ? 'icon-fill' : ''}`}>star</span>
             ))}
           </div>
         </div>

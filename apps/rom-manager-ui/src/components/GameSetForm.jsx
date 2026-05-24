@@ -31,7 +31,7 @@ export default function GameSetForm({ platforms, editTarget, onSave, onClose }) 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-content form-modal" onClick={e => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}>✕</button>
+        <button className="modal-close" onClick={onClose}><span className="icon">close</span></button>
         <h2 className="form-title">{isEdit ? 'Edit Game Set' : 'New Game Set'}</h2>
         <form onSubmit={handleSubmit} className="collection-form">
           <div className="form-group">

@@ -78,7 +78,7 @@ export default function GameBrowser({
       <div className="browser-header">
         <div className="browser-title-row">
           {showBackToDetail && (
-            <button className="back-btn" onClick={onBackToDetail} title="Back to Collection">←</button>
+            <button className="back-btn" onClick={onBackToDetail} title="Back to Collection"><span className="icon">arrow_back</span></button>
           )}
           <h1 className="browser-title">{title}</h1>
           <span className="browser-count">{totalGames} games</span>
@@ -92,9 +92,9 @@ export default function GameBrowser({
         <div className="browser-toolbar">
           <div className="toolbar-left">
             <div className="view-mode-toggle">
-              <button className={`view-btn ${isList ? 'active' : ''}`} onClick={() => handleViewChange('list')} title="List">☰</button>
-              <button className={`view-btn ${isGrid ? 'active' : ''}`} onClick={() => handleViewChange('grid')} title="Grid">⊞</button>
-              <button className={`view-btn ${isLarge ? 'active' : ''}`} onClick={() => handleViewChange('large')} title="Large Icons">⊟</button>
+              <button className={`view-btn ${isList ? 'active' : ''}`} onClick={() => handleViewChange('list')} title="List"><span className="icon">view_headline</span></button>
+              <button className={`view-btn ${isGrid ? 'active' : ''}`} onClick={() => handleViewChange('grid')} title="Grid"><span className="icon">grid_view</span></button>
+              <button className={`view-btn ${isLarge ? 'active' : ''}`} onClick={() => handleViewChange('large')} title="Large Icons"><span className="icon">view_module</span></button>
             </div>
 
             <div className="sort-controls">
@@ -106,7 +106,7 @@ export default function GameBrowser({
                   onClick={() => handleSortToggle(opt.field)}
                 >
                   {opt.label}
-                  {sortField === opt.field && <span className="sort-arrow">{sortOrder === 'asc' ? ' ↑' : ' ↓'}</span>}
+                  {sortField === opt.field && <span className="icon icon-xs sort-arrow">{sortOrder === 'asc' ? 'arrow_upward' : 'arrow_downward'}</span>}
                 </button>
               ))}
             </div>
@@ -131,7 +131,7 @@ export default function GameBrowser({
           <div className="loading-screen"><div className="loading-spinner" /></div>
         ) : games.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-icon">📭</div>
+            <div className="empty-icon"><span className="icon icon-xl">inbox</span></div>
             <h2>No games found</h2>
             {activeView === 'collection' && <p>Import a DAT file to populate this collection, or add games manually.</p>}
             {activeView === 'game-set' && <p>Add games from a collection or search to start building your set.</p>}

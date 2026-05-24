@@ -80,8 +80,8 @@ fn print_usage() {
     eprintln!("  detail <game-id> [--source <s>] Get full game details by ID");
     eprintln!();
     eprintln!("OPTIONS:");
-    eprintln!("  --source <s>       Provider: screenscraper, igdb, thegamesdb");
-    eprintln!("                     (default: env SCRAPER_SOURCE, or all providers)");
+    eprintln!("  --source <s>       Provider: screenscraper (default), igdb, thegamesdb");
+    eprintln!("                     (default: screenscraper, or SCRAPER_SOURCE env var)");
     eprintln!("  --platform <p>     Platform filter (e.g., nes, snes, arcade)");
     eprintln!();
     eprintln!("ENVIRONMENT:");
@@ -381,12 +381,16 @@ fn parse_source(args: &[String]) -> Option<rom_scraper::ScrapeSource> {
             }
         };
     }
-    std::env::var("SCRAPER_SOURCE").ok().as_deref().and_then(|val| match val {
-        "screenscraper" => Some(rom_scraper::ScrapeSource::ScreenScraper),
-        "igdb" => Some(rom_scraper::ScrapeSource::Igdb),
-        "thegamesdb" => Some(rom_scraper::ScrapeSource::TheGamesDb),
-        _ => None,
-    })
+    let from_env = std::env::var("SCRAPER_SOURCE").ok();
+    if let Some(val) = from_env.as_deref() {
+        return match val {
+            "screenscraper" => Some(rom_scraper::ScrapeSource::ScreenScraper),
+            "igdb" => Some(rom_scraper::ScrapeSource::Igdb),
+            "thegamesdb" => Some(rom_scraper::ScrapeSource::TheGamesDb),
+            _ => None,
+        };
+    }
+    Some(rom_scraper::ScrapeSource::ScreenScraper)
 }
 
 fn truncate(s: &str, max: usize) -> String {

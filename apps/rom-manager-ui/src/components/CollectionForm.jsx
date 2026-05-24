@@ -119,7 +119,7 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-content form-modal" onClick={e => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}>✕</button>
+        <button className="modal-close" onClick={onClose}><span className="icon">close</span></button>
         <h2 className="form-title">{isEdit ? 'Edit Collection' : 'New Collection'}</h2>
         <form onSubmit={handleSubmit} className="collection-form">
           <div className="form-group">
@@ -153,21 +153,21 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
               <label className={`dataset-mode ${datasetMode === 'manual' ? 'active' : ''}`}>
                 <input type="radio" name="datasetMode" value="manual" checked={datasetMode === 'manual'}
                   onChange={() => setDatasetMode('manual')} />
-                <span className="mode-icon">📂</span>
+                <span className="icon mode-icon">folder_open</span>
                 <span className="mode-label">Manual</span>
                 <span className="mode-desc">No hash checking, just browse ROMs</span>
               </label>
               <label className={`dataset-mode ${datasetMode === 'preset' ? 'active' : ''}`}>
                 <input type="radio" name="datasetMode" value="preset" checked={datasetMode === 'preset'}
                   onChange={() => setDatasetMode('preset')} />
-                <span className="mode-icon">📦</span>
+                <span className="icon mode-icon">inventory_2</span>
                 <span className="mode-label">Preset Dataset</span>
                 <span className="mode-desc">MAME, FinalBurn, No-Intro, etc.</span>
               </label>
               <label className={`dataset-mode ${datasetMode === 'upload' ? 'active' : ''}`}>
                 <input type="radio" name="datasetMode" value="upload" checked={datasetMode === 'upload'}
                   onChange={() => setDatasetMode('upload')} />
-                <span className="mode-icon">📄</span>
+                <span className="icon mode-icon">description</span>
                 <span className="mode-label">Upload DAT</span>
                 <span className="mode-desc">Import your own .dat file</span>
               </label>

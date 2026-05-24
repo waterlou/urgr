@@ -245,7 +245,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
                       onClick={() => handleImportOnline(d.numeric)}
                       disabled={importingVer === d.numeric}
                     >
-                      {importingVer === d.numeric ? '⏳' : '+'} {d.numeric} <span className="tag-date">{d.date}</span>
+                      <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:2}}>{importingVer === d.numeric ? 'hourglass' : 'add'}</span> {d.numeric} <span className="tag-date">{d.date}</span>
                     </button>
                   ))}
                   {availableDats.missing.length > 10 && <span className="tag">+{availableDats.missing.length - 10} more</span>}
@@ -383,7 +383,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
                             Mark Complete
                           </button>
                         )}
-                        {build.status === 'complete' && <span className="text-muted">✓ Built</span>}
+                        {build.status === 'complete' && <span className="text-muted"><span className="icon icon-sm" style={{verticalAlign:'middle'}}>check</span> Built</span>}
                       </td>
                     </tr>
                   ))}
@@ -406,7 +406,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
                   const disabled = existing && existing.status === 'complete'
                   return (
                     <option key={v.id} value={v.id} disabled={disabled}>
-                      {v.source} — {v.version} ({v.total_games} games) {disabled ? '✓' : existing ? `(${existing.status})` : ''}
+                      {v.source} — {v.version} ({v.total_games} games) {disabled ? <span className="icon icon-xs" style={{verticalAlign:'middle'}}>check</span> : existing ? `(${existing.status})` : ''}
                     </option>
                   )
                 })}
