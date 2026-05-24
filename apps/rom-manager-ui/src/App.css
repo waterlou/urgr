@@ -1528,6 +1528,29 @@ html, body, #root {
   margin-left: 2px;
 }
 
+.settings-test-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.settings-test-result {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+.settings-test-result .icon {
+  font-size: 18px;
+}
+.settings-test-result.success {
+  color: var(--success, #4caf50);
+}
+.settings-test-result.error {
+  color: var(--error, #e53935);
+}
+
 .settings-input {
   width: 100%;
   padding: 10px 12px;

@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::client::HttpClient;
 use crate::config::Config;
@@ -9,7 +10,7 @@ use crate::models::{
 };
 use crate::sources::GameScraper;
 
-const API_BASE: &str = "https://api.thegamesdb.net/v1.3";
+const API_BASE: &str = "https://api.thegamesdb.net/v1";
 
 pub struct TheGamesDb {
     client: HttpClient,
@@ -62,20 +63,6 @@ struct TgdbGameDetail {
     players: Option<String>,
 }
 
-#[derive(Deserialize)]
-struct BoxartData {
-    boxart: Option<Vec<TgdbBoxart>>,
-}
-
-#[derive(Deserialize, Debug)]
-struct TgdbBoxart {
-    filename: String,
-    #[serde(default)]
-    side: Option<String>,
-    #[serde(default)]
-    thumb: Option<String>,
-}
-
 impl TheGamesDb {
     pub fn new(config: &Config) -> Self {
         let tg = config.thegamesdb.as_ref().expect("TheGamesDB config");
@@ -111,17 +98,43 @@ impl TheGamesDb {
             .map_err(|e| Error::Source(format!("TheGamesDB API error: {}", e)))
     }
 
-    fn images_base() -> &'static str {
-        "https://cdn.thegamesdb.net/images"
+    async fn fetch_boxart(&self, game_id: &str) -> Media {
+        let mut media = Media::default();
+        let url = self.build_url("Games/ByGameID", &[("id", game_id), ("include", "boxart")]);
+        if let Ok(text) = self.client.get_text(&url).await {
+            if let Ok(val) = serde_json::from_str::<Value>(&text) {
+                let pointer = format!("/include/boxart/data/{}", game_id);
+                if let Some(arr) = val.pointer(&pointer).and_then(|v| v.as_array()) {
+                    for b in arr {
+                        let side = b.get("side").and_then(|s| s.as_str());
+                        let filename = b.get("filename").and_then(|f| f.as_str()).unwrap_or("");
+                        let kind = match side {
+                            Some("front") => MediaType::Cover2D,
+                            Some("back") => MediaType::Cover3D,
+                            Some("screenshot") => MediaType::Screenshot,
+                            Some("fanart") => MediaType::Fanart,
+                            Some("banner") => MediaType::Marquee,
+                            Some("clearlogo") => MediaType::Logo,
+                            _ => MediaType::Other("unknown".into()),
+                        };
+                        let thumb = b.get("thumb").and_then(|t| t.as_str());
+                        let url = if let Some(t) = thumb {
+                            format!("{}/{}", Self::images_base(), t)
+                        } else {
+                            format!("{}/{}", Self::images_base(), filename)
+                        };
+                        media.covers.push(MediaItem { url, kind });
+                    }
+                }
+            }
+        }
+        media
     }
 
-    fn boxart_url(filename: &str, thumb: &Option<String>) -> String {
-        if let Some(t) = thumb {
-            format!("{}/{}", Self::images_base(), t)
-        } else {
-            format!("{}/{}", Self::images_base(), filename)
-        }
+    fn images_base() -> &'static str {
+        "https://cdn.thegamesdb.net/images/original"
     }
+
 }
 
 #[async_trait]
@@ -155,31 +168,7 @@ impl GameScraper for TheGamesDb {
 
         let mut results = Vec::new();
         for g in &games {
-            let mut media = Media::default();
-
-            // fetch boxart for this game
-            if let Ok(box_resp) = self.get_json::<BoxartData>(
-                "Games/ByGameID",
-                &[("id", &g.id.to_string()), ("include", "boxart")],
-            ).await {
-                if let Some(boxart) = box_resp.data.and_then(|d| d.boxart) {
-                    for b in &boxart {
-                        let kind = match b.side.as_deref() {
-                            Some("front") => MediaType::Cover2D,
-                            Some("back") => MediaType::Cover3D,
-                            Some("screenshot") => MediaType::Screenshot,
-                            Some("fanart") => MediaType::Fanart,
-                            Some("banner") => MediaType::Marquee,
-                            Some("clearlogo") => MediaType::Logo,
-                            _ => MediaType::Other("unknown".into()),
-                        };
-                        media.covers.push(MediaItem {
-                            url: Self::boxart_url(&b.filename, &b.thumb),
-                            kind,
-                        });
-                    }
-                }
-            }
+            let media = self.fetch_boxart(&g.id.to_string()).await;
 
             results.push(Game {
                 id: g.id.to_string(),
@@ -226,29 +215,7 @@ impl GameScraper for TheGamesDb {
             .and_then(|mut g| g.pop())
             .ok_or_else(|| Error::Source(format!("TheGamesDB game not found: {}", game_id)))?;
 
-        let mut media = Media::default();
-        if let Ok(box_resp) = self.get_json::<BoxartData>(
-            "Games/ByGameID",
-            &[("id", game_id), ("include", "boxart")],
-        ).await {
-            if let Some(boxart) = box_resp.data.and_then(|d| d.boxart) {
-                for b in &boxart {
-                    let kind = match b.side.as_deref() {
-                        Some("front") => MediaType::Cover2D,
-                        Some("back") => MediaType::Cover3D,
-                        Some("screenshot") => MediaType::Screenshot,
-                        Some("fanart") => MediaType::Fanart,
-                        Some("banner") => MediaType::Marquee,
-                        Some("clearlogo") => MediaType::Logo,
-                        _ => MediaType::Other("unknown".into()),
-                    };
-                    media.covers.push(MediaItem {
-                        url: Self::boxart_url(&b.filename, &b.thumb),
-                        kind,
-                    });
-                }
-            }
-        }
+        let media = self.fetch_boxart(game_id).await;
 
         let players = g.players.as_ref()
             .and_then(|p| p.trim().parse::<u8>().ok());

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getSettings, saveSettings } from '../api.js'
+import { getSettings, saveSettings, testIgdbConnection, testTgdbConnection } from '../api.js'
 
 const PROVIDER_TABS = [
   {
@@ -19,28 +19,36 @@ const PROVIDER_TABS = [
       { key: 'IGDB_CLIENT_ID', label: 'Client ID', type: 'text', required: true },
       { key: 'IGDB_CLIENT_SECRET', label: 'Client Secret', type: 'password', required: true },
     ],
+    instructions: (
+      <p className="settings-hint">
+        Get your credentials from the{' '}
+        <a href="https://dev.twitch.tv/console/apps" target="_blank" rel="noopener noreferrer">Twitch Developer Portal</a>.
+        Create an app, then copy the <strong>Client ID</strong> and generate a <strong>Client Secret</strong>.
+      </p>
+    ),
   },
   {
     id: 'thegamesdb',
     label: 'TheGamesDB',
     fields: [
-      { key: 'TGDB_API_KEY', label: 'API Key', type: 'password', required: true },
+      { key: 'TGDB_API_KEY', label: 'API Key', type: 'password', placeholder: 'Default key active — enter to override' },
     ],
   },
 ]
 
 const SOURCE_OPTIONS = [
   { value: '', label: 'All providers (no default)' },
+  { value: 'thegamesdb', label: 'TheGamesDB' },
   { value: 'screenscraper', label: 'ScreenScraper' },
   { value: 'igdb', label: 'IGDB' },
-  { value: 'thegamesdb', label: 'TheGamesDB' },
 ]
 
 export default function Settings({ onClose }) {
-  const [values, setValues] = useState({ SCRAPER_SOURCE: 'screenscraper' })
+  const [values, setValues] = useState({ SCRAPER_SOURCE: 'thegamesdb' })
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState(null)
   const [activeTab, setActiveTab] = useState('screenscraper')
+  const [testResults, setTestResults] = useState({})
 
   useEffect(() => {
     getSettings().then(data => {
@@ -55,12 +63,27 @@ export default function Settings({ onClose }) {
     setValues(prev => ({ ...prev, [key]: val }))
   }
 
+  async function handleTest() {
+    setTestResults(prev => ({ ...prev, [activeTab]: { testing: true } }))
+    try {
+      let result
+      if (activeTab === 'igdb') {
+        result = await testIgdbConnection(values.IGDB_CLIENT_ID, values.IGDB_CLIENT_SECRET)
+      } else if (activeTab === 'thegamesdb') {
+        result = await testTgdbConnection(values.TGDB_API_KEY)
+      }
+      setTestResults(prev => ({ ...prev, [activeTab]: { ok: result.ok, error: result.error || null } }))
+    } catch (e) {
+      setTestResults(prev => ({ ...prev, [activeTab]: { ok: false, error: e.message } }))
+    }
+  }
+
   async function handleSave() {
     setSaving(true)
     setMessage(null)
     try {
       await saveSettings(values)
-      setMessage({ type: 'success', text: 'Settings saved. Restart scraper-cli for changes to take effect.' })
+      setMessage({ type: 'success', text: 'Settings saved.' })
     } catch (e) {
       setMessage({ type: 'error', text: 'Failed to save: ' + e.message })
     } finally {
@@ -69,6 +92,7 @@ export default function Settings({ onClose }) {
   }
 
   const activeProvider = PROVIDER_TABS.find(t => t.id === activeTab)
+  const testResult = testResults[activeTab]
 
   return (
     <div className="settings-overlay" onClick={onClose}>
@@ -83,7 +107,7 @@ export default function Settings({ onClose }) {
             <button
               key={tab.id}
               className={`settings-tab ${activeTab === tab.id ? 'active' : ''}`}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => { setActiveTab(tab.id); setTestResults(prev => ({ ...prev, [tab.id]: undefined })) }}
             >
               {tab.label}
             </button>
@@ -93,6 +117,7 @@ export default function Settings({ onClose }) {
         <div className="settings-body">
           {activeProvider && (
             <div className="settings-provider-fields">
+              {activeProvider.instructions}
               {activeProvider.fields.map(field => (
                 <label key={field.key} className="settings-field">
                   <span className="settings-field-label">
@@ -103,11 +128,23 @@ export default function Settings({ onClose }) {
                     type={field.type}
                     value={values[field.key] || ''}
                     onChange={e => setValue(field.key, e.target.value)}
-                    placeholder={field.required ? `Enter ${field.label}` : `Optional: ${field.label}`}
+                    placeholder={field.placeholder || (field.required ? `Enter ${field.label}` : `Optional: ${field.label}`)}
                     className="settings-input"
                   />
                 </label>
               ))}
+              {(activeTab === 'igdb' || activeTab === 'thegamesdb') && (
+                <div className="settings-test-row">
+                  <button className="settings-btn settings-btn-secondary" onClick={handleTest} disabled={testResult?.testing}>
+                    {testResult?.testing ? 'Testing...' : 'Test Connection'}
+                  </button>
+                  {testResult && !testResult.testing && (
+                    <span className={`settings-test-result ${testResult.ok ? 'success' : 'error'}`}>
+                      {testResult.ok ? <><span className="icon">check_circle</span> Connected</> : <><span className="icon">error</span> {testResult.error}</>}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

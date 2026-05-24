@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use rom_scraper::{compute_hashes, parse_filename, Config, ScraperRegistry};
+use rom_scraper::{compute_hashes, parse_filename, Config, HttpClient, ScraperRegistry};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -16,6 +16,12 @@ struct HashOutput {
 }
 
 #[derive(Serialize)]
+struct ScrapeOutput {
+    hashes: HashOutput,
+    matched: Option<ScrapeMatch>,
+}
+
+#[derive(Serialize)]
 struct SearchResult {
     id: String,
     title: String,
@@ -24,20 +30,23 @@ struct SearchResult {
 }
 
 #[derive(Serialize)]
-struct ScrapeOutput {
-    hashes: HashOutput,
-    matched: Option<ScrapeMatch>,
-    filename_fallback: Option<SearchResult>,
-}
-
-#[derive(Serialize)]
 struct ScrapeMatch {
+    id: String,
     title: String,
     platform: String,
+    platform_short: String,
     description: String,
     publisher: Option<String>,
-    covers: usize,
-    screenshots: usize,
+    developer: Option<String>,
+    release_date: Option<String>,
+    players: Option<u8>,
+    genres: Vec<String>,
+    rating: Option<f32>,
+    covers: Vec<String>,
+    screenshots: Vec<String>,
+    roms: Vec<RomEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    downloaded: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -67,6 +76,72 @@ fn print_json<T: Serialize>(value: &T) {
     println!("{}", serde_json::to_string_pretty(value).unwrap());
 }
 
+fn game_to_match(game: &rom_scraper::Game) -> ScrapeMatch {
+    ScrapeMatch {
+        id: game.id.clone(),
+        title: game.title.clone(),
+        platform: game.platform.name.clone(),
+        platform_short: game.platform.short_name.clone(),
+        description: game.description.clone(),
+        publisher: game.publisher.clone(),
+        developer: game.developer.clone(),
+        release_date: game.release_date.clone(),
+        players: game.players,
+        genres: game.genres.clone(),
+        rating: game.rating,
+        covers: game.media.covers.iter().map(|m| m.url.clone()).collect(),
+        screenshots: game.media.screenshots.iter().map(|m| m.url.clone()).collect(),
+        roms: game.roms.iter().map(|r| RomEntry {
+            filename: r.filename.clone(),
+            crc: r.crc32.clone(),
+        }).collect(),
+        downloaded: None,
+    }
+}
+
+fn slugify(s: &str) -> String {
+    s.to_lowercase().chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect::<String>()
+        .trim_matches('_')
+        .chars()
+        .take(64)
+        .collect()
+}
+
+async fn download_media(urls: &[String], platform: &str, release_date: &Option<String>, title: &str, client: &HttpClient) -> Vec<String> {
+    fn normalize_url(u: &str) -> String {
+        if u.starts_with("//") {
+            format!("https:{}", u)
+        } else {
+            u.to_string()
+        }
+    }
+    let platform_slug = if platform.is_empty() { "unknown" } else { platform };
+    let year = release_date.as_ref().and_then(|d| d.get(..4)).unwrap_or("0000");
+    let dir_name = format!("{}-{}-{}", slugify(platform_slug), year, slugify(title));
+    let base = std::path::Path::new("data").join("media").join(&dir_name);
+    std::fs::create_dir_all(&base).ok();
+    let mut local_paths = Vec::new();
+    for url in urls {
+        let normalized = normalize_url(url);
+        let filename = normalized.rsplit('/').next().unwrap_or("unknown");
+        let dest = base.join(filename);
+        if dest.exists() {
+            local_paths.push(dest.to_string_lossy().to_string());
+            continue;
+        }
+        match client.get_bytes(&normalized).await {
+            Ok(bytes) => {
+                std::fs::write(&dest, &bytes).ok();
+                local_paths.push(dest.to_string_lossy().to_string());
+            }
+            Err(e) => eprintln!("Download failed for {}: {}", normalized, e),
+        }
+    }
+    local_paths
+}
+
 fn print_usage() {
     eprintln!("scraper-cli  —  Scrape retro game metadata from multiple providers");
     eprintln!();
@@ -76,13 +151,14 @@ fn print_usage() {
     eprintln!("COMMANDS:");
     eprintln!("  hash <file>                    Compute ROM hashes (CRC32, MD5, SHA1)");
     eprintln!("  search <query> [--source <s>]  Search games by name");
-    eprintln!("  scrape <file>                  Match a ROM file via hash + filename");
+    eprintln!("  scrape <file> [--download] [--source <s>]   Match a ROM file and optionally download media");
     eprintln!("  detail <game-id> [--source <s>] Get full game details by ID");
     eprintln!();
     eprintln!("OPTIONS:");
-    eprintln!("  --source <s>       Provider: screenscraper (default), igdb, thegamesdb");
-    eprintln!("                     (default: screenscraper, or SCRAPER_SOURCE env var)");
+    eprintln!("  --source <s>       Provider: thegamesdb (default), screenscraper, igdb");
+    eprintln!("                     (default: thegamesdb, or SCRAPER_SOURCE env var)");
     eprintln!("  --platform <p>     Platform filter (e.g., nes, snes, arcade)");
+    eprintln!("  --download         Download cover/screenshot media to data/media/<game-id>/");
     eprintln!();
     eprintln!("ENVIRONMENT:");
     eprintln!("  All providers need credentials. May be set in .env or as env vars.");
@@ -100,7 +176,7 @@ fn print_usage() {
     eprintln!("    IGDB_CLIENT_SECRET   Twitch Client Secret (required)");
     eprintln!();
     eprintln!("  TheGamesDB:");
-    eprintln!("    TGDB_API_KEY         API key from thegamesdb.net (required)");
+    eprintln!("    TGDB_API_KEY         API key from thegamesdb.net (optional - built-in key active by default)");
     eprintln!();
     eprintln!("EXAMPLES:");
     eprintln!("  scraper-cli search \"Super Mario\"");
@@ -113,6 +189,7 @@ fn print_usage() {
 #[tokio::main]
 async fn main() -> ExitCode {
     dotenvy::dotenv().ok();
+    let _ = dotenvy::from_path("data/.env");
 
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -223,7 +300,7 @@ async fn cmd_search(args: &[String]) -> ExitCode {
 
 async fn cmd_scrape(args: &[String]) -> ExitCode {
     if args.len() < 2 {
-        eprintln!("Usage: scraper-cli scrape <file>");
+        eprintln!("Usage: scraper-cli scrape <file> [--download] [--source <s>]");
         return ExitCode::FAILURE;
     }
     let path = PathBuf::from(&args[1]);
@@ -231,6 +308,8 @@ async fn cmd_scrape(args: &[String]) -> ExitCode {
         eprintln!("File not found: {}", path.display());
         return ExitCode::FAILURE;
     }
+    let download = args.iter().any(|a| a == "--download");
+    let source = parse_source(args);
     let config = build_config();
     let registry = ScraperRegistry::new(&config);
 
@@ -242,60 +321,69 @@ async fn cmd_scrape(args: &[String]) -> ExitCode {
         }
     };
 
+    let filename = path.file_name().map(|n| n.to_string_lossy().to_string());
+    let (parsed_title, parsed_region) = filename.as_deref()
+        .and_then(|n| parse_filename(n))
+        .map(|p| (Some(p.title), p.region))
+        .unwrap_or((None, None));
+
     let hash_out = HashOutput {
         crc32: hashes.crc32.clone(),
         md5: hashes.md5.clone(),
         sha1: hashes.sha1.clone(),
         size: hashes.size,
-        filename: path.file_name().map(|n| n.to_string_lossy().to_string()),
-        parsed_title: None,
-        parsed_region: None,
+        filename: filename.clone(),
+        parsed_title: parsed_title.clone(),
+        parsed_region,
     };
 
-    match registry.search_by_hashes(&hashes, None).await {
-        Ok(Some(game)) => {
-            print_json(&ScrapeOutput {
-                hashes: hash_out,
-                matched: Some(ScrapeMatch {
-                    title: game.title,
-                    platform: game.platform.name,
-                    description: game.description,
-                    publisher: game.publisher,
-                    covers: game.media.covers.len(),
-                    screenshots: game.media.screenshots.len(),
-                }),
-                filename_fallback: None,
-            });
-            ExitCode::SUCCESS
-        }
-        Ok(None) => {
-            let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            let (title, _) = parse_filename(filename)
-                .map(|p| (p.title.clone(), p.title))
-                .unwrap_or_default();
-            let fb_result = if !title.is_empty() {
-                if let Ok(games) = registry.search_by_name(&title, None).await {
-                    games.first().map(|g| SearchResult {
-                        id: g.id.clone(),
-                        title: g.title.clone(),
-                        platform: g.platform.short_name.clone(),
-                        release_date: g.release_date.clone(),
-                    })
-                } else { None }
-            } else { None };
+    let mut matched = None;
 
-            print_json(&ScrapeOutput {
-                hashes: hash_out,
-                matched: None,
-                filename_fallback: fb_result,
-            });
-            ExitCode::SUCCESS
+    match source {
+        Some(ref src) => {
+            if let Ok(Some(game)) = registry.search_by_hashes_from_source(&hashes, src, None).await {
+                matched = Some(game_to_match(&game));
+            }
+            if matched.is_none() {
+                if let Some(ref title) = parsed_title {
+                    if let Ok(games) = registry.search_by_name_from_source(title, src, None).await {
+                        if let Some(game) = games.into_iter().next() {
+                            matched = Some(game_to_match(&game));
+                        }
+                    }
+                }
+            }
         }
-        Err(e) => {
-            eprintln!("Scrape error: {}", e);
-            ExitCode::FAILURE
+        None => {
+            if let Ok(Some(game)) = registry.search_by_hashes(&hashes, None).await {
+                matched = Some(game_to_match(&game));
+            }
+            if matched.is_none() {
+                if let Some(ref title) = parsed_title {
+                    if let Ok(games) = registry.search_by_name(title, None).await {
+                        if let Some(game) = games.into_iter().next() {
+                            matched = Some(game_to_match(&game));
+                        }
+                    }
+                }
+            }
         }
     }
+
+    if download {
+        if let Some(ref mut m) = matched {
+            let client = HttpClient::new();
+            let mut all = Vec::new();
+            all.extend(download_media(&m.covers, &m.platform, &m.release_date, &m.title, &client).await);
+            all.extend(download_media(&m.screenshots, &m.platform, &m.release_date, &m.title, &client).await);
+            if !all.is_empty() {
+                m.downloaded = Some(all);
+            }
+        }
+    }
+
+    print_json(&ScrapeOutput { hashes: hash_out, matched });
+    ExitCode::SUCCESS
 }
 
 async fn cmd_detail(args: &[String]) -> ExitCode {
@@ -304,7 +392,7 @@ async fn cmd_detail(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     }
     let game_id = &args[1];
-    let source = parse_source(args).unwrap_or(rom_scraper::ScrapeSource::ScreenScraper);
+    let source = parse_source(args).unwrap_or(rom_scraper::ScrapeSource::TheGamesDb);
 
     let config = build_config();
     let registry = ScraperRegistry::new(&config);
@@ -361,8 +449,10 @@ fn build_config() -> Config {
         config = config.with_igdb(id, secret);
     }
 
-    if let Some(key) = std::env::var("TGDB_API_KEY").ok().as_ref() {
-        config = config.with_thegamesdb(key);
+    if let Ok(key) = std::env::var("TGDB_API_KEY") {
+        if !key.is_empty() {
+            config = config.with_thegamesdb(&key);
+        }
     }
 
     config
@@ -390,7 +480,7 @@ fn parse_source(args: &[String]) -> Option<rom_scraper::ScrapeSource> {
             _ => None,
         };
     }
-    Some(rom_scraper::ScrapeSource::ScreenScraper)
+    Some(rom_scraper::ScrapeSource::TheGamesDb)
 }
 
 fn truncate(s: &str, max: usize) -> String {

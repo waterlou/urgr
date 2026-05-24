@@ -132,11 +132,12 @@ impl Igdb {
     async fn ensure_token(&self) -> Result<&str> {
         self.access_token
             .get_or_try_init(|| async {
-                let url = format!(
-                    "{}?client_id={}&client_secret={}&grant_type=client_credentials",
-                    TOKEN_URL, self.client_id, self.client_secret
-                );
-                let resp: TokenResponse = self.client.get_json(&url).await.map_err(|e| {
+                let params: &[(&str, &str)] = &[
+                    ("client_id", self.client_id.as_str()),
+                    ("client_secret", self.client_secret.as_str()),
+                    ("grant_type", "client_credentials"),
+                ];
+                let resp: TokenResponse = self.client.post_form_json(TOKEN_URL, params).await.map_err(|e| {
                     Error::Source(format!("IGDB auth failed: {}", e))
                 })?;
                 Ok::<_, Error>(resp.access_token)

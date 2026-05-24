@@ -2,12 +2,16 @@ const BASE = '/api';
 
 export async function fetchJson(url, opts) {
   const res = await fetch(BASE + url, opts);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const text = await res.text();
+  const body = await res.text();
+  if (!res.ok) {
+    let detail = '';
+    try { detail = JSON.parse(body).error || body; } catch { detail = body.slice(0, 200); }
+    throw new Error(`HTTP ${res.status}${detail ? ': ' + detail : ''}`);
+  }
   try {
-    return JSON.parse(text);
+    return JSON.parse(body);
   } catch (e) {
-    console.error(`fetchJson parse error for ${url}:`, text.slice(0, 200));
+    console.error(`fetchJson parse error for ${url}:`, body.slice(0, 200));
     throw new Error(`Response is not JSON: ${e.message}`);
   }
 }
@@ -150,6 +154,16 @@ export function scraperScrape(file, game_name, platform) {
 }
 export function hashFile(file) {
   return fetchWithBody('/scraper/hash', 'POST', { file });
+}
+
+// ==============================
+// Settings
+// ==============================
+export function testIgdbConnection(client_id, client_secret) {
+  return fetchWithBody('/settings/test-igdb', 'POST', { client_id, client_secret });
+}
+export function testTgdbConnection(api_key) {
+  return fetchWithBody('/settings/test-tgdb', 'POST', { api_key });
 }
 
 // ==============================

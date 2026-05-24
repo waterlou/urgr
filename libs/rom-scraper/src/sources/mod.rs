@@ -128,6 +128,40 @@ impl ScraperRegistry {
         Ok(None)
     }
 
+    pub async fn search_by_hashes_from_source(
+        &self,
+        hashes: &RomHashes,
+        source: &ScrapeSource,
+        platform: Option<&str>,
+    ) -> Result<Option<Game>> {
+        let hash_entries: [(HashType, &str); 3] = [
+            (HashType::Sha1, &hashes.sha1),
+            (HashType::Md5, &hashes.md5),
+            (HashType::Crc32, &hashes.crc32),
+        ];
+        for (hash_type, hash_value) in &hash_entries {
+            for scraper in &self.scrapers {
+                if &scraper.source_type() != source {
+                    continue;
+                }
+                match scraper.search_by_hash(hash_value, *hash_type, platform).await {
+                    Ok(games) if !games.is_empty() => return Ok(Some(games[0].clone())),
+                    Ok(_) => continue,
+                    Err(e) => {
+                        tracing::debug!(
+                            "Scraper {} {} lookup failed: {}",
+                            scraper.name(),
+                            hash_type,
+                            e
+                        );
+                        continue;
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
     pub async fn search_by_name_from_source(
         &self,
         query: &str,

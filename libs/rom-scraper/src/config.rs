@@ -23,6 +23,8 @@ pub struct IgdbConfig {
     pub client_secret: String,
 }
 
+pub const DEFAULT_TGDB_API_KEY: &str = "e96eddebbe2ead66d6e80a996d9a2e4958964d8363b59de15dc5f282c3a23aae";
+
 #[derive(Debug, Clone)]
 pub struct TheGamesDbConfig {
     pub api_key: String,
@@ -39,12 +41,14 @@ impl Default for Config {
         Self {
             screenscraper: None,
             igdb: None,
-            thegamesdb: None,
+            thegamesdb: Some(TheGamesDbConfig {
+                api_key: DEFAULT_TGDB_API_KEY.to_string(),
+            }),
             cache_dir: None,
             source_priority: vec![
-                SourceEntry { source: ScrapeSource::ScreenScraper, priority: 100 },
-                SourceEntry { source: ScrapeSource::Igdb, priority: 200 },
-                SourceEntry { source: ScrapeSource::TheGamesDb, priority: 300 },
+                SourceEntry { source: ScrapeSource::TheGamesDb, priority: 100 },
+                SourceEntry { source: ScrapeSource::ScreenScraper, priority: 200 },
+                SourceEntry { source: ScrapeSource::Igdb, priority: 300 },
             ],
         }
     }
@@ -134,10 +138,11 @@ mod tests {
     }
 
     #[test]
-    fn test_config_default_no_sources() {
+    fn test_config_default_has_thegamesdb() {
         let cfg = Config::default();
         assert!(cfg.screenscraper.is_none());
         assert!(cfg.igdb.is_none());
-        assert!(cfg.thegamesdb.is_none());
+        assert!(cfg.thegamesdb.is_some());
+        assert_eq!(cfg.thegamesdb.unwrap().api_key, DEFAULT_TGDB_API_KEY);
     }
 }

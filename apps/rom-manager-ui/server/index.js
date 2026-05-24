@@ -864,6 +864,63 @@ app.put('/api/settings', async (req, res) => {
   }
 });
 
+app.post('/api/settings/test-tgdb', async (req, res) => {
+  try {
+    const { api_key } = req.body;
+    if (!api_key) {
+      return res.status(400).json({ error: 'api_key is required' });
+    }
+    const testRes = await fetch(`https://api.thegamesdb.net/v1/Platforms?apikey=${api_key}`);
+    const data = await testRes.json();
+    if (data.code === 200) {
+      res.json({ ok: true });
+    } else {
+      res.json({ ok: false, error: data.status || 'Invalid API key' });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/settings/test-igdb', async (req, res) => {
+  try {
+    const { client_id, client_secret } = req.body;
+    if (!client_id || !client_secret) {
+      return res.status(400).json({ error: 'client_id and client_secret are required' });
+    }
+    const params = new URLSearchParams({
+      client_id,
+      client_secret,
+      grant_type: 'client_credentials',
+    });
+    const tokenRes = await fetch('https://id.twitch.tv/oauth2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params,
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok || !tokenData.access_token) {
+      return res.json({ ok: false, error: tokenData.message || tokenData.error || 'Authentication failed' });
+    }
+    const testRes = await fetch('https://api.igdb.com/v4/games', {
+      method: 'POST',
+      headers: {
+        'Client-ID': client_id,
+        'Authorization': `Bearer ${tokenData.access_token}`,
+        'Content-Type': 'text/plain',
+      },
+      body: 'fields name; limit 1;',
+    });
+    if (!testRes.ok) {
+      const text = await testRes.text();
+      return res.json({ ok: false, error: `API test failed (HTTP ${testRes.status}): ${text.slice(0, 200)}` });
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // =============================================================================
 // Static files + SPA fallback
 // =============================================================================
