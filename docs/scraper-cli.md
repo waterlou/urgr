@@ -42,6 +42,33 @@ Credentials may be set in `.env` (CWD) or `data/.env`. The server **Settings UI*
 | **IGDB (Twitch)** | ✅ | ✅ | ✅ | ✅ | Needs `IGDB_CLIENT_ID` + `IGDB_CLIENT_SECRET` in `.env` |
 | **ScreenScraper** | ❌ | ❌ | ❌ | ❌ | Not tested — needs `SS_DEVID` + `SS_DEVPASSWORD` |
 
+## scrape Flow
+
+1. Compute ROM hashes (CRC32, MD5, SHA1)
+2. Parse filename (title, region) — uses `rom-scraper::parse_filename()`
+3. Try hash-based lookup against the provider
+4. Fall back to filename-based search
+5. **Enrich:** call `get_game_detail()` for full metadata (description, genres, screenshots, etc.)
+6. If `--download`: download cover and screenshot images
+
+## scrape Output Fields
+
+| Field | TGDB | IGDB |
+|-------|------|------|
+| `id` | ✅ Numeric ID | ✅ Numeric ID |
+| `title` | ✅ | ✅ |
+| `platform` | ✅ Platform name (e.g. "Super Nintendo (SNES)") | ✅ Platform name (e.g. "Game Boy Advance") |
+| `platform_short` | ✅ Alias (e.g. "super-nintendo-snes") | ✅ Abbreviation (e.g. "GBA"), empty if same as name |
+| `description` | ⬜ Empty (API limitation) | ✅ Full description |
+| `publisher` | ⬜ None (API limitation) | ✅ |
+| `developer` | ⬜ None (API limitation) | ✅ |
+| `genres` | ⬜ Empty (API limitation) | ✅ |
+| `rating` | ✅ | ✅ |
+| `covers` | ✅ Box art URLs | ✅ Cover URLs (`https:` prefixed) |
+| `screenshots` | ⬜ None | ✅ Screenshot URLs |
+| `release_date` | ✅ | ✅ |
+| `downloaded` | Only with `--download` | Only with `--download` |
+
 ## Examples
 
 ```bash
@@ -52,7 +79,7 @@ scraper-cli search "Super Mario"
 scraper-cli search "Street Fighter" --source igdb --platform arcade
 scraper-cli search "Zelda" --source thegamesdb
 
-# Scrape a ROM file (matches by hash first, then filename)
+# Scrape a ROM file (matches by hash first, then filename, enriches via detail)
 scraper-cli scrape ~/roms/smb.zip
 
 # Scrape + download cover images
@@ -69,7 +96,7 @@ scraper-cli detail 136 --source thegamesdb
 ## Output
 
 ### `search`
-JSON array of matches with `id`, `title`, `platform`, `release_date`.
+JSON array of matches with `id`, `title`, `platform` (full name), `release_date`.
 
 ### `scrape`
 JSON object with:
@@ -78,13 +105,32 @@ JSON object with:
   - `downloaded` — list of local file paths (only present when `--download` used)
 
 ### `detail`
-JSON with full game metadata.
+JSON with full game metadata including `synopsis` (truncated to 500 chars).
 
-## Notes
+## Known Issues & Limitations
 
-- The `--source` flag restricts the query to a single provider. Without it, the first provider in priority order that returns results is used.
-- TheGamesDB has a built-in API key; no configuration required.
-- IGDB uses Twitch OAuth (Client Credentials grant). Get credentials at https://dev.twitch.tv/console/apps.
-- ScreenScraper requires a free account at https://www.screenscraper.fr.
-- Protocol-relative URLs from IGDB (`//images.igdb.com/...`) are automatically prefixed with `https:` when downloading.
-- Downloaded media directory format: `data/media/<platform>-<year>-<title_slug>/`.
+### TheGamesDB
+- API v1 does **not** return genre, developer, or publisher data for most games
+- No screenshot support
+- Description/overview empty for many games
+- Platform data uses alias format (e.g. "super-nintendo-snes") as short name
+
+### IGDB
+- Platform "Arcade" abbreviation is "Arcade" (same as name) — short_name set to empty
+- Some games are associated with incorrect platforms in IGDB's database (e.g. Super Mario World showing as "Arcade")
+- Screenshots require the `get_game_detail` enrichment call; not available in basic search
+
+### General
+- Hash-based ROM matching requires actual ROM content — empty/dummy files won't match
+- The `--source` flag now also restricts the scrape enrichment call to that provider only
+- Protocol-relative IGDB URLs (`//images.igdb.com/...`) are auto-prefixed with `https:`
+
+## Test Coverage
+
+30 unit tests in `apps/scraper-cli/src/main.rs`:
+- `slugify` — 6 tests (basic, uppercase, special chars, slugged, truncation, trim underscores)
+- `normalize_url` — 3 tests (https, protocol-relative, http)
+- `truncate` — 5 tests (short, exact, long, empty, zero)
+- `parse_source` — 8 tests (flags, env var, fallback, override)
+- `game_to_match` — 4 tests (fields, covers/screenshots, roms, downloaded)
+- Serialization — 3 tests (ScrapeMatch, DetailOutput, SearchResult)
