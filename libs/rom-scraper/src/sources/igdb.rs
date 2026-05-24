@@ -238,7 +238,9 @@ impl Igdb {
                 name: g.platforms.as_ref()
                     .and_then(|p| p.first().map(|p| p.name.clone()))
                     .unwrap_or_default(),
-                short_name: String::new(),
+                short_name: g.platforms.as_ref()
+                    .and_then(|p| p.first().map(|p| p.name.clone()))
+                    .unwrap_or_default(),
             },
             description: g.summary.clone().unwrap_or_default(),
             publisher: publishers.first().cloned(),

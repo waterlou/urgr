@@ -21,6 +21,8 @@ pub struct TheGamesDb {
 #[derive(Deserialize)]
 struct TgdbResponse<T> {
     data: Option<T>,
+    #[serde(default)]
+    include: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -135,6 +137,25 @@ impl TheGamesDb {
         "https://cdn.thegamesdb.net/images/original"
     }
 
+    fn extract_platform(include: &Option<Value>, platform_id: Option<u64>) -> Platform {
+        let id = platform_id.map(|p| p.to_string()).unwrap_or_default();
+        let (name, short_name) = match platform_id {
+            Some(pid) => {
+                if let Some(obj) = include.as_ref()
+                    .and_then(|inc| inc.get("platform"))
+                    .and_then(|p| p.get(pid.to_string()))
+                {
+                    let n = obj.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let s = obj.get("alias").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    (n, s)
+                } else {
+                    (String::new(), String::new())
+                }
+            }
+            None => (String::new(), String::new()),
+        };
+        Platform { id, name, short_name }
+    }
 }
 
 #[async_trait]
@@ -174,11 +195,7 @@ impl GameScraper for TheGamesDb {
                 id: g.id.to_string(),
                 title: g.game_title.clone(),
                 alternative_titles: Vec::new(),
-                platform: Platform {
-                    id: g.platform.map(|p| p.to_string()).unwrap_or_default(),
-                    name: String::new(),
-                    short_name: String::new(),
-                },
+                platform: Self::extract_platform(&resp.include, g.platform),
                 description: String::new(),
                 publisher: None,
                 developer: None,
@@ -224,11 +241,7 @@ impl GameScraper for TheGamesDb {
             id: g.id.to_string(),
             title: g.game_title,
             alternative_titles: Vec::new(),
-            platform: Platform {
-                id: g.platform.map(|p| p.to_string()).unwrap_or_default(),
-                name: String::new(),
-                short_name: String::new(),
-            },
+            platform: Self::extract_platform(&resp.include, g.platform),
             description: g.overview.unwrap_or_default(),
             publisher: None,
             developer: None,

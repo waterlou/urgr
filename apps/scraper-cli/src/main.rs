@@ -285,7 +285,7 @@ async fn cmd_search(args: &[String]) -> ExitCode {
             let results: Vec<SearchResult> = games.iter().map(|g| SearchResult {
                 id: g.id.clone(),
                 title: g.title.clone(),
-                platform: g.platform.short_name.clone(),
+                platform: g.platform.name.clone(),
                 release_date: g.release_date.clone(),
             }).collect();
             print_json(&serde_json::json!({"results": results}));
