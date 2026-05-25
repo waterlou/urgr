@@ -17,6 +17,7 @@ pub struct GameEntry {
     pub year: Option<String>,
     pub manufacturer: Option<String>,
     pub cloneof: Option<String>,
+    pub platform: String,
 }
 
 #[derive(Debug, Clone)]

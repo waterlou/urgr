@@ -41,12 +41,14 @@ export function getCollections() { return fetchJson('/collections'); }
 export function createCollection(data) { return fetchWithBody('/collections', 'POST', data); }
 export function updateCollection(id, data) { return fetchWithBody(`/collections/${id}`, 'PUT', data); }
 export function deleteCollection(id) { return fetchWithBody(`/collections/${id}`, 'DELETE'); }
-export function getCollectionGames(id, { limit, offset, sort, order } = {}) {
+export function getCollectionGames(id, { limit, offset, sort, order, q, parents_only } = {}) {
   const p = new URLSearchParams();
   if (limit) p.set('limit', limit);
   if (offset) p.set('offset', offset);
   if (sort) p.set('sort', sort);
   if (order) p.set('order', order);
+  if (q) p.set('q', q);
+  if (parents_only) p.set('parents_only', parents_only);
   return fetchJson(`/collections/${id}/games${p.toString() ? '?' + p.toString() : ''}`);
 }
 
@@ -89,12 +91,13 @@ export function getGameSets() { return fetchJson('/game-sets'); }
 export function createGameSet(data) { return fetchWithBody('/game-sets', 'POST', data); }
 export function updateGameSet(id, data) { return fetchWithBody(`/game-sets/${id}`, 'PUT', data); }
 export function deleteGameSet(id) { return fetchWithBody(`/game-sets/${id}`, 'DELETE'); }
-export function getGameSetGames(id, { limit, offset, sort, order } = {}) {
+export function getGameSetGames(id, { limit, offset, sort, order, q } = {}) {
   const p = new URLSearchParams();
   if (limit) p.set('limit', limit);
   if (offset) p.set('offset', offset);
   if (sort) p.set('sort', sort);
   if (order) p.set('order', order);
+  if (q) p.set('q', q);
   return fetchJson(`/game-sets/${id}/games${p.toString() ? '?' + p.toString() : ''}`);
 }
 export function addGameSetGames(id, gameEntryIds) {
@@ -108,7 +111,7 @@ export function exportGameSet(id) { return fetchJson(`/game-sets/${id}/exports`)
 // ==============================
 // Games (global)
 // ==============================
-export function getGames({ limit, offset, sort, order, q, collection_id, version_id } = {}) {
+export function getGames({ limit, offset, sort, order, q, collection_id, version_id, parents_only } = {}) {
   const p = new URLSearchParams();
   if (limit) p.set('limit', limit);
   if (offset) p.set('offset', offset);
@@ -117,6 +120,7 @@ export function getGames({ limit, offset, sort, order, q, collection_id, version
   if (q) p.set('q', q);
   if (collection_id) p.set('collection_id', collection_id);
   if (version_id) p.set('version_id', version_id);
+  if (parents_only) p.set('parents_only', parents_only);
   return fetchJson(`/games?${p.toString()}`);
 }
 
@@ -124,7 +128,7 @@ export function getGame(id) { return fetchJson(`/games/${id}`); }
 export function updateGameRating(id, data) {
   return fetchWithBody(`/games/${id}/rating`, 'PUT', data);
 }
-export function coverUrl(id) { return `${BASE}/games/${id}/cover`; }
+export function coverUrl(id) { return `${BASE}/games/${id}/cover?_=${Date.now()}`; }
 
 // ==============================
 // Versions
@@ -138,9 +142,12 @@ export function getVersionGames(id, { limit, offset, q } = {}) {
   return fetchJson(`/versions/${id}/games${p.toString() ? '?' + p.toString() : ''}`);
 }
 
-export function getAvailableVersions() { return fetchJson('/versions/available'); }
-export function importOnlineVersion(collectionId, version) {
-  return fetchWithBody('/versions/import-online', 'POST', { collection_id: collectionId, version });
+export function getAvailableVersions(source) {
+  const qs = source ? `?source=${encodeURIComponent(source)}` : '';
+  return fetchJson(`/versions/available${qs}`);
+}
+export function importOnlineVersion(collectionId, version, source, refresh) {
+  return fetchWithBody('/versions/import-online', 'POST', { collection_id: collectionId, version, source, refresh });
 }
 export function importDat(content) {
   return fetchWithBody('/versions/import-dat', 'POST', { content });
@@ -157,6 +164,12 @@ export function scraperScrape(file, game_name, platform) {
 }
 export function hashFile(file) {
   return fetchWithBody('/scraper/hash', 'POST', { file });
+}
+export function scrapeGameMetadata(gameId) {
+  return fetchWithBody(`/games/${gameId}/scrape`, 'POST');
+}
+export function scraperDetail(gameId, source) {
+  return fetchWithBody('/scraper/detail', 'POST', { game_id: gameId, source });
 }
 
 // ==============================

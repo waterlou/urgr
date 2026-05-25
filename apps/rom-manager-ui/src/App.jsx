@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   getGames, getCollections, getGameSets, getPlatforms, getVersions,
   getCollectionGames, getGameSetGames, createCollection, deleteCollection,
@@ -22,7 +22,9 @@ export default function App() {
   const [collectionSubView, setCollectionSubView] = useState('detail') // 'detail' or 'games'
   const [games, setGames] = useState([])
   const [activeMeta, setActiveMeta] = useState(null)
+  const [offset, setOffset] = useState(0)
   const [totalGames, setTotalGames] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
   const [platforms, setPlatforms] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectedGame, setSelectedGame] = useState(null)
@@ -32,7 +34,14 @@ export default function App() {
   const [viewMode, setViewMode] = useState('grid')
   const [sortField, setSortField] = useState('name')
   const [sortOrder, setSortOrder] = useState('asc')
+  const [versionFilter, setVersionFilter] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
+  const [parentsOnly, setParentsOnly] = useState(() => localStorage.getItem('rom-manager-parents-only') === 'true')
+
+  function handleSetParentsOnly(v) {
+    setParentsOnly(v);
+    localStorage.setItem('rom-manager-parents-only', v);
+  }
   const POPULAR_DATASETS = [
     { name: 'MAME', slug: 'mame', platform: 'Arcade' },
     { name: 'Final Burn Neo', slug: 'fbneo', platform: 'Arcade' },
@@ -68,28 +77,35 @@ export default function App() {
     }
   }, [])
 
-  const loadGames = useCallback(async (view, id, mode, sort, order, q) => {
+  const PAGE_SIZE = 500
+  const loadingMoreRef = useRef(false)
+
+  const loadGames = useCallback(async (view, id, mode, sort, order, q, po) => {
     setLoading(true)
+    setOffset(0)
     try {
       if (view === 'browse') {
-        const data = await getGames({ limit: 500, sort, order, q })
+        const data = await getGames({ limit: PAGE_SIZE, sort, order, q, parents_only: po ? 'true' : undefined })
         setGames(data.games)
         setTotalGames(data.total)
         setActiveMeta(null)
         setPlatforms([])
+        setHasMore(data.games.length < data.total)
       } else if (view === 'collection') {
-        const data = await getCollectionGames(id, { limit: 500, sort, order, mode })
+        const data = await getCollectionGames(id, { limit: PAGE_SIZE, sort, order, q, parents_only: po ? 'true' : undefined })
         setGames(data.games)
         setActiveMeta(data.collection)
         setPlatforms(data.platforms || [])
         setTotalGames(data.total)
+        setHasMore(data.games.length < data.total)
       } else if (view === 'game-set') {
-        const data = await getGameSetGames(id, { limit: 500, sort, order })
+        const data = await getGameSetGames(id, { limit: PAGE_SIZE, sort, order, q })
         setGames(data.games)
         setActiveMeta(data.game_set)
         const plats = data.game_set?.platforms ? data.game_set.platforms.split(',').filter(Boolean) : []
         setPlatforms(plats)
         setTotalGames(data.total)
+        setHasMore(data.games.length < data.total)
       }
     } catch (e) {
       console.error('Failed to load games:', e)
@@ -98,11 +114,37 @@ export default function App() {
     }
   }, [])
 
+  async function loadMore() {
+    if (loadingMoreRef.current || !hasMore) return
+    loadingMoreRef.current = true
+    setLoading(true)
+    try {
+      let data
+      if (activeView === 'browse') {
+        data = await getGames({ limit: PAGE_SIZE, offset: offset + PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery, parents_only: parentsOnly ? 'true' : undefined })
+      } else if (activeView === 'collection') {
+        data = await getCollectionGames(activeId, { limit: PAGE_SIZE, offset: offset + PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery, parents_only: parentsOnly ? 'true' : undefined })
+      } else if (activeView === 'game-set') {
+        data = await getGameSetGames(activeId, { limit: PAGE_SIZE, offset: offset + PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery })
+      }
+      if (data) {
+        setOffset(prev => prev + PAGE_SIZE)
+        setGames(prev => [...prev, ...data.games])
+        setHasMore(data.games.length === PAGE_SIZE)
+      }
+    } catch (e) {
+      console.error('Failed to load more games:', e)
+    } finally {
+      setLoading(false)
+      loadingMoreRef.current = false
+    }
+  }
+
   useEffect(() => { loadSidebar() }, [loadSidebar])
 
   useEffect(() => {
-    loadGames(activeView, activeId, viewMode, sortField, sortOrder, searchQuery)
-  }, [activeView, activeId, viewMode, sortField, sortOrder, searchQuery, loadGames])
+    loadGames(activeView, activeId, viewMode, sortField, sortOrder, searchQuery, parentsOnly)
+  }, [activeView, activeId, viewMode, sortField, sortOrder, searchQuery, parentsOnly, loadGames])
 
   function handleSelect(view, id) {
     setActiveView(view)
@@ -118,6 +160,9 @@ export default function App() {
   }
 
   async function handleDeleteCollection(id) {
+    const col = collections.find(c => c.id === id)
+    const name = col?.name || 'this collection'
+    if (!window.confirm(`Are you sure you want to delete "${name}"? This cannot be undone.`)) return
     await deleteCollection(id)
     if (activeView === 'collection' && activeId === id) {
       setActiveView('browse')
@@ -222,6 +267,8 @@ export default function App() {
           <GameBrowser
             games={games}
             loading={loading}
+            hasMore={hasMore}
+            onLoadMore={loadMore}
             activeView={activeView}
             activeMeta={activeMeta}
             totalGames={totalGames}
@@ -240,11 +287,13 @@ export default function App() {
             activeId={activeId}
             showBackToDetail={activeView === 'collection'}
             onBackToDetail={() => setCollectionSubView('detail')}
+            parentsOnly={parentsOnly}
+            onParentsOnlyChange={handleSetParentsOnly}
           />
         )}
       </main>
 
-      {selectedGame && <GameDetail gameId={selectedGame.id || selectedGame} onClose={() => setSelectedGame(null)} />}
+      {selectedGame && <GameDetail gameId={selectedGame.id || selectedGame} onClose={() => setSelectedGame(null)} onNavigate={(id) => setSelectedGame({id})} />}
 
       {showCollectionForm && (
         <CollectionForm

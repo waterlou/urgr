@@ -1,18 +1,32 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import GameGridCard from './GameGridCard.jsx'
 import GameListItem from './GameListItem.jsx'
 import { getGames, coverUrl, updateGameRating } from '../api.js'
 
 export default function GameBrowser({
-  games, loading, activeView, activeMeta, totalGames, platforms,
+  games, loading, hasMore, onLoadMore, activeView, activeMeta, totalGames, platforms,
   viewMode, sortField, sortOrder, searchQuery,
   onViewModeChange, onSortFieldChange, onSortOrderChange,
   onSearchQueryChange, onSelectGame, onAddToGameSet, gameSets, activeId,
   showBackToDetail, onBackToDetail,
+  parentsOnly, onParentsOnlyChange,
 }) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchResults, setSearchResults] = useState([])
   const [localQuery, setLocalQuery] = useState('')
+  const sentinelRef = useRef(null)
+
+  // Infinite scroll via IntersectionObserver
+  useEffect(() => {
+    if (!hasMore || loading) return
+    const el = sentinelRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) onLoadMore?.()
+    }, { rootMargin: '200px' })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [hasMore, loading, onLoadMore])
 
   async function handleSearch(e) {
     const q = e.target.value
@@ -91,6 +105,16 @@ export default function GameBrowser({
 
         <div className="browser-toolbar">
           <div className="toolbar-left">
+            {onParentsOnlyChange && (activeView === 'collection' || activeView === 'browse') && (
+              <button
+                className={`btn btn-sm ${parentsOnly ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => onParentsOnlyChange(!parentsOnly)}
+                title="Show parent games only"
+                style={{marginRight:8}}
+              >
+                <span className="icon icon-sm">account_tree</span> {parentsOnly ? 'Parents' : 'All'}
+              </button>
+            )}
             <div className="view-mode-toggle">
               <button className={`view-btn ${isList ? 'active' : ''}`} onClick={() => handleViewChange('list')} title="List"><span className="icon">view_headline</span></button>
               <button className={`view-btn ${isGrid ? 'active' : ''}`} onClick={() => handleViewChange('grid')} title="Grid"><span className="icon">grid_view</span></button>
@@ -127,7 +151,7 @@ export default function GameBrowser({
       </div>
 
       <div className="browser-content">
-        {loading ? (
+        {loading && games.length === 0 ? (
           <div className="loading-screen"><div className="loading-spinner" /></div>
         ) : games.length === 0 ? (
           <div className="empty-state">
@@ -172,6 +196,8 @@ export default function GameBrowser({
             ))}
           </div>
         )}
+        {hasMore && <div ref={sentinelRef} className="scroll-sentinel" />}
+        {loading && games.length > 0 && <div className="loading-more"><div className="loading-spinner" /></div>}
       </div>
     </div>
   )

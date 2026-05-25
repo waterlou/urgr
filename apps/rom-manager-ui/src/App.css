@@ -99,6 +99,9 @@ html, body, #root {
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.scroll-sentinel { height: 1px; }
+.loading-more { display: flex; justify-content: center; padding: 24px; }
+
 /* Sidebar */
 .sidebar {
   width: var(--sidebar-width);
@@ -655,6 +658,24 @@ html, body, #root {
   font-weight: 500;
 }
 
+.version-tag {
+  display: inline-block;
+  background: var(--surface);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin: 0 3px 2px 0;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.list-col-platform .version-tag {
+  display: inline-block;
+  margin: 1px 2px;
+}
+
 .grid-card-rating {
   margin-top: auto;
 }
@@ -1075,25 +1096,42 @@ html, body, #root {
   color: var(--text);
 }
 
-/* Game Detail (legacy) */
-.modal-header {
-  height: 360px;
-  position: relative;
+/* Game Detail */
+.game-detail-content { max-width: 960px; }
+
+.detail-header {
   display: flex;
-  align-items: flex-end;
-  background-size: cover;
-  background-position: center top;
+  gap: 24px;
+  padding: 28px 40px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
 }
 
-.modal-header-content {
-  padding: 60px 40px 30px;
+.detail-cover {
+  flex-shrink: 0;
+  width: 180px;
+  cursor: pointer;
+}
+
+.detail-cover-img {
   width: 100%;
+  border-radius: 8px;
+  display: block;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
 }
 
-.modal-title {
-  font-size: 32px;
+.detail-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 12px;
+}
+
+.detail-title {
+  font-size: 28px;
   font-weight: 700;
-  margin-bottom: 12px;
+  line-height: 1.2;
 }
 
 .modal-meta { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -1108,6 +1146,7 @@ html, body, #root {
 }
 
 .badge-clone { background: var(--accent-dim); color: var(--accent); }
+.badge-scraped { background: var(--accent-dim); color: var(--accent); }
 
 .modal-body { padding: 24px 40px 40px; }
 
@@ -1118,8 +1157,87 @@ html, body, #root {
   margin-bottom: 28px;
 }
 
+.scrape-btn { margin-bottom: 20px; }
+.rescrape-btn { align-self: flex-start; }
+.scrape-error { color: var(--accent); font-size: 13px; }
+.scrape-success { font-size: 13px; color: var(--accent); margin-top: 0; margin-bottom: 0; }
+
 .modal-body section { margin-bottom: 24px; }
 .modal-body h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+
+/* Screenshots grid */
+.screenshot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.screenshot-item {
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  aspect-ratio: 4/3;
+  background: var(--surface);
+}
+
+.screenshot-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.2s;
+}
+
+.screenshot-item:hover img { transform: scale(1.05); }
+
+/* Variants list */
+.variants-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.variant-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.variant-item:hover { background: rgba(255,255,255,0.05); }
+
+.variant-name { font-weight: 500; }
+.variant-romname { font-size: 12px; color: var(--text-secondary); margin-left: auto; }
+
+/* Lightbox */
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0,0,0,0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+
+.lightbox-img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+@media (max-width: 700px) {
+  .detail-header { flex-direction: column; align-items: center; text-align: center; }
+  .detail-cover { width: 140px; }
+  .detail-title { font-size: 22px; }
+  .modal-body { padding: 20px; }
+  .screenshot-grid { grid-template-columns: 1fr 1fr; }
+}
 
 .rom-table-wrapper { overflow-x: auto; }
 

@@ -121,6 +121,7 @@ mod tests {
                     year: None,
                     manufacturer: None,
                     cloneof: None,
+                    platform: String::new(),
                 },
             )
             .unwrap();

@@ -22,9 +22,13 @@ CREATE TABLE IF NOT EXISTS game_entries (
     version_id  INTEGER NOT NULL,
     name        TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
+    synopsis    TEXT DEFAULT '',
     year        TEXT,
     manufacturer TEXT,
     cloneof     TEXT,
+    platform    TEXT DEFAULT '',
+    covers      TEXT DEFAULT '[]',
+    screenshots TEXT DEFAULT '[]',
     FOREIGN KEY (version_id) REFERENCES set_versions(id) ON DELETE CASCADE,
     UNIQUE(version_id, name)
 );
@@ -147,7 +151,16 @@ export async function initDb(dbPath) {
   }
 
   db.run('PRAGMA journal_mode=WAL');
+  db.run('PRAGMA foreign_keys = ON');
   db.run(SCHEMA);
+  // Migration: add platform column if missing
+  try { db.run("ALTER TABLE game_entries ADD COLUMN platform TEXT DEFAULT ''"); } catch (_) {}
+  // Migration: add synopsis column if missing
+  try { db.run("ALTER TABLE game_entries ADD COLUMN synopsis TEXT DEFAULT ''"); } catch (_) {}
+  // Migration: add covers column if missing
+  try { db.run("ALTER TABLE game_entries ADD COLUMN covers TEXT DEFAULT '[]'"); } catch (_) {}
+  // Migration: add screenshots column if missing
+  try { db.run("ALTER TABLE game_entries ADD COLUMN screenshots TEXT DEFAULT '[]'"); } catch (_) {}
 
   // No default seed data — start empty
 

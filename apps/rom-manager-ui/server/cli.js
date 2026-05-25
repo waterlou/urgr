@@ -1,4 +1,4 @@
-import { execSync, spawn } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { getDb, saveDb, initDb, getDbPath } from './db.js';
@@ -10,6 +10,37 @@ const CLI_NAMES = {
   parse: 'parse-cli',
   build: 'build-cli',
 };
+
+const SETTINGS_PATH = path.join(__dirname, '..', '..', '..', 'data', '.env');
+const SETTINGS_KEYS = [
+  'SS_DEVID', 'SS_DEVPASSWORD', 'SS_USERNAME', 'SS_PASSWORD',
+  'IGDB_CLIENT_ID', 'IGDB_CLIENT_SECRET',
+  'TGDB_API_KEY',
+  'SCRAPER_SOURCE',
+];
+
+function loadScraperEnv() {
+  const env = { ...process.env };
+  try {
+    if (fs.existsSync(SETTINGS_PATH)) {
+      const text = fs.readFileSync(SETTINGS_PATH, 'utf-8');
+      for (const line of text.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eq = trimmed.indexOf('=');
+        if (eq === -1) continue;
+        const key = trimmed.slice(0, eq).trim();
+        const val = trimmed.slice(eq + 1).trim();
+        if (SETTINGS_KEYS.includes(key)) {
+          env[key] = val;
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Error reading .env for scraper:', e.message);
+  }
+  return env;
+}
 
 function findBinary(binary) {
   const envKey = binary === 'scraper' ? 'SCRAPER_CLI_BINARY'
@@ -40,11 +71,13 @@ export function execCli(args, { binary = 'build' } = {}) {
   const needsDb = binary === 'parse' || binary === 'build';
   if (needsDb) saveDb();
 
-  const cmd = [bin, ...args, '--json', '--db', dbPath].join(' ');
+  const cmdArgs = [bin, ...args, '--json', '--db', dbPath];
 
   let stdout;
   try {
-    stdout = execSync(cmd, { encoding: 'utf-8', timeout: 120000 });
+    const opts = { encoding: 'utf-8', timeout: 120000 };
+    if (binary === 'scraper') opts.env = loadScraperEnv();
+    stdout = execFileSync(cmdArgs[0], cmdArgs.slice(1), opts);
   } catch (e) {
     const msg = e.stderr?.trim() || e.message;
     throw new Error(`CLI error: ${msg}`);
@@ -68,9 +101,9 @@ export function execCliStream(args, { binary = 'build', onProgress, signal } = {
     if (needsDb) saveDb();
 
     const cmdArgs = [...args, '--json', '--progress', '--db', dbPath];
-    const child = spawn(bin, cmdArgs, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const spawnOpts = { stdio: ['ignore', 'pipe', 'pipe'] };
+    if (binary === 'scraper') spawnOpts.env = loadScraperEnv();
+    const child = spawn(bin, cmdArgs, spawnOpts);
 
     let stdout = '';
     let stderr = '';

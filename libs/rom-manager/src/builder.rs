@@ -12,6 +12,9 @@ use crate::models::{GameEntry, RomEntry, SetVersion};
 const STATUS_FILENAME: &str = "_build_status.json";
 const MODE_FILENAME: &str = "_build_mode.json";
 const PROGRESS_FILENAME: &str = "_build_progress.json";
+const ROMS_DIR_NAME: &str = "roms";
+const SAMPLES_DIR_NAME: &str = "samples";
+const CHD_DIR_NAME: &str = "chd";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildStatus {
@@ -83,6 +86,26 @@ impl ImportIndex {
         } else {
             None
         }
+    }
+
+    /// For a given source zip path, discover CHD files in a same-named sibling directory.
+    /// e.g. `arcade/game1.zip` → check `arcade/game1/*.chd`
+    fn find_chd_files(zip_path: &Path) -> Vec<PathBuf> {
+        let chd_dir = zip_path.with_extension("");
+        if !chd_dir.is_dir() {
+            return Vec::new();
+        }
+        let mut chds = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&chd_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("chd") {
+                    chds.push(path);
+                }
+            }
+        }
+        chds.sort();
+        chds
     }
 }
 
@@ -195,6 +218,7 @@ pub fn build_version(
     progress(on_progress, "diff", 10, "Diff computed", 0, 0, need_copy.len() + unchanged, &progress_path);
 
     // ── Phase 2: Folder setup ──
+    let roms_dir = collection_dir.join(ROMS_DIR_NAME);
     if force_update {
         if let Some(ref p) = prev {
             let old_dir = base_dir.join(source).join(&p.version);
@@ -202,23 +226,35 @@ pub fn build_version(
                 info!("Renaming {} → {}", old_dir.display(), collection_dir.display());
                 std::fs::create_dir_all(collection_dir.parent().unwrap())?;
                 std::fs::rename(&old_dir, &collection_dir)?;
+                // Migrate flat ROMs into roms/ subfolder
+                if !roms_dir.exists() {
+                    std::fs::create_dir_all(&roms_dir)?;
+                    for entry in walk_files(&collection_dir)? {
+                        if entry.extension().and_then(|e| e.to_str()) == Some("zip")
+                            && entry.file_stem().map(|s| s != "_build_status").unwrap_or(false)
+                        {
+                            let dest = roms_dir.join(entry.file_name().unwrap());
+                            std::fs::rename(&entry, &dest)?;
+                        }
+                    }
+                }
             }
         }
     }
-    std::fs::create_dir_all(&collection_dir)?;
+    std::fs::create_dir_all(&roms_dir)?;
     std::fs::create_dir_all(&deleted_dir)?;
 
     progress(on_progress, "setup", 15, "Folders ready", 0, 0, need_copy.len() + unchanged, &progress_path);
 
     // ── Phase 3: Cleanup ──
     let all_games = db.list_games(latest.id)?;
-    if collection_dir.exists() {
+    if roms_dir.exists() {
         let keep: std::collections::HashSet<String> = if force_update {
             all_games.iter().map(|g| g.name.clone()).collect()
         } else {
             need_copy.iter().cloned().collect()
         };
-        for entry in walk_files(&collection_dir)? {
+        for entry in walk_files(&roms_dir)? {
             if entry.extension().and_then(|e| e.to_str()) != Some("zip") {
                 continue;
             }
@@ -233,13 +269,38 @@ pub fn build_version(
         }
     }
 
+    // Clean up stale CHD directories (update mode)
+    if force_update {
+        let chd_dir = collection_dir.join(CHD_DIR_NAME);
+        if chd_dir.exists() {
+            let game_names: std::collections::HashSet<String> =
+                all_games.iter().map(|g| g.name.clone()).collect();
+            for entry in std::fs::read_dir(&chd_dir)? {
+                let entry = entry?;
+                if entry.path().is_dir() {
+                    let dir_name = entry.file_name().to_string_lossy().to_string();
+                    if !game_names.contains(&dir_name) {
+                        std::fs::remove_dir_all(entry.path())?;
+                        status.cleaned += 1;
+                    }
+                }
+            }
+        }
+    }
+
     // For update mode: remove old versions of changed games from collection
     if force_update && prev.is_some() {
         let prev_version = prev.unwrap();
         let changed: std::collections::HashSet<String> = db.diff_versions(prev_version.id, latest.id)?
             .changed.into_iter().collect();
+        let platform_map: HashMap<&str, &str> = all_games.iter().map(|g| (g.name.as_str(), g.platform.as_str())).collect();
         for game_name in &changed {
-            let zip_path = collection_dir.join(format!("{}.zip", game_name));
+            let pf = platform_map.get(game_name.as_str()).copied().unwrap_or("");
+            let zip_path = if pf.is_empty() {
+                roms_dir.join(format!("{}.zip", game_name))
+            } else {
+                roms_dir.join(pf).join(format!("{}.zip", game_name))
+            };
             if zip_path.exists() && !verify_game_zip(db, latest.id, game_name, &zip_path)? {
                 move_to_deleted(&zip_path, &deleted_dir, &latest, Some(prev_version))?;
                 status.cleaned += 1;
@@ -256,14 +317,23 @@ pub fn build_version(
     check_cancelled(cancelled)?;
     progress(on_progress, "index", 30, "Import index built", 0, need_copy.len(), need_copy.len() + unchanged, &progress_path);
 
-    // ── Phase 5: Copy matching ROMs ──
+    // ── Phase 5: Copy matching ROMs + CHDs ──
     let game_map: HashMap<String, &GameEntry> = all_games.iter().map(|g| (g.name.clone(), g)).collect();
 
     let mut matched = 0usize;
     let mut missing = Vec::new();
 
     for game_name in &need_copy {
-        let dest = collection_dir.join(format!("{}.zip", game_name));
+        // Determine platform subdirectory
+        let platform = game_map.get(game_name).map(|g| &g.platform).filter(|p| !p.is_empty());
+        let dest = if let Some(p) = platform {
+            roms_dir.join(p).join(format!("{}.zip", game_name))
+        } else {
+            roms_dir.join(format!("{}.zip", game_name))
+        };
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
 
         // Periodic progress + cancellation check
         if matched % 50 == 0 {
@@ -291,8 +361,42 @@ pub fn build_version(
             info!("  Copying {} → {}", src_path.display(), dest.display());
             std::fs::copy(&src_path, &dest)?;
             matched += 1;
+
+            // Copy CHD files alongside the game zip (if any)
+            let chds = ImportIndex::find_chd_files(&src_path);
+            if !chds.is_empty() {
+                let chd_dest_base = collection_dir.join(CHD_DIR_NAME).join(game_name);
+                for chd_src in &chds {
+                    let chd_dest = chd_dest_base.join(
+                        chd_src.file_name().unwrap_or_default(),
+                    );
+                    std::fs::create_dir_all(chd_dest.parent().unwrap())?;
+                    std::fs::copy(chd_src, &chd_dest)?;
+                    info!("  CHD {} → {}", chd_src.display(), chd_dest.display());
+                }
+            }
         } else {
             missing.push(game_name.clone());
+        }
+    }
+
+    // ── Phase 5b: Copy samples folder ──
+    let import_samples = import_dir.join(SAMPLES_DIR_NAME);
+    if import_samples.is_dir() {
+        let dest_samples = collection_dir.join(SAMPLES_DIR_NAME);
+        std::fs::create_dir_all(&dest_samples)?;
+        for entry in walk_files(&import_samples)? {
+            if entry.extension().and_then(|e| e.to_str()) == Some("zip") {
+                let rel = entry.strip_prefix(&import_samples).unwrap_or(&entry);
+                let dst = dest_samples.join(rel);
+                if let Some(parent) = dst.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                if !dst.exists() {
+                    std::fs::copy(&entry, &dst)?;
+                    info!("  Sample {} → {}", entry.display(), dst.display());
+                }
+            }
         }
     }
 

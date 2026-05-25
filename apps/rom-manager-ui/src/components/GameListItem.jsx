@@ -11,11 +11,15 @@ export default function GameListItem({ game, onSelect, onRating, onFavourite }) 
   return (
     <div className="list-item" onClick={() => onSelect(game)}>
       <span className="list-col-name">
-        <img src={coverUrl(game.id)} alt="" className="list-thumb" loading="lazy" />
-        <span className="list-name-text">{game.name}</span>
-        {game.description && <span className="list-desc">{game.description}</span>}
+        <img src={coverUrl(game.id)} alt="" className="list-thumb" loading="lazy" onError={e => { e.target.style.display = 'none' }} />
+        <span className="list-name-text">{game.description || game.name}</span>
+        {game.description && <span className="list-desc">{game.name}</span>}
       </span>
-      <span className="list-col-platform">{game.source || '-'}</span>
+      <span className="list-col-platform">
+        {game.versions && game.versions.length > 0
+          ? game.versions.map(v => <span key={v} className="version-tag">{v}</span>)
+          : <span className="version-tag">{game.source || '-'}</span>}
+      </span>
       <span className="list-col-year">{game.year || '-'}</span>
       <span className="list-col-rating" onClick={e => e.stopPropagation()}>
         <div className="stars stars-sm" onClick={handleClickStars}>

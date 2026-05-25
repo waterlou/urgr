@@ -43,10 +43,13 @@ export default function GameGridCard({ game, onSelect, onRating, onFavourite, on
         </div>
       </div>
       <div className="grid-card-info">
-        <div className="grid-card-name">{game.name}</div>
+        <div className="grid-card-name">{game.description || game.name}</div>
         <div className="grid-card-sub">
           {game.year && <span>{game.year}</span>}
-          {game.source && <span className="grid-card-source">{game.source}</span>}
+          {(game.versions && game.versions.length > 0
+            ? game.versions
+            : game.source ? [game.source] : []
+          ).map(v => <span key={v} className="version-tag">{v}</span>)}
         </div>
         <div className="grid-card-rating" onClick={e => e.stopPropagation()}>
           <div className="stars" onClick={handleClickStars}>

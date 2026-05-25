@@ -40,11 +40,21 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
   const [buildProgress, setBuildProgress] = useState({})
   const eventSourcesRef = useRef({})
 
+  function getDatSource() {
+    // Map collection folder to DAT source identifier
+    if (collection?.folder === 'fbneo') return 'FBNeo';
+    if (collection?.folder === 'fba' || collection?.folder === 'fbalpha') return 'FBAlpha44';
+    return 'MAME'; // default, covers 'mame' and everything else
+  }
+
   useEffect(() => {
     async function load() {
       try {
-        const [dats, buildsData, vers] = await Promise.all([
-          getAvailableVersions().catch(() => null),
+        const source = getDatSource();
+        const datsPromise = getAvailableVersions(source).catch(() => null);
+        const datsTimeout = new Promise(resolve => setTimeout(() => resolve(null), 12000));
+        const dats = await Promise.race([datsPromise, datsTimeout]);
+        const [buildsData, vers] = await Promise.all([
           getCollectionBuilds(collectionId).catch(() => []),
           getVersions().catch(() => []),
         ])
@@ -175,15 +185,15 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
     }
   }
 
-  async function handleImportOnline(version) {
+  async function handleImportOnline(version, source, refresh) {
     setImportingVer(version)
     setError(null)
     setInfo(null)
     try {
-      const result = await importOnlineVersion(collectionId, version)
-      setInfo(`Version ${version} imported!`)
+      const result = await importOnlineVersion(collectionId, version, source || getDatSource(), refresh)
+      setInfo(`Version ${version} imported! (${result.total_games} games)`)
       const [dats, vers] = await Promise.all([
-        getAvailableVersions().catch(() => null),
+        getAvailableVersions(getDatSource()).catch(() => null),
         getVersions().catch(() => []),
       ])
       setAvailableDats(dats)
@@ -290,42 +300,85 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
       </div>
 
       <div className="browser-content">
-        {/* Version Check — MAME preset collections */}
-        {availableDats && collection?.folder === 'mame' && (
+        {/* Version Check — MAME / FBNeo / FBAlpha preset collections */}
+        {availableDats && (collection?.folder === 'mame' || collection?.folder === 'fbneo') && (
           <section className="detail-section">
             <h2 className="detail-section-title">
-              MAME DAT Versions
-              {availableDats.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>New version available! {availableDats.latest}</span>}
+              {collection?.folder === 'mame' ? 'MAME' : 'Final Burn Neo / FB Alpha'} DAT Versions
+              {availableDats.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>Update available! {availableDats.latest}</span>}
             </h2>
             <p className="detail-section-desc">
-              Latest available: <strong>{availableDats.latest}</strong>
-              {availableDats.imported.length > 0 && ` · ${availableDats.imported.length} version(s) imported`}
-              {availableDats.missing.length > 0 && ` · ${availableDats.missing.length} version(s) not yet imported`}
+              {collection?.folder === 'mame' ? 'Latest MAME: ' : 'Latest: '}
+              <strong>{availableDats.latest}</strong>
+              {availableDats.imported?.length > 0 && ` · ${availableDats.imported.length} version(s) imported`}
+              {availableDats.missing?.length > 0 && ` · ${availableDats.missing.length} version(s) not yet imported`}
             </p>
 
-            {availableDats.missing.length > 0 && (
+            {availableDats.source === 'FBNeo' && (
+              <div className="info-box">
+                <strong>Nightly</strong> is the latest FBNeo HEAD &mdash; refreshed when FBNeo is updated.
+                Tagged versions are stable releases. <strong>FB Alpha 0.2.97.x</strong> versions are hardcoded for older retro consoles.
+              </div>
+            )}
+
+            {availableDats.missing?.length > 0 && (
               <div className="info-box warn">
                 <strong>Versions available to import:</strong>
+                {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing {importingVer}...</div>}
                 <div className="tag-list">
-                  {availableDats.missing.slice(0, 10).map(d => (
-                    <button
-                      key={d.numeric}
-                      className="tag tag-import"
-                      onClick={() => handleImportOnline(d.numeric)}
-                      disabled={importingVer === d.numeric}
-                    >
-                      <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:2}}>{importingVer === d.numeric ? 'hourglass' : 'add'}</span> {d.numeric} <span className="tag-date">{d.date}</span>
-                    </button>
-                  ))}
-                  {availableDats.missing.length > 10 && <span className="tag">+{availableDats.missing.length - 10} more</span>}
+                  {availableDats.missing.map(d => {
+                    const verKey = d.numeric || d.version;
+                    const label = d.nightly ? 'nightly (HEAD)' : d.source === 'FBAlpha43' || d.source === 'FBAlpha44' ? `${d.version} (FB Alpha)` : d.numeric || d.version;
+                    return (
+                      <button
+                        key={verKey}
+                        className="tag tag-import"
+                        onClick={() => handleImportOnline(verKey, d.source || availableDats.source)}
+                        disabled={importingVer !== null}
+                        title={d.source || availableDats.source}
+                      >
+                        <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:2}}>{importingVer === verKey ? 'hourglass' : 'add'}</span>
+                        {label}
+                        {d.date && <span className="tag-date">{d.date}</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Already-imported versions with refresh for nightly */}
+            {availableDats.source === 'FBNeo' && availableDats.imported?.length > 0 && (
+              <div className="info-box" style={{marginTop:12}}>
+                <strong>Imported versions:</strong>
+                <div className="tag-list" style={{marginTop:8}}>
+                  {availableDats.imported.map(iv => {
+                    const isNightly = iv.version === 'nightly';
+                    return (
+                      <span key={iv.id} className="tag" style={{display:'inline-flex',alignItems:'center',gap:4}}>
+                        <span className="icon icon-sm" style={{fontSize:14}}>check</span>
+                        {iv.source} — {iv.version}
+                        {isNightly && (
+                          <button
+                            className="btn btn-sm btn-secondary"
+                            style={{padding:'1px 6px',fontSize:11,marginLeft:4}}
+                            onClick={() => handleImportOnline(iv.version, 'FBNeo', true)}
+                            disabled={importingVer !== null}
+                          >
+                            Refresh
+                          </button>
+                        )}
+                      </span>
+                    )
+                  })}
                 </div>
               </div>
             )}
           </section>
         )}
 
-        {/* Preset dataset info for non-MAME presets */}
-        {collection?.has_dataset === 1 && collection?.folder !== 'mame' && (
+        {/* Preset dataset info for non-MAME/non-FBNeo presets */}
+        {collection?.has_dataset === 1 && collection?.folder !== 'mame' && collection?.folder !== 'fbneo' && (
           <section className="detail-section">
             <h2 className="detail-section-title">
               Dataset: {collection.folder}

@@ -49,6 +49,7 @@ pub fn parse_logiqx_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>, Vec
                             year: game.2,
                             manufacturer: game.3,
                             cloneof: game.4,
+                            platform: String::new(),
                         };
                         let rom_entries: Vec<RomEntry> = roms
                             .into_iter()

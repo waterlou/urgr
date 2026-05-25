@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import crypto, { createHash } from 'crypto';
+import { execSync } from 'child_process';
 import { initDb, getDb, closeDb, saveDb } from './db.js';
 import { execCli, execCliStream } from './cli.js';
 import { createJob, getJob, updateProgress, doneJob, failJob, cancelJob } from './jobs.js';
@@ -14,6 +15,10 @@ const PORT = process.env.PORT || 3001;
 const distPath = path.join(__dirname, '..', 'dist');
 const dbPath = process.env.ROM_DB || path.join(__dirname, '..', '..', '..', 'data', 'roms.db');
 let dbReady = initDb(dbPath);
+
+function unescapeXml(s) {
+  return s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, '\'');
+}
 
 function all(sql, params = []) {
   const stmt = getDb().prepare(sql);
@@ -130,8 +135,21 @@ app.put('/api/collections/:id', async (req, res) => {
 app.delete('/api/collections/:id', async (req, res) => {
   await dbReady;
   try {
+    run('DELETE FROM collection_builds WHERE collection_id = ?', [req.params.id]);
+    run('DELETE FROM collection_versions WHERE collection_id = ?', [req.params.id]);
     run('DELETE FROM collections WHERE id = ?', [req.params.id]);
-    res.json({ ok: true });
+    // Clean up orphaned versions no longer referenced by any collection
+    const orphaned = all(`
+      SELECT sv.id FROM set_versions sv
+      WHERE NOT EXISTS (SELECT 1 FROM collection_versions cv WHERE cv.version_id = sv.id)
+    `);
+    for (const v of orphaned) {
+      run('DELETE FROM rom_entries WHERE game_entry_id IN (SELECT id FROM game_entries WHERE version_id = ?)', [v.id]);
+      run('DELETE FROM scanned_games WHERE version_id = ?', [v.id]);
+      run('DELETE FROM game_entries WHERE version_id = ?', [v.id]);
+      run('DELETE FROM set_versions WHERE id = ?', [v.id]);
+    }
+    res.json({ ok: true, orphaned_versions: orphaned.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -139,7 +157,7 @@ app.get('/api/collections/:id/games', async (req, res) => {
   await dbReady;
   try {
     const { id } = req.params;
-    const { limit = 200, offset = 0, sort = 'name', order = 'asc' } = req.query;
+    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, parents_only } = req.query;
     const collection = get('SELECT * FROM collections WHERE id = ?', [id]);
     if (!collection) return res.status(404).json({ error: 'not found' });
 
@@ -148,21 +166,43 @@ app.get('/api/collections/:id/games', async (req, res) => {
 
     const vids = versions.map(v => v.version_id);
     const ph = vids.map(() => '?').join(',');
-    const sortCol = sort === 'rating' ? 'COALESCE(r.rating, 0)' : sort === 'favourite' ? 'COALESCE(r.favourite, 0)' : sort === 'play_count' ? 'COALESCE(r.play_count, 0)' : 'g.name';
+    const sortCol = sort === 'rating' ? 'MAX(COALESCE(r.rating, 0))' : sort === 'favourite' ? 'MAX(COALESCE(r.favourite, 0))' : sort === 'play_count' ? 'MAX(COALESCE(r.play_count, 0))' : 'g.name';
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
 
-    const total = get(`SELECT COUNT(*) as c FROM game_entries g WHERE g.version_id IN (${ph})`, vids).c;
+    let whereExtra = '';
+    let extraParams = [];
+    if (q) {
+      whereExtra += 'AND (g.name LIKE ? OR g.description LIKE ?)';
+      extraParams.push(`%${q}%`, `%${q}%`);
+    }
+    if (parents_only === 'true') {
+      whereExtra += ' AND g.cloneof IS NULL';
+    }
 
-    const games = all(`
-      SELECT g.*, sv.source, sv.version,
-        COALESCE(r.rating, 0) as rating, COALESCE(r.favourite, 0) as favourite,
-        COALESCE(r.play_count, 0) as play_count
+    const total = get(`SELECT COUNT(DISTINCT g.name) as c FROM game_entries g WHERE g.version_id IN (${ph}) ${whereExtra}`, [...vids, ...extraParams]).c;
+
+    let games = all(`
+      SELECT g.name, g.description, g.year, g.manufacturer, g.cloneof, g.platform,
+        MIN(g.id) as id, MIN(g.version_id) as version_id, MIN(sv.source) as source, MIN(sv.version) as version,
+        GROUP_CONCAT(sv.source || '||' || sv.version, '||') as versions_tags,
+        MAX(COALESCE(r.rating, 0)) as rating,
+        MAX(COALESCE(r.favourite, 0)) as favourite,
+        MAX(COALESCE(r.play_count, 0)) as play_count
       FROM game_entries g
       JOIN set_versions sv ON sv.id = g.version_id
       LEFT JOIN game_ratings r ON r.game_entry_id = g.id
-      WHERE g.version_id IN (${ph})
-      ORDER BY ${sortCol} ${sortDir}, g.name LIMIT ? OFFSET ?
-    `, [...vids, Number(limit), Number(offset)]);
+      WHERE g.version_id IN (${ph}) ${whereExtra}
+      GROUP BY g.name
+      ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?
+    `, [...vids, ...extraParams, Number(limit), Number(offset)]);
+
+    games = games.map(g => {
+      const tags = g.versions_tags ? g.versions_tags.split('||') : [];
+      const versions = [];
+      for (let i = 0; i < tags.length; i += 2) versions.push(tags[i + 1]);
+      delete g.versions_tags;
+      return { ...g, versions };
+    });
 
     const platforms = all(`SELECT DISTINCT sv.source as platform FROM set_versions sv WHERE sv.id IN (${ph})`, vids).map(p => p.platform);
 
@@ -510,7 +550,7 @@ app.get('/api/game-sets/:id/exports', async (req, res) => {
 app.get('/api/games', async (req, res) => {
   await dbReady;
   try {
-    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, collection_id, version_id } = req.query;
+    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, collection_id, version_id, parents_only } = req.query;
     const sortCol = sort === 'rating' ? 'COALESCE(r.rating, 0)' : sort === 'favourite' ? 'COALESCE(r.favourite, 0)' : sort === 'play_count' ? 'COALESCE(r.play_count, 0)' : 'g.name';
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
 
@@ -532,20 +572,35 @@ app.get('/api/games', async (req, res) => {
       where.push('g.version_id = ?');
       params.push(version_id);
     }
+    if (parents_only === 'true') {
+      where.push('g.cloneof IS NULL');
+    }
 
     const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
-    const countSql = `SELECT COUNT(*) as c FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id ${whereClause}`;
+    const countSql = `SELECT COUNT(DISTINCT g.name) as c FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id ${whereClause}`;
     const total = params.length ? get(countSql, params).c : get(countSql).c;
 
-    params.push(Number(limit), Number(offset));
-    const games = all(`
-      SELECT g.*, sv.source, sv.version,
-        COALESCE(r.rating, 0) as rating, COALESCE(r.favourite, 0) as favourite,
-        COALESCE(r.play_count, 0) as play_count
+    const sortCol2 = sort === 'rating' ? 'MAX(COALESCE(r.rating, 0))' : sort === 'favourite' ? 'MAX(COALESCE(r.favourite, 0))' : sort === 'play_count' ? 'MAX(COALESCE(r.play_count, 0))' : 'g.name';
+    const pageParams = params.slice();
+    pageParams.push(Number(limit), Number(offset));
+    let games = all(`
+      SELECT g.name, g.description, g.year, g.manufacturer, g.cloneof, g.platform,
+        MIN(g.id) as id, MIN(g.version_id) as version_id, MIN(sv.source) as source, MIN(sv.version) as version,
+        GROUP_CONCAT(sv.source || '||' || sv.version, '||') as versions_tags,
+        MAX(COALESCE(r.rating, 0)) as rating,
+        MAX(COALESCE(r.favourite, 0)) as favourite,
+        MAX(COALESCE(r.play_count, 0)) as play_count
       FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id
       LEFT JOIN game_ratings r ON r.game_entry_id = g.id
-      ${whereClause} ORDER BY ${sortCol} ${sortDir}, g.name LIMIT ? OFFSET ?
-    `, params);
+      ${whereClause} GROUP BY g.name ORDER BY ${sortCol2} ${sortDir} LIMIT ? OFFSET ?
+    `, pageParams);
+    games = games.map(g => {
+      const tags = g.versions_tags ? g.versions_tags.split('||') : [];
+      const versions = [];
+      for (let i = 0; i < tags.length; i += 2) versions.push(tags[i + 1]);
+      delete g.versions_tags;
+      return { ...g, versions };
+    });
     res.json({ games, total, limit: Number(limit), offset: Number(offset) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -555,10 +610,259 @@ app.get('/api/games/:id', async (req, res) => {
   try {
     const game = get('SELECT g.*, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [req.params.id]);
     if (!game) return res.status(404).json({ error: 'not found' });
+    // Parse JSON columns
+    if (typeof game.covers === 'string') try { game.covers = JSON.parse(game.covers); } catch { game.covers = []; }
+    if (typeof game.screenshots === 'string') try { game.screenshots = JSON.parse(game.screenshots); } catch { game.screenshots = []; }
+    if (typeof game.synopsis === 'string') try { game.synopsis = JSON.parse(game.synopsis); } catch {} // already a string, no-op
     const roms = all('SELECT * FROM rom_entries WHERE game_entry_id = ?', [game.id]);
     const scanned = all('SELECT * FROM scanned_games WHERE name = ? AND version_id = ?', [game.name, game.version_id]);
     const rating = get('SELECT * FROM game_ratings WHERE game_entry_id = ?', [game.id]);
-    res.json({ ...game, roms, scanned_games: scanned, rating });
+    // Find clone variants (games where cloneof = this game's name, in the same version)
+    const clones = all('SELECT id, name, description, cloneof FROM game_entries WHERE cloneof = ? AND version_id = ? ORDER BY name', [game.name, game.version_id]);
+    res.json({ ...game, roms, scanned_games: scanned, rating, clones });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/games/:id/scrape', async (req, res) => {
+  await dbReady;
+  try {
+    const game = get('SELECT * FROM game_entries WHERE id = ?', [req.params.id]);
+    if (!game) return res.status(404).json({ error: 'Game not found' });
+
+    function trySearch(query, platform) {
+      const args = ['search', query];
+      if (platform) args.push('--platform', platform);
+      const r = execCli(args, { binary: 'scraper' });
+      if (r?.results?.length) return r;
+      return null;
+    }
+
+    // Build search candidates in priority order
+    const candidates = [];
+
+    // 1. Description with region/set suffixes stripped (e.g., "2010: The Graphic Action Game (USA)" → "2010: The Graphic Action Game")
+    if (game.description) {
+      const stripped = game.description.replace(/\s*\([^)]*\)\s*/g, '').trim();
+      if (stripped && !candidates.includes(stripped)) candidates.push(stripped);
+      // Also try the raw description
+      if (!candidates.includes(game.description)) candidates.push(game.description);
+    }
+
+    // 2. ROM name with spaces at word boundaries
+    if (game.name) {
+      const spaced = game.name.replace(/([a-z])([A-Z0-9])/g, '$1 $2').replace(/([0-9])([A-Za-z])/g, '$1 $2');
+      if (spaced !== game.name && !candidates.includes(spaced)) candidates.push(spaced);
+    }
+
+    // 3. ROM name with known variant suffix stripped (e.g., "8eyesj" → "8eyes")
+    if (game.name) {
+      const VARIANT_SUFFIXES = ['j','u','e','a','w','p','h','b','f','s','k','ja','ju','us','ua','uk','eu','hk','tw','kr','fr','de','es','it','nl','br'];
+      for (const sfx of VARIANT_SUFFIXES) {
+        if (game.name.endsWith(sfx) && game.name.length > sfx.length + 2) {
+          const base = game.name.slice(0, -sfx.length);
+          const baseSpaced = base.replace(/([a-z])([A-Z0-9])/g, '$1 $2').replace(/([0-9])([A-Za-z])/g, '$1 $2');
+          if (!candidates.includes(baseSpaced)) candidates.push(baseSpaced);
+          if (!candidates.includes(base)) candidates.push(base);
+          break;
+        }
+      }
+    }
+
+    // 4. Raw ROM name as last resort
+    if (game.name && !candidates.includes(game.name)) candidates.push(game.name);
+
+    // Try searches, preferring arcade-matching results
+    let searchResult = null;
+    for (const q of candidates) {
+      const r = trySearch(q, game.platform);
+      if (!r) continue;
+      // Prefer results whose platform contains 'arcade' when game is arcade
+      if (game.platform === 'arcade' || !game.platform) {
+        const arcadeMatch = r.results.find(x => x.platform?.toLowerCase().includes('arcade'));
+        if (arcadeMatch) {
+          searchResult = { results: [arcadeMatch] };
+          break;
+        }
+      }
+      searchResult = r;
+      break;
+    }
+
+    if (!searchResult) {
+      return res.json({ scraped: false, error: 'No matches found in any provider' });
+    }
+
+    const first = searchResult.results[0];
+    let detailResult;
+    try {
+      detailResult = execCli(['detail', first.id], { binary: 'scraper' });
+    } catch {
+      return res.json({ scraped: false, error: 'Failed to get game details' });
+    }
+    if (!detailResult || detailResult.error) {
+      return res.json({ scraped: false, error: 'Detail fetch failed' });
+    }
+
+    const synopsis = detailResult.synopsis || '';
+    const rawDate = (detailResult.release_date || '').trim();
+    const year = (rawDate && !rawDate.startsWith('1970')) ? rawDate.substring(0, 4) : null;
+    const manufacturer = detailResult.publisher || detailResult.developer || null;
+
+    // Upgrade IGDB thumbnail sizes to larger resolutions
+    function upgradeCovers(urls) {
+      return (urls || []).map(u => {
+        const s = u.startsWith('//') ? 'https:' + u : u;
+        return s.replace('/t_thumb/', '/t_cover_big/');
+      });
+    }
+    function upgradeScreenshots(urls) {
+      return (urls || []).map(u => {
+        const s = u.startsWith('//') ? 'https:' + u : u;
+        return s.replace('/t_thumb/', '/t_screenshot_huge/');
+      });
+    }
+
+    if (synopsis || year || manufacturer || detailResult.covers?.length || detailResult.screenshots?.length) {
+      const updates = [];
+      const upParams = [];
+      if (synopsis) { updates.push('synopsis = ?'); upParams.push(synopsis); }
+      if (year) { updates.push('year = ?'); upParams.push(year); }
+      if (manufacturer) { updates.push('manufacturer = ?'); upParams.push(manufacturer); }
+      if (detailResult.covers?.length) {
+        updates.push('covers = ?');
+        upParams.push(JSON.stringify(upgradeCovers(detailResult.covers)));
+      }
+      if (detailResult.screenshots?.length) {
+        updates.push('screenshots = ?');
+        upParams.push(JSON.stringify(upgradeScreenshots(detailResult.screenshots)));
+      }
+      upParams.push(game.id);
+      run(`UPDATE game_entries SET ${updates.join(', ')} WHERE id = ?`, upParams);
+      saveDb();
+    }
+
+    const updated = get('SELECT g.*, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [game.id]);
+    // Parse JSON columns before returning (sql.js returns TEXT)
+    if (typeof updated.covers === 'string') try { updated.covers = JSON.parse(updated.covers); } catch { updated.covers = []; }
+    if (typeof updated.screenshots === 'string') try { updated.screenshots = JSON.parse(updated.screenshots); } catch { updated.screenshots = []; }
+    const hadData = synopsis || year || manufacturer || detailResult.covers?.length || detailResult.screenshots?.length;
+    res.json({ scraped: true, saved: !!hadData, title: first.title, game: updated });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Migration: fill empty descriptions for a version by re-downloading its DAT files
+app.post('/api/versions/:id/fill-descriptions', async (req, res) => {
+  await dbReady;
+  try {
+    const sv = get('SELECT * FROM set_versions WHERE id = ?', [req.params.id]);
+    if (!sv) return res.status(404).json({ error: 'Version not found' });
+
+    // Map source labels back to repo info
+    const SOURCE_REPOS = {
+      FBNeo: 'libretro/FBNeo',
+      FBAlpha43: 'barbudreadmon/fbalpha-backup-dontuse-ty',
+      FBAlpha44: 'libretro/fbalpha',
+    };
+    const repo = SOURCE_REPOS[sv.source];
+    if (!repo) return res.json({ updated: 0, error: `Source ${sv.source} not supported for re-import` });
+
+    // For nightly, use master ref; else use the version tag
+    const ref = (sv.source === 'FBNeo' && sv.version === 'nightly') ? 'master' : sv.version;
+    const contentsResp = await fetch(`https://api.github.com/repos/${repo}/contents/dats?ref=${ref}`);
+    if (!contentsResp.ok) throw new Error(`GitHub API HTTP ${contentsResp.status}`);
+    const contents = await contentsResp.json();
+    if (!Array.isArray(contents)) throw new Error('Invalid response');
+
+    let datFiles = contents.filter(f => f.name.endsWith('.dat') && f.download_url);
+    if (sv.source === 'FBAlpha43') {
+      const combined = datFiles.find(f => f.name.includes('0.2.97.43') && !f.name.includes('only'));
+      if (combined) datFiles = [combined];
+    }
+
+    // Build name → {desc, cloneof} map from DATs
+    const datMap = new Map();
+    for (const df of datFiles) {
+      const dlResp = await fetch(df.download_url);
+      if (!dlResp.ok) continue;
+      const text = await dlResp.text();
+      if (text.length < 10) continue;
+
+      if (text.trim().startsWith('<')) {
+        const blockRegex = /<game\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/game>/gi;
+        let m;
+        while ((m = blockRegex.exec(text)) !== null) {
+          if (datMap.has(m[1])) continue;
+          const descMatch = m[2].match(/<description>([^<]*)<\/description>/);
+          const cloneMatch = m[0].match(/cloneof\s*=\s*"([^"]+)"/);
+          datMap.set(m[1], {
+            desc: descMatch ? unescapeXml(descMatch[1].trim()) : '',
+            cloneof: cloneMatch ? cloneMatch[1] : null
+          });
+        }
+      } else {
+        let idx = 0;
+        while (idx < text.length) {
+          const gs = text.indexOf('game (', idx);
+          if (gs === -1) break;
+          let depth = 1;
+          let end = gs + 6;
+          while (end < text.length && depth > 0) {
+            if (text[end] === '(') depth++;
+            else if (text[end] === ')') depth--;
+            end++;
+          }
+          const block = text.slice(gs, end);
+          const nameMatch = block.match(/\bname\s+([^\s")]+)/);
+          if (nameMatch && !datMap.has(nameMatch[1])) {
+            const descMatch = block.match(/description\s+"([^"]+)"/);
+            const cloneMatch = block.match(/\bcloneof\s+([^\s")]+)/);
+            datMap.set(nameMatch[1], {
+              desc: descMatch ? unescapeXml(descMatch[1].trim()) : '',
+              cloneof: cloneMatch ? cloneMatch[1] : null
+            });
+          }
+          idx = end;
+        }
+      }
+    }
+
+    // Update game_entries — descriptions + cloneof
+    const games = all('SELECT id, name, description, cloneof FROM game_entries WHERE version_id = ? AND (description IS NULL OR description = "" OR length(description) > 80 OR cloneof IS NULL OR cloneof = "")', [sv.id]);
+    let updated = 0;
+    let synopsisMoved = 0;
+    let cloneofFilled = 0;
+    for (const g of games) {
+      const entry = datMap.get(g.name);
+      if (!entry) continue;
+      const desc = entry.desc;
+      const co = entry.cloneof;
+      const updates = [];
+      const upParams = [];
+      if (desc && (g.description !== desc)) {
+        // If current description was a scraped synopsis (long), move it to synopsis column
+        if (g.description && g.description.length > 80 && g.description !== desc) {
+          updates.push('description = ?', 'synopsis = ?');
+          upParams.push(desc, g.description);
+          synopsisMoved++;
+        } else {
+          updates.push('description = ?');
+          upParams.push(desc);
+        }
+      }
+      if (co && (!g.cloneof || g.cloneof !== co)) {
+        updates.push('cloneof = ?');
+        upParams.push(co);
+        cloneofFilled++;
+      }
+      if (updates.length > 0) {
+        upParams.push(g.id);
+        run(`UPDATE game_entries SET ${updates.join(', ')} WHERE id = ?`, upParams);
+        updated++;
+      }
+    }
+    saveDb();
+
+    res.json({ ok: true, total: games.length, updated, synopsis_moved: synopsisMoved, cloneof_filled: cloneofFilled });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -580,8 +884,29 @@ app.put('/api/games/:id/rating', async (req, res) => {
 app.get('/api/games/:id/cover', async (req, res) => {
   await dbReady;
   try {
-    const game = get('SELECT id, name FROM game_entries WHERE id = ?', [req.params.id]);
+    const game = get('SELECT id, name, covers FROM game_entries WHERE id = ?', [req.params.id]);
     if (!game) return res.status(404).end();
+
+    // If we have a saved cover, proxy it (avoids CORS/redirect issues)
+    if (game.covers) {
+      try {
+        const urls = JSON.parse(game.covers);
+        if (urls.length > 0) {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 5000);
+          const imgResp = await fetch(urls[0], { signal: controller.signal });
+          clearTimeout(timeout);
+          if (imgResp.ok) {
+            const buf = Buffer.from(await imgResp.arrayBuffer());
+            res.set('Content-Type', imgResp.headers.get('content-type') || 'image/jpeg');
+            res.set('Cache-Control', 'no-cache');
+            return res.send(buf);
+          }
+        }
+      } catch {}
+    }
+
+    // Fallback: placeholder SVG
     const hash = createHash('md5').update(game.name).digest('hex');
     const hue = parseInt(hash.slice(0, 6), 16) % 360;
     const sat = 50 + (parseInt(hash.slice(6, 8), 16) % 30);
@@ -620,12 +945,18 @@ app.get('/api/versions/:id/games', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// --- Available DAT versions from progettosnaps ---
+// --- Available DAT versions from progettosnaps / GitHub ---
 
 const MAME_DATS_URL = 'https://www.progettosnaps.net/dats/MAME/';
 let mameDatsCache = null;
 let mameDatsCacheTime = 0;
 const CACHE_TTL = 600_000;
+
+const FBNEO_REPO = 'libretro/FBNeo';
+const FBALPHA43_REPO = 'barbudreadmon/fbalpha-backup-dontuse-ty';
+const FBALPHA44_REPO = 'libretro/fbalpha';
+let fbneoDatsCache = null;
+let fbneoDatsCacheTime = 0;
 
 function parseMameVersion(str) {
   const m = str.trim().match(/^(\d+)\.(\d+)(?:b(\d+))?$/i);
@@ -635,12 +966,91 @@ function parseMameVersion(str) {
 function fmtVersion(v) { return v[2] > 0 ? `${v[0]}.${v[1]}b${v[2]}` : `${v[0]}.${v[1]}`; }
 function cmpVersion(a, b) { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i]; return 0; }
 
+async function getFBNeoVersions() {
+  if (fbneoDatsCache && Date.now() - fbneoDatsCacheTime < CACHE_TTL) return fbneoDatsCache;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  try {
+    const resp = await fetch(`https://api.github.com/repos/${FBNEO_REPO}/tags?per_page=100`, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (!resp.ok) throw new Error(`GitHub API HTTP ${resp.status}`);
+    const tags = await resp.json();
+    if (!Array.isArray(tags)) throw new Error('Invalid response from GitHub tags API');
+
+    const versions = tags.map(t => t.name);
+    // hardcoded FB Alpha versions — common on slower retro consoles
+    const fbalphaVersions = [
+      { version: '0.2.97.43', source: 'FBAlpha43', repo: FBALPHA43_REPO },
+      { version: '0.2.97.44', source: 'FBAlpha44', repo: FBALPHA44_REPO },
+    ];
+
+    const imported = all("SELECT id, source, version FROM set_versions WHERE source IN ('FBNeo','FBAlpha43','FBAlpha44') ORDER BY version");
+    const importedSet = new Set(imported.map(v => `${v.source}:${v.version}`));
+
+    // Ascending order: oldest first, nightly at the end
+    const allVersions = [
+      ...fbalphaVersions,
+      ...versions.slice().reverse().map(v => ({ version: v, source: 'FBNeo', repo: FBNEO_REPO, ref: v })),
+      { version: 'nightly', source: 'FBNeo', repo: FBNEO_REPO, ref: 'master', nightly: true },
+    ];
+
+    const missing = allVersions.filter(v => !importedSet.has(`${v.source}:${v.version}`));
+    const result = {
+      source: 'FBNeo',
+      latest: 'nightly',
+      hasNewer: missing.some(v => v.nightly || !importedSet.has(`FBNeo:${v.version}`)),
+      available: allVersions,
+      imported,
+      missing,
+    };
+
+    fbneoDatsCache = result;
+    fbneoDatsCacheTime = Date.now();
+    return result;
+  } catch (e) {
+    clearTimeout(timeoutId);
+    throw e;
+  }
+}
+
 app.get('/api/versions/available', async (req, res) => {
   await dbReady;
   try {
+    const source = (req.query.source || 'MAME').toUpperCase();
+
+    if (source === 'FBNEO') {
+      const fbneo = await getFBNeoVersions();
+      return res.json(fbneo);
+    }
+    if (source === 'FBALPHA43' || source === 'FBALPHA44') {
+      const is43 = source === 'FBALPHA43';
+      const src = is43 ? 'FBAlpha43' : 'FBAlpha44';
+      const repo = is43 ? FBALPHA43_REPO : FBALPHA44_REPO;
+      const ver = is43 ? '0.2.97.43' : '0.2.97.44';
+      const imported = all("SELECT id, source, version FROM set_versions WHERE source = ? ORDER BY version", [src]);
+      return res.json({
+        source: src,
+        latest: ver,
+        hasNewer: false,
+        available: [{ version: ver, source: src, repo }],
+        imported,
+        missing: imported.length === 0 ? [{ version: ver, source: src, repo }] : [],
+      });
+    }
+
+    // Default: MAME
     if (mameDatsCache && Date.now() - mameDatsCacheTime < CACHE_TTL) return res.json(mameDatsCache);
 
-    const html = await (await fetch(MAME_DATS_URL)).text();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    let html;
+    try {
+      const response = await fetch(MAME_DATS_URL, { signal: controller.signal });
+      html = await response.text();
+    } finally {
+      clearTimeout(timeoutId);
+    }
     const plainText = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
     const latestMatch = plainText.match(/Latest\s+dat\s+a\s*vailable:\s*([\d.\sb]+)/i);
     const latestVer = latestMatch ? parseMameVersion(latestMatch[1].replace(/\s+/g, '')) : null;
@@ -653,14 +1063,16 @@ app.get('/api/versions/available', async (req, res) => {
       const cellRegex = /<TD[^>]*>[\s\S]*?<\/TD>/gi;
       let cellMatch;
       while ((cellMatch = cellRegex.exec(rowMatch[1])) !== null) {
-        cells.push(cellMatch[0].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+        cells.push(cellMatch[0].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
       }
       if (cells.length >= 3) {
         const rawVer = cells[0].replace(/[()]/g, '').trim();
         const ver = rawVer.split(/\s+/)[0];
         const parsed = parseMameVersion(ver);
         if (parsed[0] > 0 || parsed[1] > 0) {
-          rows.push({ version: rawVer, parsed, date: cells[1] || '', hasDat: cells[2] !== '-' && cells[2] !== '', year: cells[1].match(/(\d{4})/)?.[1] || '' });
+          const allLinks = [...rowMatch[1].matchAll(/<a[^>]+href="([^"]+)"/gi)];
+          const url = allLinks.length > 0 ? allLinks[0][1].replace(/&amp;/g, '&') : null;
+          rows.push({ version: rawVer, parsed, date: cells[1] || '', hasDat: cells[2] !== '-' && cells[2] !== '', year: cells[1].match(/(\d{4})/)?.[1] || '', url });
         }
       }
     }
@@ -670,12 +1082,18 @@ app.get('/api/versions/available', async (req, res) => {
     const availableDats = rows.filter(r => r.hasDat && !importedParsed.some(iv => cmpVersion(iv.parsed, r.parsed) === 0));
     const hasNewer = latestVer ? !importedParsed.some(iv => cmpVersion(iv.parsed, latestVer) === 0) : false;
 
+    const _urls = {};
+    for (const r of rows) {
+      if (r.url) _urls[fmtVersion(r.parsed)] = r.url;
+    }
     const result = {
+      source: 'MAME',
       latest: latestVer ? fmtVersion(latestVer) : null, latestParsed: latestVer,
-      available: rows.filter(r => r.hasDat).map(r => ({ version: r.version, numeric: fmtVersion(r.parsed), date: r.date, year: r.year, parsed: r.parsed })),
+      available: rows.filter(r => r.hasDat).map(r => ({ version: r.version, numeric: fmtVersion(r.parsed), date: r.date, year: r.year, parsed: r.parsed, url: r.url })),
       imported: importedParsed,
-      missing: availableDats.map(r => ({ version: r.version, numeric: fmtVersion(r.parsed), date: r.date, parsed: r.parsed })),
+      missing: availableDats.map(r => ({ version: r.version, numeric: fmtVersion(r.parsed), date: r.date, parsed: r.parsed, url: r.url })),
       hasNewer,
+      _urls,
     };
 
     mameDatsCache = result;
@@ -687,22 +1105,333 @@ app.get('/api/versions/available', async (req, res) => {
 app.post('/api/versions/import-online', async (req, res) => {
   await dbReady;
   try {
-    const { collection_id, version } = req.body;
+    const { collection_id, version, source: reqSource, refresh } = req.body;
     if (!collection_id || !version) return res.status(400).json({ error: 'collection_id and version required' });
-    let row = get('SELECT id FROM set_versions WHERE source = ? AND version = ?', ['MAME', version]);
-    if (!row) {
-      const db = getDb();
-      db.run('INSERT INTO set_versions (source, version) VALUES (?, ?)', ['MAME', version]);
-      const result = db.exec('SELECT last_insert_rowid() as id');
-      if (result?.[0]?.values?.[0]) {
-        row = { id: result[0].values[0][0] };
+
+    const source = reqSource || 'MAME';
+
+    // --- Non-MAME: FBNeo / FBAlpha ---
+    if (source !== 'MAME') {
+      let repo, ref, srcLabel;
+      if (source === 'FBNeo') {
+        repo = FBNEO_REPO;
+        ref = version === 'nightly' ? 'master' : version;
+        srcLabel = 'FBNeo';
+      } else if (source === 'FBAlpha43') {
+        repo = FBALPHA43_REPO;
+        ref = 'master';
+        srcLabel = 'FBAlpha43';
+      } else if (source === 'FBAlpha44') {
+        repo = FBALPHA44_REPO;
+        ref = 'master';
+        srcLabel = 'FBAlpha44';
       } else {
-        return res.status(500).json({ error: 'Failed to create version' });
+        throw new Error(`Unknown source: ${source}`);
       }
+
+      // Fetch list of DAT files in the dats/ folder from GitHub API
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const contentsResp = await fetch(`https://api.github.com/repos/${repo}/contents/dats?ref=${ref}`, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (!contentsResp.ok) throw new Error(`GitHub API HTTP ${contentsResp.status}`);
+      const contents = await contentsResp.json();
+      if (!Array.isArray(contents)) throw new Error('Invalid response from GitHub contents API');
+
+      let datFiles = contents.filter(f => f.name.endsWith('.dat') && f.download_url);
+
+      // For FBAlpha43, prefer the combined DAT over individual system DATs
+      if (source === 'FBAlpha43') {
+        const combined = datFiles.find(f => f.name.includes('0.2.97.43') && !f.name.includes('only'));
+        if (combined) datFiles = [combined];
+      }
+
+      if (datFiles.length === 0) throw new Error('No DAT files found in the dats/ folder');
+
+      // Map DAT filename patterns to platform folder names
+      const PLATFORM_MAP = [
+        { match: /arcade/i, folder: 'arcade' },
+        { match: /neogeo only/i, folder: 'neogeo' },
+        { match: /neogeo pocket/i, folder: 'ngp' },
+        { match: /nes games/i, folder: 'nes' },
+        { match: /fds games/i, folder: 'fds' },
+        { match: /snes games/i, folder: 'snes' },
+        { match: /megadrive|mega.?drive/i, folder: 'megadriv' },
+        { match: /master system/i, folder: 'sms' },
+        { match: /game gear/i, folder: 'gamegear' },
+        { match: /pc-?engine/i, folder: 'pce' },
+        { match: /turbografx.?16/i, folder: 'tg16' },
+        { match: /suprgrafx/i, folder: 'sgx' },
+        { match: /colecovision/i, folder: 'coleco' },
+        { match: /msx 1|msx1/i, folder: 'msx' },
+        { match: /zx spectrum/i, folder: 'zxspectrum' },
+        { match: /fairchild channel.?f/i, folder: 'channelf' },
+        { match: /sg-?1000/i, folder: 'sg1000' },
+      ];
+      function platformFromName(filename) {
+        for (const p of PLATFORM_MAP) {
+          if (p.match.test(filename)) return p.folder;
+        }
+        return 'arcade'; // default for anything unrecognized
+      }
+
+      // Download and parse each DAT file, grouping games by platform
+      const gamesByPlatform = new Map(); // platform → Map(name → description)
+      for (const df of datFiles) {
+        const platform = platformFromName(df.name);
+        const dlResp = await fetch(df.download_url);
+        if (!dlResp.ok) continue;
+        const text = await dlResp.text();
+        if (text.length < 10) continue;
+
+        const localEntries = new Map();
+        if (text.trim().startsWith('<')) {
+          // Logiqx XML — extract name + description per game block
+          const blockRegex = /<game\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/game>/gi;
+          let m;
+          while ((m = blockRegex.exec(text)) !== null) {
+            if (localEntries.has(m[1])) continue;
+            const descMatch = m[2].match(/<description>([^<]*)<\/description>/);
+            const cloneMatch = m[0].match(/cloneof\s*=\s*"([^"]+)"/);
+            localEntries.set(m[1], { desc: descMatch ? unescapeXml(descMatch[1].trim()) : '', cloneof: cloneMatch ? cloneMatch[1] : null });
+          }
+
+        } else {
+          // ClrMamePro — parse balanced paren blocks
+          let idx = 0;
+          while (idx < text.length) {
+            const gs = text.indexOf('game (', idx);
+            if (gs === -1) break;
+            let depth = 1;
+            let end = gs + 6;
+            while (end < text.length && depth > 0) {
+              if (text[end] === '(') depth++;
+              else if (text[end] === ')') depth--;
+              end++;
+            }
+            const block = text.slice(gs, end);
+            const nameMatch = block.match(/\bname\s+([^\s")]+)/);
+            if (nameMatch && !localEntries.has(nameMatch[1])) {
+              const descMatch = block.match(/description\s+"([^"]+)"/);
+              const cloneMatch = block.match(/\bcloneof\s+([^\s")]+)/);
+              localEntries.set(nameMatch[1], { desc: descMatch ? unescapeXml(descMatch[1].trim()) : '', cloneof: cloneMatch ? cloneMatch[1] : null });
+            }
+            idx = end;
+          }
+        }
+        if (localEntries.size === 0) continue;
+
+        const existing = gamesByPlatform.get(platform);
+        if (existing) {
+          for (const [name, val] of localEntries) {
+            if (!existing.has(name)) existing.set(name, val);
+          }
+        } else {
+          gamesByPlatform.set(platform, localEntries);
+        }
+      }
+
+      if (gamesByPlatform.size === 0) throw new Error('No games found in any DAT file.');
+
+      // Create or find version row
+      let row = get('SELECT id FROM set_versions WHERE source = ? AND version = ?', [srcLabel, version]);
+      const existed = !!row;
+      if (!row) {
+        const db = getDb();
+        db.run('INSERT INTO set_versions (source, version) VALUES (?, ?)', [srcLabel, version]);
+        const result = db.exec('SELECT last_insert_rowid() as id');
+        if (result?.[0]?.values?.[0]) {
+          row = { id: result[0].values[0][0] };
+        } else {
+          throw new Error('Failed to create version');
+        }
+      } else if (refresh) {
+        run('DELETE FROM game_entries WHERE version_id = ?', [row.id]);
+      }
+
+      // Insert game entries with platform
+      const totalGames = [...gamesByPlatform.entries()].reduce((sum, [, map]) => sum + map.size, 0);
+      const insert = getDb().prepare('INSERT OR IGNORE INTO game_entries (version_id, name, description, platform, cloneof) VALUES (?, ?, ?, ?, ?)');
+      for (const [platform, nameMap] of gamesByPlatform) {
+        for (const [name, val] of nameMap) {
+          insert.bind([row.id, name, val.desc || '', platform, val.cloneof || null]);
+          insert.step();
+          insert.reset();
+        }
+      }
+      insert.free();
+      saveDb();
+
+      run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, row.id]);
+
+      fbneoDatsCache = null;
+      res.json({ ok: true, version_id: row.id, total_games: totalGames });
+      return;
     }
-    run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, row.id]);
-    mameDatsCache = null;
-    res.json({ ok: true, version_id: row.id });
+
+    // --- Original MAME flow ---
+    else {
+      let url = null;
+      if (mameDatsCache && mameDatsCache._urls) {
+        url = mameDatsCache._urls[version];
+      }
+      if (!url) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const resp = await fetch(MAME_DATS_URL, { signal: controller.signal });
+        const html = await resp.text();
+        clearTimeout(timeoutId);
+        const rowRegex = /<TR[^>]*>([\s\S]*?)<\/TR>/gi;
+        let rowMatch;
+        while ((rowMatch = rowRegex.exec(html)) !== null) {
+          const cells = [];
+          const cellRegex = /<TD[^>]*>[\s\S]*?<\/TD>/gi;
+          let cellMatch;
+          while ((cellMatch = cellRegex.exec(rowMatch[1])) !== null) {
+            cells.push(cellMatch[0].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
+          }
+          if (cells.length >= 3) {
+            const rawVer = cells[0].replace(/[()]/g, '').trim();
+            const ver = rawVer.split(/\s+/)[0];
+            const parsed = parseMameVersion(ver);
+            if (fmtVersion(parsed) === version) {
+              const linkMatch = rowMatch[1].match(/<a[^>]+href="([^"]+)"/i);
+              if (linkMatch) url = linkMatch[1].replace(/&amp;/g, '&');
+              break;
+            }
+          }
+        }
+      }
+      if (!url) throw new Error(`Could not find download URL for MAME version "${version}"`);
+
+      const ext = url.includes('.rar') ? '.rar' : '.7z';
+      const tempFile = path.join('/tmp', `mame_pack_${Date.now()}${ext}`);
+      try {
+        const dlController = new AbortController();
+        const dlTimeout = setTimeout(() => dlController.abort(), 180_000);
+        const dlRes = await fetch(url, { signal: dlController.signal });
+        clearTimeout(dlTimeout);
+        if (!dlRes.ok) throw new Error(`HTTP ${dlRes.status}`);
+        const buf = Buffer.from(await dlRes.arrayBuffer());
+        fs.writeFileSync(tempFile, buf);
+      } catch (dlErr) {
+        throw new Error(`Failed to download pack: ${dlErr.message}`);
+      }
+
+      const extractDir = path.join('/tmp', `mame_extract_${Date.now()}`);
+      fs.mkdirSync(extractDir, { recursive: true });
+      let text = '';
+      try {
+        try {
+          execSync(`7z e -y -o"${extractDir}" "${tempFile}"`, { encoding: 'utf-8' });
+        } catch (_) {
+          try {
+            execSync(`unrar e -y "${tempFile}" "${extractDir}/"`, { encoding: 'utf-8' });
+          } catch (_) {
+            throw new Error('Failed to extract pack archive (both 7z and unrar failed)');
+          }
+        }
+
+        const allFiles = [];
+        const walkDir = (dir) => {
+          for (const f of fs.readdirSync(dir)) {
+            const fp = path.join(dir, f);
+            if (fs.statSync(fp).isDirectory()) walkDir(fp);
+            else allFiles.push(fp);
+          }
+        };
+        walkDir(extractDir);
+        let foundDat = null;
+
+        for (const fp of allFiles) {
+          const base = path.basename(fp).toLowerCase();
+          if (base.endsWith('.dat') && !/without.?crc|nocrc/i.test(base) && base.includes(version.replace('.', ''))) {
+            foundDat = fp; break;
+          }
+          if (base.endsWith('.xml') && base.includes(version.replace('.', '')) && !foundDat) foundDat = fp;
+        }
+
+        if (!foundDat) {
+          for (const fp of allFiles) {
+            const base = path.basename(fp).toLowerCase();
+            if (!base.endsWith('.exe') && !base.endsWith('.7z') && !base.endsWith('.rar')) continue;
+            const nestedDir = path.join(extractDir, 'nested_' + path.basename(fp));
+            fs.mkdirSync(nestedDir);
+            let extracted = false;
+            try { execSync(`7z e -y -o"${nestedDir}" "${fp}"`, { encoding: 'utf-8' }); extracted = true; } catch (_) {}
+            if (!extracted) try { execSync(`unrar e -y "${fp}" "${nestedDir}/"`, { encoding: 'utf-8' }); extracted = true; } catch (_) {}
+            if (!extracted) continue;
+            const nestedFiles = [];
+            const walkNested = (d) => { for (const f of fs.readdirSync(d)) { const p = path.join(d, f); if (fs.statSync(p).isDirectory()) walkNested(p); else nestedFiles.push(p); } };
+            walkNested(nestedDir);
+            for (const fp2 of nestedFiles) {
+              const b2 = path.basename(fp2).toLowerCase();
+              if (b2.endsWith('.dat') && !/without.?crc|nocrc/i.test(b2)) { foundDat = fp2; break; }
+              if (b2.endsWith('.xml') && !foundDat) foundDat = fp2;
+            }
+            if (foundDat) break;
+          }
+        }
+
+        if (!foundDat) {
+          for (const fp of allFiles) {
+            const b = path.basename(fp).toLowerCase();
+            if (b.endsWith('.dat') && !/without.?crc|nocrc/i.test(b)) { foundDat = fp; break; }
+            if (b.endsWith('.xml') && !foundDat) foundDat = fp;
+          }
+        }
+
+        if (!foundDat) throw new Error(`No DAT/XML file found for version "${version}" in the archive`);
+
+        text = fs.readFileSync(foundDat, 'utf-8');
+      } finally {
+        try { fs.rmSync(extractDir, { recursive: true }); } catch (_) {}
+        try { fs.unlinkSync(tempFile); } catch (_) {}
+      }
+
+      if (!text || text.length < 10) throw new Error(`Empty or invalid DAT content (size=${text?.length || 0})`);
+
+      const gameNames = [];
+      if (text.trim().startsWith('<')) {
+        const gameRegex = /<(?:game|machine)\s+name="([^"]+)"/gi;
+        let m;
+        while ((m = gameRegex.exec(text)) !== null) gameNames.push(m[1]);
+      } else {
+        const gameRegex = /game\s*\([\s\S]*?name\s+([^\s")]+)/gi;
+        let m;
+        while ((m = gameRegex.exec(text)) !== null) gameNames.push(m[1]);
+      }
+      if (gameNames.length === 0) throw new Error('No games found in DAT file.');
+
+      let row = get('SELECT id FROM set_versions WHERE source = ? AND version = ?', ['MAME', version]);
+      const existed = !!row;
+      if (!row) {
+        const db = getDb();
+        db.run('INSERT INTO set_versions (source, version) VALUES (?, ?)', ['MAME', version]);
+        const result = db.exec('SELECT last_insert_rowid() as id');
+        if (result?.[0]?.values?.[0]) {
+          row = { id: result[0].values[0][0] };
+        } else {
+          throw new Error('Failed to create version');
+        }
+      } else if (refresh) {
+        run('DELETE FROM game_entries WHERE version_id = ?', [row.id]);
+      }
+
+      const insert = getDb().prepare('INSERT OR IGNORE INTO game_entries (version_id, name, description) VALUES (?, ?, ?)');
+      for (const name of gameNames) {
+        insert.bind([row.id, name, '']);
+        insert.step();
+        insert.reset();
+      }
+      insert.free();
+      saveDb();
+
+      run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, row.id]);
+
+      mameDatsCache = null;
+      res.json({ ok: true, version_id: row.id, total_games: gameNames.length });
+    }
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -736,7 +1465,7 @@ app.post('/api/versions/import-dat', async (req, res) => {
       if (verMatch) version = verMatch[1];
       if (text.match(/<(?:mame|datafile|clrmamepro)[^>]*>/i)) source = 'DAT';
     } else {
-      const gameRegex = /game\s*\(\s*name\s+"([^"]+)"/gi;
+      const gameRegex = /game\s*\([\s\S]*?name\s+([^\s")]+)/gi;
       let match;
       while ((match = gameRegex.exec(text)) !== null) gameNames.push(match[1]);
     }
@@ -793,6 +1522,17 @@ app.post('/api/scraper/hash', async (req, res) => {
     const { file } = req.body;
     if (!file) return res.status(400).json({ error: 'file required' });
     const result = execCli(['hash', file], { binary: 'scraper' });
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/scraper/detail', async (req, res) => {
+  try {
+    const { game_id, source } = req.body;
+    if (!game_id) return res.status(400).json({ error: 'game_id required' });
+    const args = ['detail', game_id];
+    if (source) args.push('--source', source);
+    const result = execCli(args, { binary: 'scraper' });
     res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

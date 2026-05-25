@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS game_entries (
     year        TEXT,
     manufacturer TEXT,
     cloneof     TEXT,
+    platform    TEXT DEFAULT '',
     FOREIGN KEY (version_id) REFERENCES set_versions(id) ON DELETE CASCADE,
     UNIQUE(version_id, name)
 );
