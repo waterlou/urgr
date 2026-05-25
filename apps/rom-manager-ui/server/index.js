@@ -271,6 +271,47 @@ app.post('/api/collections/:id/verify', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// --- Collection Build (with version fallback) ---
+
+app.post('/api/collections/:id/build', async (req, res) => {
+  await dbReady;
+  try {
+    const { version_id, import_dir } = req.body;
+    if (!version_id || !import_dir) return res.status(400).json({ error: 'version_id and import_dir required' });
+
+    const col = get('SELECT id, slug, folder FROM collections WHERE id = ?', [req.params.id]);
+    if (!col) return res.status(404).json({ error: 'Collection not found' });
+    const sv = get('SELECT source, version FROM set_versions WHERE id = ?', [version_id]);
+    if (!sv) return res.status(404).json({ error: 'Version not found' });
+
+    const collectionDir = path.join(__dirname, '..', '..', '..', 'data', 'roms', col.folder || col.slug);
+    const jobId = crypto.randomUUID();
+    const job = createJob(jobId);
+    job._abort = new AbortController();
+
+    setTimeout(async () => {
+      try {
+        // Run build-cli build with collection-dir
+        const args = ['build', sv.source, import_dir, '--base-dir', collectionDir, '--collection-dir', collectionDir, '--progress'];
+        execCliStream(args, {
+          binary: 'build',
+          onProgress: (p) => updateProgress(jobId, p.pct || 0, p.msg || ''),
+          signal: job._abort.signal,
+        }).then(result => {
+          doneJob(jobId, result);
+        }).catch(err => {
+          failJob(jobId, err.message);
+        });
+      } catch (e) {
+        if (job._abort.signal.aborted) return;
+        failJob(jobId, e.message);
+      }
+    }, 0);
+
+    res.status(202).json({ jobId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // --- Builds ---
 
 app.get('/api/collections/:id/builds', async (req, res) => {
@@ -1148,121 +1189,48 @@ app.post('/api/versions/import-online', async (req, res) => {
 
       if (datFiles.length === 0) throw new Error('No DAT files found in the dats/ folder');
 
+      // Download each DAT to temp and import via parse-cli (handles games + ROM entries)
       // Map DAT filename patterns to platform folder names
       const PLATFORM_MAP = [
-        { match: /arcade/i, folder: 'arcade' },
-        { match: /neogeo only/i, folder: 'neogeo' },
-        { match: /neogeo pocket/i, folder: 'ngp' },
-        { match: /nes games/i, folder: 'nes' },
-        { match: /fds games/i, folder: 'fds' },
-        { match: /snes games/i, folder: 'snes' },
-        { match: /megadrive|mega.?drive/i, folder: 'megadriv' },
-        { match: /master system/i, folder: 'sms' },
-        { match: /game gear/i, folder: 'gamegear' },
-        { match: /pc-?engine/i, folder: 'pce' },
-        { match: /turbografx.?16/i, folder: 'tg16' },
-        { match: /suprgrafx/i, folder: 'sgx' },
-        { match: /colecovision/i, folder: 'coleco' },
-        { match: /msx 1|msx1/i, folder: 'msx' },
-        { match: /zx spectrum/i, folder: 'zxspectrum' },
-        { match: /fairchild channel.?f/i, folder: 'channelf' },
+        { match: /arcade/i, folder: 'arcade' }, { match: /neogeo only/i, folder: 'neogeo' },
+        { match: /neogeo pocket/i, folder: 'ngp' }, { match: /nes games/i, folder: 'nes' },
+        { match: /fds games/i, folder: 'fds' }, { match: /snes games/i, folder: 'snes' },
+        { match: /megadrive|mega.?drive/i, folder: 'megadriv' }, { match: /master system/i, folder: 'sms' },
+        { match: /game gear/i, folder: 'gamegear' }, { match: /pc-?engine/i, folder: 'pce' },
+        { match: /turbografx.?16/i, folder: 'tg16' }, { match: /suprgrafx/i, folder: 'sgx' },
+        { match: /colecovision/i, folder: 'coleco' }, { match: /msx 1|msx1/i, folder: 'msx' },
+        { match: /zx spectrum/i, folder: 'zxspectrum' }, { match: /fairchild channel.?f/i, folder: 'channelf' },
         { match: /sg-?1000/i, folder: 'sg1000' },
       ];
       function platformFromName(filename) {
-        for (const p of PLATFORM_MAP) {
-          if (p.match.test(filename)) return p.folder;
-        }
-        return 'arcade'; // default for anything unrecognized
+        for (const p of PLATFORM_MAP) { if (p.match.test(filename)) return p.folder; }
+        return 'arcade';
       }
 
-      // Download and parse each DAT file, grouping games by platform
-      const gamesByPlatform = new Map(); // platform → Map(name → description)
+      let totalGames = 0;
       for (const df of datFiles) {
-        const platform = platformFromName(df.name);
         const dlResp = await fetch(df.download_url);
         if (!dlResp.ok) continue;
         const text = await dlResp.text();
         if (text.length < 10) continue;
 
-        const localEntries = new Map();
-        if (text.trim().startsWith('<')) {
-          // Logiqx XML — extract name + description per game block
-          const blockRegex = /<game\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/game>/gi;
-          let m;
-          while ((m = blockRegex.exec(text)) !== null) {
-            if (localEntries.has(m[1])) continue;
-            const descMatch = m[2].match(/<description>([^<]*)<\/description>/);
-            const cloneMatch = m[0].match(/cloneof\s*=\s*"([^"]+)"/);
-            localEntries.set(m[1], { desc: descMatch ? unescapeXml(descMatch[1].trim()) : '', cloneof: cloneMatch ? cloneMatch[1] : null });
-          }
+        const plat = platformFromName(df.name);
+        const tmpFile = path.join('/tmp', `fbneo_import_${Date.now()}_${Math.random().toString(36).slice(2)}.dat`);
+        fs.writeFileSync(tmpFile, text, 'utf-8');
 
-        } else {
-          // ClrMamePro — parse balanced paren blocks
-          let idx = 0;
-          while (idx < text.length) {
-            const gs = text.indexOf('game (', idx);
-            if (gs === -1) break;
-            let depth = 1;
-            let end = gs + 6;
-            while (end < text.length && depth > 0) {
-              if (text[end] === '(') depth++;
-              else if (text[end] === ')') depth--;
-              end++;
-            }
-            const block = text.slice(gs, end);
-            const nameMatch = block.match(/\bname\s+([^\s")]+)/);
-            if (nameMatch && !localEntries.has(nameMatch[1])) {
-              const descMatch = block.match(/description\s+"([^"]+)"/);
-              const cloneMatch = block.match(/\bcloneof\s+([^\s")]+)/);
-              localEntries.set(nameMatch[1], { desc: descMatch ? unescapeXml(descMatch[1].trim()) : '', cloneof: cloneMatch ? cloneMatch[1] : null });
-            }
-            idx = end;
-          }
-        }
-        if (localEntries.size === 0) continue;
-
-        const existing = gamesByPlatform.get(platform);
-        if (existing) {
-          for (const [name, val] of localEntries) {
-            if (!existing.has(name)) existing.set(name, val);
-          }
-        } else {
-          gamesByPlatform.set(platform, localEntries);
+        try {
+          const result = execCli(['import', tmpFile, srcLabel, version, '--platform', plat], { binary: 'parse' });
+          if (result) totalGames += result.games_inserted || 0;
+        } catch (e) {
+          console.error('parse-cli error for', df.name, e.message);
+        } finally {
+          fs.unlinkSync(tmpFile);
         }
       }
 
-      if (gamesByPlatform.size === 0) throw new Error('No games found in any DAT file.');
-
-      // Create or find version row
-      let row = get('SELECT id FROM set_versions WHERE source = ? AND version = ?', [srcLabel, version]);
-      const existed = !!row;
-      if (!row) {
-        const db = getDb();
-        db.run('INSERT INTO set_versions (source, version) VALUES (?, ?)', [srcLabel, version]);
-        const result = db.exec('SELECT last_insert_rowid() as id');
-        if (result?.[0]?.values?.[0]) {
-          row = { id: result[0].values[0][0] };
-        } else {
-          throw new Error('Failed to create version');
-        }
-      } else if (refresh) {
-        run('DELETE FROM game_entries WHERE version_id = ?', [row.id]);
-      }
-
-      // Insert game entries with platform
-      const totalGames = [...gamesByPlatform.entries()].reduce((sum, [, map]) => sum + map.size, 0);
-      const insert = getDb().prepare('INSERT OR IGNORE INTO game_entries (version_id, name, description, platform, cloneof) VALUES (?, ?, ?, ?, ?)');
-      for (const [platform, nameMap] of gamesByPlatform) {
-        for (const [name, val] of nameMap) {
-          insert.bind([row.id, name, val.desc || '', platform, val.cloneof || null]);
-          insert.step();
-          insert.reset();
-        }
-      }
-      insert.free();
-      saveDb();
-
-      run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, row.id]);
+      // Link to collection
+      const row = get('SELECT id FROM set_versions WHERE source = ? AND version = ?', [srcLabel, version]);
+      if (row) run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, row.id]);
 
       fbneoDatsCache = null;
       res.json({ ok: true, version_id: row.id, total_games: totalGames });
@@ -1391,34 +1359,16 @@ app.post('/api/versions/import-online', async (req, res) => {
 
       if (!text || text.length < 10) throw new Error(`Empty or invalid DAT content (size=${text?.length || 0})`);
 
-      const gameNames = [];
-      if (text.trim().startsWith('<')) {
-        const gameRegex = /<(?:game|machine)\s+name="([^"]+)"/gi;
-        let m;
-        while ((m = gameRegex.exec(text)) !== null) gameNames.push(m[1]);
-      } else {
-        const gameRegex = /game\s*\([\s\S]*?name\s+([^\s")]+)/gi;
-        let m;
-        while ((m = gameRegex.exec(text)) !== null) gameNames.push(m[1]);
+      // Save to temp and import via parse-cli
+      const tmpFile = path.join('/tmp', `mame_import_${Date.now()}_${version.replace(/[^a-zA-Z0-9]/g, '_')}.dat`);
+      fs.writeFileSync(tmpFile, text, 'utf-8');
+      try {
+        execCli(['import', tmpFile, 'MAME', version], { binary: 'parse' });
+      } finally {
+        fs.unlinkSync(tmpFile);
       }
-      if (gameNames.length === 0) throw new Error('No games found in DAT file.');
 
       let row = get('SELECT id FROM set_versions WHERE source = ? AND version = ?', ['MAME', version]);
-      const existed = !!row;
-      if (!row) {
-        const db = getDb();
-        db.run('INSERT INTO set_versions (source, version) VALUES (?, ?)', ['MAME', version]);
-        const result = db.exec('SELECT last_insert_rowid() as id');
-        if (result?.[0]?.values?.[0]) {
-          row = { id: result[0].values[0][0] };
-        } else {
-          throw new Error('Failed to create version');
-        }
-      } else if (refresh) {
-        run('DELETE FROM game_entries WHERE version_id = ?', [row.id]);
-      }
-
-      const insert = getDb().prepare('INSERT OR IGNORE INTO game_entries (version_id, name, description) VALUES (?, ?, ?)');
       for (const name of gameNames) {
         insert.bind([row.id, name, '']);
         insert.step();
@@ -1430,7 +1380,7 @@ app.post('/api/versions/import-online', async (req, res) => {
       run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, row.id]);
 
       mameDatsCache = null;
-      res.json({ ok: true, version_id: row.id, total_games: gameNames.length });
+      res.json({ ok: true, version_id: row.id });
     }
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1538,6 +1488,124 @@ app.post('/api/scraper/detail', async (req, res) => {
 });
 
 // =============================================================================
+// Internet Archive download
+// =============================================================================
+
+app.post('/api/collections/:id/download-ia', async (req, res) => {
+  await dbReady;
+  try {
+    const { item, file_pattern, dest_dir } = req.body;
+    if (!item || !dest_dir) return res.status(400).json({ error: 'item and dest_dir required' });
+
+    // Resolve IA download URL
+    const metaResp = await fetch(`https://archive.org/metadata/${item}`);
+    if (!metaResp.ok) return res.status(404).json({ error: `IA item "${item}" not found` });
+    const meta = await metaResp.json();
+    const files = meta.files || [];
+    const target = file_pattern
+      ? files.find(f => f.name.includes(file_pattern) && f.size > 0)
+      : files.filter(f => f.size > 0 && !f.name.startsWith('__') && !f.name.endsWith('.xml') && !f.name.endsWith('.sqlite') && !f.name.endsWith('.torrent') && !f.name.endsWith('.jpg'))[0];
+    if (!target) return res.status(404).json({ error: 'No matching file found in IA item' });
+
+    const dlUrl = `https://archive.org/download/${item}/${target.name}`;
+    const totalSize = parseInt(target.size, 10);
+    const baseName = target.name.split('/').pop() || target.name;
+    const destFile = path.join(dest_dir, baseName);
+
+    // Create job
+    const jobId = crypto.randomUUID();
+    const job = createJob(jobId);
+    job._abort = new AbortController();
+
+    setTimeout(async () => {
+      try {
+        fs.mkdirSync(dest_dir, { recursive: true });
+
+        // Resume partial downloads
+        let startByte = 0;
+        if (fs.existsSync(destFile)) {
+          const stats = fs.statSync(destFile);
+          startByte = stats.size;
+        }
+
+        const headers = {};
+        if (startByte > 0) headers['Range'] = `bytes=${startByte}-`;
+        const dlResp = await fetch(dlUrl, { headers, signal: job._abort.signal });
+        if (!dlResp.ok && dlResp.status !== 206) throw new Error(`HTTP ${dlResp.status}`);
+
+        const stream = fs.createWriteStream(destFile, { flags: startByte > 0 ? 'a' : 'w' });
+        const reader = dlResp.body.getReader();
+        let downloaded = startByte;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          stream.write(Buffer.from(value));
+          downloaded += value.length;
+          const pct = Math.round((downloaded / totalSize) * 100);
+          updateProgress(jobId, pct, `Downloading ${baseName} — ${(downloaded / 1024 / 1024).toFixed(1)} / ${(totalSize / 1024 / 1024).toFixed(0)} MB (${pct}%)`);
+        }
+
+        await new Promise(resolve => stream.end(resolve));
+        updateProgress(jobId, 100, 'Download complete, extracting...');
+
+        // Extract zip
+        let extractDir = dest_dir;
+        if (baseName.endsWith('.zip')) {
+          extractDir = path.join(dest_dir, baseName.replace(/\.zip$/, ''));
+          fs.mkdirSync(extractDir, { recursive: true });
+          execSync(`unzip -o "${destFile}" -d "${extractDir}"`, { stdio: 'ignore' });
+          updateProgress(jobId, 100, `Extracted to ${extractDir}`);
+        }
+
+        doneJob(jobId, { dest_dir: extractDir, file_count: files.length });
+      } catch (e) {
+        if (job._abort.signal.aborted) return cancelJob(jobId);
+        failJob(jobId, e.message);
+      }
+    }, 0);
+
+    res.status(202).json({ jobId, file: target.name, size: totalSize });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// =============================================================================
+// Remote ZIP (Internet Archive) — list + download individual ROMs
+// =============================================================================
+
+app.post('/api/ia/list', async (req, res) => {
+  try {
+    const { url, pattern } = req.body;
+    if (!url) return res.status(400).json({ error: 'url required' });
+    const { RemoteZip } = await import('./remote-zip.js');
+    const rz = new RemoteZip(url);
+    const files = await rz.listFiles(pattern);
+    res.json({ files: files.map(f => ({ name: f.name, size: f.uncompressedSize })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/ia/download', async (req, res) => {
+  await dbReady;
+  try {
+    const { url, entry, collection_id } = req.body;
+    if (!url || !entry) return res.status(400).json({ error: 'url and entry required' });
+    const baseDir = path.join(__dirname, '..', '..', '..', 'data', 'roms');
+    let dest = path.join(baseDir, entry.replace(/^roms\//, ''));
+    console.log('[ia-download] collection_id:', collection_id);
+    if (collection_id) {
+      const col = get('SELECT id, folder FROM collections WHERE id = ?', [collection_id]);
+      console.log('[ia-download] collection query result:', JSON.stringify(col));
+      if (col?.folder) dest = path.join(baseDir, col.folder, entry.replace(/^roms\//, ''));
+      console.log('[ia-download] resolved dest:', dest);
+    }
+    const { RemoteZip } = await import('./remote-zip.js');
+    const rz = new RemoteZip(url);
+    const result = await rz.extractToFile(entry, dest);
+    res.json({ ok: true, ...result, path: dest });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// =============================================================================
 // Jobs (SSE progress streams)
 // =============================================================================
 app.get('/api/jobs/:jobId', (req, res) => {
@@ -1545,11 +1613,14 @@ app.get('/api/jobs/:jobId', (req, res) => {
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
   if (job.status !== 'running') {
-    return res.json({
-      type: job.status,
-      ...(job.result ? { data: job.result } : {}),
-      ...(job.error ? { error: job.error } : {}),
-    });
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+    if (job.status === 'done' && job.result) {
+      res.write(`data: ${JSON.stringify({ type: 'result', data: job.result })}\n\n`);
+    } else if (job.error) {
+      res.write(`data: ${JSON.stringify({ type: 'error', error: job.error })}\n\n`);
+    }
+    res.end();
+    return;
   }
 
   res.writeHead(200, {

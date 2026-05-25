@@ -75,7 +75,7 @@ export function execCli(args, { binary = 'build' } = {}) {
 
   let stdout;
   try {
-    const opts = { encoding: 'utf-8', timeout: 120000 };
+    const opts = { encoding: 'utf-8', timeout: 120000, maxBuffer: 100 * 1024 * 1024 };
     if (binary === 'scraper') opts.env = loadScraperEnv();
     stdout = execFileSync(cmdArgs[0], cmdArgs.slice(1), opts);
   } catch (e) {
@@ -149,7 +149,20 @@ export function execCliStream(args, { binary = 'build', onProgress, signal } = {
           resolve({ raw: stdout.trim() });
         }
       } else {
-        const errMsg = stderr.split('\n').filter(l => !l.startsWith('{')).pop() || `CLI exited with code ${code}`;
+        // Try to extract error from stderr (skip JSON progress lines)
+        const stderrLines = stderr.split('\n').filter(l => l.trim());
+        const nonJson = stderrLines.filter(l => !l.trim().startsWith('{'));
+        let errMsg = nonJson.pop() || '';
+        // If stderr has no useful error, try stdout
+        if (!errMsg) {
+          try {
+            const out = JSON.parse(stdout.trim());
+            errMsg = out.error || JSON.stringify(out);
+          } catch {
+            errMsg = stdout.trim().slice(0, 200) || `CLI exited with code ${code}`;
+          }
+        }
+        console.error(`[cli] ${binary} exited with code ${code}: ${errMsg}`);
         reject(new Error(`CLI error: ${errMsg}`));
       }
     });

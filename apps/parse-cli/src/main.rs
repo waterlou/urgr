@@ -115,9 +115,10 @@ fn main() -> ExitCode {
     let file = &args[2];
     let source = &args[3];
     let version = &args[4];
-    let dir = args.get(5).and_then(|a| {
-        if a == "--dir" { args.get(6) } else { None }
-    });
+    let dir = args.iter().position(|a| a == "--dir")
+        .and_then(|p| args.get(p + 1));
+    let platform = args.iter().position(|a| a == "--platform")
+        .and_then(|p| args.get(p + 1));
 
     let path = std::path::Path::new(file);
     if !path.exists() {
@@ -151,7 +152,15 @@ fn main() -> ExitCode {
     let mut parser_id_to_db_id: HashMap<i64, i64> = HashMap::new();
     for game in &games {
         match db.insert_game(version_id, game) {
-            Ok(db_id) => { parser_id_to_db_id.insert(game.id, db_id); }
+            Ok(db_id) => {
+                parser_id_to_db_id.insert(game.id, db_id);
+                // Set platform if provided
+                if let Some(p) = platform {
+                    if let Err(e) = db.set_game_platform(db_id, p) {
+                        eprintln!("Failed to set platform: {}", e);
+                    }
+                }
+            }
             Err(e) => { eprintln!("Failed to insert game {}: {}", game.name, e); return ExitCode::FAILURE; }
         }
     }

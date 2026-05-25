@@ -4,7 +4,8 @@ import {
   getAvailableVersions, getCollectionBuilds, startCollectionBuild, updateCollectionBuild,
   exportCollection, getVersions, addCollectionVersion, getCollectionGames,
   importOnlineVersion, scanCollection, verifyCollection, subscribeJobSSE,
-  runCollectionBuild, cancelJob,
+  runCollectionBuild, cancelJob, downloadFromIA, iaListFiles, iaDownloadEntry,
+  collectionBuild,
 } from '../api.js'
 
 function waitForJob(jobId) {
@@ -31,14 +32,87 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
   const [importingVer, setImportingVer] = useState(null)
   const [gameCount, setGameCount] = useState(0)
   const [scanDir, setScanDir] = useState('')
+  const [scanVersion, setScanVersion] = useState('')
   const [scanning, setScanning] = useState(false)
   const [scanResult, setScanResult] = useState(null)
   const [verifyDir, setVerifyDir] = useState('')
+  const [verifyVersion, setVerifyVersion] = useState('')
   const [verifyFallback, setVerifyFallback] = useState('')
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState(null)
   const [buildProgress, setBuildProgress] = useState({})
+  const [buildVersion, setBuildVersion] = useState('')
+  const [buildFormat, setBuildFormat] = useState('split')
+  const [buildImportDir, setBuildImportDir] = useState('')
+  const [buildRunning, setBuildRunning] = useState(false)
+  const [buildProgressMsg, setBuildProgressMsg] = useState('')
+  const [buildResult, setBuildResult] = useState(null)
+  const [iaDownloading, setIaDownloading] = useState(false)
+  const [iaProgress, setIaProgress] = useState(null)
+  const [iaError, setIaError] = useState(null)
+  const [iaSearchQuery, setIaSearchQuery] = useState('')
+  const [iaSearching, setIaSearching] = useState(false)
+  const [iaSearchResults, setIaSearchResults] = useState(null)
+  const [iaDownloadingRom, setIaDownloadingRom] = useState(null)
+  const [iaDownloadError, setIaDownloadError] = useState(null)
+  const [iaDownloadSuccess, setIaDownloadSuccess] = useState(null)
   const eventSourcesRef = useRef({})
+
+  async function handleIaDownload() {
+    const item = collection?.dataset_preset === 'Final Burn Neo' ? 'fbneo' : 'fbneo'
+    setIaDownloading(true)
+    setIaProgress(null)
+    setIaError(null)
+    try {
+      const { jobId } = await downloadFromIA(collectionId, item, 'FBNeo/roms.zip', '/tmp/ia_downloads')
+      subscribeJobSSE(jobId, {
+        onProgress: (msg) => setIaProgress(msg),
+        onResult: (data) => {
+          setIaDownloading(false)
+          setInfo(`Downloaded to ${data.dest_dir}`)
+        },
+        onError: (err) => {
+          setIaDownloading(false)
+          setIaError(err)
+        },
+      })
+    } catch (e) {
+      setIaDownloading(false)
+      setIaError(e.message)
+    }
+  }
+
+  const IA_ZIP_URL = 'https://archive.org/download/fbneo/FBNeo/roms.zip'
+
+  async function handleIaSearch() {
+    if (!iaSearchQuery.trim()) return
+    setIaSearching(true)
+    setIaSearchResults(null)
+    setIaDownloadError(null)
+    try {
+      const data = await iaListFiles(IA_ZIP_URL, iaSearchQuery.trim())
+      setIaSearchResults(data.files || [])
+    } catch (e) {
+      setIaDownloadError(e.message)
+    } finally {
+      setIaSearching(false)
+    }
+  }
+
+  async function handleIaDownloadRom(entry) {
+    setIaDownloadingRom(entry)
+    setIaDownloadError(null)
+    setIaDownloadSuccess(null)
+    try {
+      const result = await iaDownloadEntry(IA_ZIP_URL, entry, collectionId)
+      if (result.ok) setIaDownloadSuccess({ name: entry.replace(/^roms\//, ''), path: result.path, size: result.size })
+      else setIaDownloadError('Download failed')
+    } catch (e) {
+      setIaDownloadError(e.message)
+    } finally {
+      setIaDownloadingRom(null)
+    }
+  }
 
   function getDatSource() {
     // Map collection folder to DAT source identifier
@@ -114,29 +188,29 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
     eventSourcesRef.current[buildId] = es
   }
 
-  async function handleBuild(versionId, format) {
-    const version = versions.find(v => v.id === versionId)
-    if (!version) return
-    setBuildInProgress(versionId)
+  async function handleBuildStart() {
+    if (!buildVersion || !buildImportDir) return
+    setBuildRunning(true)
+    setBuildProgressMsg('Starting build...')
+    setBuildResult(null)
     setError(null)
-    setInfo(null)
     try {
-      const build = await startCollectionBuild(collectionId, versionId, format)
-      setBuilds(prev => {
-        const idx = prev.findIndex(b => b.version_id === versionId)
-        if (idx >= 0) { const updated = [...prev]; updated[idx] = build; return updated }
-        return [...prev, build]
+      const { jobId } = await collectionBuild(collectionId, parseInt(buildVersion), buildImportDir)
+      subscribeJobSSE(jobId, {
+        onProgress: (msg) => setBuildProgressMsg(msg.msg || `Progress: ${msg.pct}%`),
+        onResult: (data) => {
+          setBuildResult(data)
+          setBuildRunning(false)
+          setInfo(`Build complete: ${data.added} added, ${data.exists} existed, ${data.reused} reused, ${data.missing} missing`)
+        },
+        onError: (err) => {
+          setBuildRunning(false)
+          setError(err)
+        },
       })
-      const { jobId } = await runCollectionBuild(collectionId, build.id, {
-        source: version.source,
-        import_dir: `${version.dir || '/roms/' + version.source}/${version.source}`,
-        base_dir: '/roms',
-        update: false,
-      })
-      subscribeToRunningBuild(jobId)
     } catch (e) {
+      setBuildRunning(false)
       setError(e.message)
-      setBuildInProgress(null)
     }
   }
 
@@ -401,10 +475,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
             <div className="build-form">
               <h3>Scan</h3>
               <div className="build-form-row">
-                <select className="build-select" defaultValue="" onChange={e => {
-                  const v = e.target.value
-                  if (v && scanDir) handleScan(parseInt(v))
-                }}>
+                <select className="build-select" value={scanVersion} onChange={e => setScanVersion(e.target.value)}>
                   <option value="">Select version...</option>
                   {versions.map(v => (
                     <option key={v.id} value={v.id}>{v.source} — {v.version}</option>
@@ -418,10 +489,13 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
                   onChange={e => setScanDir(e.target.value)}
                   style={{flex:1}}
                 />
+                <button className="btn btn-primary" onClick={() => scanVersion && scanDir && handleScan(parseInt(scanVersion))} disabled={!scanVersion || !scanDir || scanning}>
+                  <span className="icon">search</span> Scan
+                </button>
                 {scanning && <div className="loading-inline"><div className="loading-spinner-sm" /> Scanning...</div>}
               </div>
               {scanResult && (
-                <div className="info-box">
+                <div className="info-box" style={{marginTop:8}}>
                   Total: {scanResult.total_files} files · Matched: {scanResult.matched_games} · Missing: {scanResult.missing_games}
                 </div>
               )}
@@ -430,10 +504,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
             <div className="build-form" style={{marginTop:12}}>
               <h3>Verify</h3>
               <div className="build-form-row">
-                <select className="build-select" defaultValue="" onChange={e => {
-                  const v = e.target.value
-                  if (v && verifyDir) handleVerify(parseInt(v))
-                }}>
+                <select className="build-select" value={verifyVersion} onChange={e => setVerifyVersion(e.target.value)}>
                   <option value="">Select version...</option>
                   {versions.map(v => (
                     <option key={v.id} value={v.id}>{v.source} — {v.version}</option>
@@ -455,6 +526,9 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
                   onChange={e => setVerifyFallback(e.target.value)}
                   style={{width:180}}
                 />
+                <button className="btn btn-primary" onClick={() => verifyVersion && verifyDir && handleVerify(parseInt(verifyVersion))} disabled={!verifyVersion || !verifyDir || verifying}>
+                  <span className="icon">check_circle</span> Verify
+                </button>
                 {verifying && <div className="loading-inline"><div className="loading-spinner-sm" /> Verifying...</div>}
               </div>
               {verifyResult && (
@@ -466,6 +540,45 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
             </div>
           </section>
         )}
+
+        {/* Internet Archive — Single ROM Download */}
+        <section className="detail-section">
+          <h2 className="detail-section-title">Download ROM from Internet Archive</h2>
+          <p className="detail-section-desc">Download individual ROM files from archive.org by game name.</p>
+          <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+            <input
+              type="text"
+              className="build-select"
+              placeholder="Game name (e.g. 1941)"
+              value={iaSearchQuery}
+              onChange={e => setIaSearchQuery(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleIaSearch()}
+              style={{flex:1, minWidth:200}}
+            />
+            <button className="btn btn-primary" onClick={handleIaSearch} disabled={iaSearching || !iaSearchQuery}>
+              <span className="icon">search</span> Search
+            </button>
+          </div>
+          {iaSearching && <div className="loading-inline" style={{marginTop:8}}><div className="loading-spinner-sm" /> Searching...</div>}
+          {iaSearchResults && iaSearchResults.length > 0 && (
+            <div className="ia-results" style={{marginTop:12}}>
+              {iaSearchResults.map(f => (
+                <div key={f.name} className="ia-result-item">
+                  <span className="ia-result-name">{f.name.replace('roms/', '')}</span>
+                  <span className="ia-result-size">{(f.size / 1024).toFixed(0)} KB</span>
+                  <button className="btn btn-sm btn-primary" onClick={() => handleIaDownloadRom(f.name)} disabled={iaDownloadingRom === f.name}>
+                    {iaDownloadingRom === f.name ? <span className="loading-spinner-sm" /> : <span className="icon">download</span>}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {iaSearchResults && iaSearchResults.length === 0 && !iaSearching && (
+            <p className="error-text" style={{marginTop:8}}>No matches found.</p>
+          )}
+          {iaDownloadError && <p className="error-text" style={{marginTop:8}}>{iaDownloadError}</p>}
+          {iaDownloadSuccess && <div className="info-box" style={{marginTop:8}}>Downloaded: <strong>{iaDownloadSuccess.name}</strong> → <code>{iaDownloadSuccess.path}</code> ({(iaDownloadSuccess.size / 1024).toFixed(0)} KB)</div>}
+        </section>
 
         {/* Build Management */}
         <section className="detail-section">
@@ -527,30 +640,41 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
 
           <div className="build-form">
             <h3>Start New Build</h3>
+            <p className="detail-section-desc" style={{marginBottom:12}}>
+              Builds ROMs from your import folder into <code>data/roms/{collection?.folder || collection?.slug}/&lt;version&gt;/roms/</code>.
+              Previously built versions are checked for matching checksums to avoid duplicates.
+            </p>
             <div className="build-form-row">
-              <select className="build-select" value="" onChange={e => {
-                const val = e.target.value
-                if (val) handleBuild(val, 'split')
-                e.target.value = ''
-              }}>
-                <option value="">Select a version to build...</option>
-                {versions.map(v => {
-                  const existing = getBuildForVersion(v.id)
-                  const disabled = existing && existing.status === 'complete'
-                  return (
-                    <option key={v.id} value={v.id} disabled={disabled}>
-                      {v.source} — {v.version} ({v.total_games} games) {disabled ? <span className="icon icon-xs" style={{verticalAlign:'middle'}}>check</span> : existing ? `(${existing.status})` : ''}
-                    </option>
-                  )
-                })}
+              <input type="text" className="build-select" placeholder="Import directory (e.g. /path/to/roms)" value={buildImportDir} onChange={e => setBuildImportDir(e.target.value)} style={{flex:1}} />
+              <select className="build-select" value={buildVersion} onChange={e => setBuildVersion(e.target.value)}>
+                <option value="">Select version...</option>
+                {versions.map(v => (
+                  <option key={v.id} value={v.id}>{v.source} — {v.version} ({v.total_games} games)</option>
+                ))}
               </select>
-              <select className="build-select" value={exportFormat} onChange={e => setExportFormat(e.target.value)} style={{width:120}}>
-                <option value="split">Split</option>
-                <option value="merged">Merged</option>
-                <option value="non-merged">Non-merged</option>
-              </select>
+              <button className="btn btn-primary" onClick={handleBuildStart} disabled={!buildVersion || !buildImportDir || buildRunning}>
+                <span className="icon">build</span> Build
+              </button>
             </div>
-            {buildInProgress && <div className="loading-inline"><div className="loading-spinner-sm" /> Building...</div>}
+            {buildRunning && (
+              <div className="info-box" style={{marginTop:12}}>
+                <div className="loading-inline"><div className="loading-spinner-sm" /> {buildProgressMsg}</div>
+              </div>
+            )}
+            {buildResult && (
+              <div className="info-box" style={{marginTop:12}}>
+                <strong>Build complete</strong> ({buildResult.elapsed}s)<br />
+                ✓ {buildResult.added} added · {buildResult.exists} existed · ♻ {buildResult.reused} reused · ✗ {buildResult.missing} missing · 🗑 {buildResult.cleaned} cleaned
+                {buildResult.missing > 0 && buildResult.missing_games?.length > 0 && (
+                  <details style={{marginTop:8,fontSize:13}}>
+                    <summary>Missing games ({buildResult.missing})</summary>
+                    <div style={{maxHeight:200,overflow:'auto',marginTop:4}}>
+                      {buildResult.missing_games.map(g => <div key={g}>{g}</div>)}
+                    </div>
+                  </details>
+                )}
+              </div>
+            )}
           </div>
         </section>
 

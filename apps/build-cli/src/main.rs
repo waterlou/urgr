@@ -76,8 +76,10 @@ struct BuildOutput {
     mode: String,
     prev_version: Option<String>,
     total_games: usize,
-    matched: usize,
+    added: usize,
+    exists: usize,
     unchanged: usize,
+    reused: usize,
     missing: usize,
     cleaned: usize,
     missing_games: Vec<String>,
@@ -349,7 +351,7 @@ fn cmd_diff(args: &[String], json: bool) -> ExitCode {
 
 fn cmd_build(args: &[String], json: bool) -> ExitCode {
     if args.len() < 3 {
-        eprintln!("Usage: build-cli build <source> <import-dir> [--update] [--base-dir <dir>] [--progress]");
+        eprintln!("Usage: build-cli build <source> <import-dir> [--update] [--base-dir <dir>] [--collection-dir <dir>] [--progress]");
         return ExitCode::FAILURE;
     }
     let source = &args[1];
@@ -365,6 +367,9 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
         .and_then(|p| args.get(p + 1))
         .map(|s| std::path::PathBuf::from(s))
         .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let collection_dir = args.iter().position(|a| a == "--collection-dir")
+        .and_then(|p| args.get(p + 1))
+        .map(|s| std::path::PathBuf::from(s));
 
     let db = match open_db() { Ok(d) => d, Err(e) => { eprintln!("{}", e); return ExitCode::FAILURE; } };
 
@@ -380,7 +385,7 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
         }
     };
 
-    match build_version(&db, source, import_dir, &base_dir, update, &progress_cb, &CANCEL_FLAG) {
+    match build_version(&db, source, import_dir, &base_dir, collection_dir.as_deref(), update, &progress_cb, &CANCEL_FLAG) {
         Ok(result) => {
             if json {
                 print_json(&BuildOutput {
@@ -389,8 +394,10 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
                     mode: result.mode,
                     prev_version: result.prev_version,
                     total_games: result.total_games,
-                    matched: result.matched,
+                    added: result.added,
+                    exists: result.exists,
                     unchanged: result.unchanged,
+                    reused: result.reused,
                     missing: result.missing,
                     cleaned: result.cleaned,
                     missing_games: result.missing_games,
@@ -402,7 +409,13 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
                     println!("  from v{} → v{}", pv, result.version);
                 }
                 println!("  total:     {}", result.total_games);
-                println!("  matched:   {} (copied)", result.matched);
+                println!("  added:     {} (newly copied)", result.added);
+                if result.exists > 0 {
+                    println!("  exists:    {} (already in place)", result.exists);
+                }
+                if result.reused > 0 {
+                    println!("  reused:    {} (from prior version)", result.reused);
+                }
                 if result.unchanged > 0 {
                     println!("  unchanged: {} (kept from prev)", result.unchanged);
                 }

@@ -66,6 +66,15 @@ export function scanCollection(id, version_id, dir) {
 export function verifyCollection(id, version_id, dir, fallback_id) {
   return fetchWithBody(`/collections/${id}/verify`, 'POST', { version_id, dir, fallback_id });
 }
+export function downloadFromIA(id, item, file_pattern, dest_dir) {
+  return fetchWithBody(`/collections/${id}/download-ia`, 'POST', { item, file_pattern, dest_dir });
+}
+export function iaListFiles(url, pattern) {
+  return fetchWithBody('/ia/list', 'POST', { url, pattern });
+}
+export function iaDownloadEntry(url, entry, collection_id) {
+  return fetchWithBody('/ia/download', 'POST', { url, entry, collection_id });
+}
 
 // Builds
 export function getCollectionBuilds(id) { return fetchJson(`/collections/${id}/builds`); }
@@ -77,6 +86,9 @@ export function updateCollectionBuild(id, buildId, data) {
 }
 export function runCollectionBuild(id, buildId, { source, import_dir, base_dir, update } = {}) {
   return fetchWithBody(`/collections/${id}/builds/${buildId}/run`, 'POST', { source, import_dir, base_dir, update });
+}
+export function collectionBuild(id, version_id, import_dir) {
+  return fetchWithBody(`/collections/${id}/build`, 'POST', { version_id, import_dir });
 }
 
 // Exports

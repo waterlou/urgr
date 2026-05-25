@@ -1538,6 +1538,13 @@ html, body, #root {
 }
 
 .text-muted { color: var(--text-muted); }
+.error-text { color: var(--accent); font-size: 13px; margin-top: 8px; }
+
+.ia-results { max-height: 300px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+.ia-result-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.ia-result-item:last-child { border-bottom: none; }
+.ia-result-name { flex: 1; font-size: 13px; }
+.ia-result-size { font-size: 11px; color: var(--text-secondary); width: 60px; text-align: right; }
 
 .btn-sm { padding: 5px 12px; font-size: 11px; }
 

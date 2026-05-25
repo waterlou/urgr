@@ -166,6 +166,14 @@ impl Database {
         Ok(self.conn.last_insert_rowid())
     }
 
+    pub fn set_game_platform(&self, game_id: i64, platform: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE game_entries SET platform = ?1 WHERE id = ?2",
+            params![platform, game_id],
+        )?;
+        Ok(())
+    }
+
     pub fn insert_games_batch(&self, version_id: i64, games: &[GameEntry]) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         for game in games {

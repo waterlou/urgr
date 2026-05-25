@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::io::Write;
 
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
@@ -8,6 +9,7 @@ use tracing::{debug, info};
 use crate::db::Database;
 use crate::error::{Error, Result};
 use crate::models::{GameEntry, RomEntry, SetVersion};
+use rom_scraper::compute_hashes_from_bytes;
 
 const STATUS_FILENAME: &str = "_build_status.json";
 const MODE_FILENAME: &str = "_build_mode.json";
@@ -15,6 +17,8 @@ const PROGRESS_FILENAME: &str = "_build_progress.json";
 const ROMS_DIR_NAME: &str = "roms";
 const SAMPLES_DIR_NAME: &str = "samples";
 const CHD_DIR_NAME: &str = "chd";
+const VERSION_FILE: &str = ".version";
+const DELETED_DIR_NAME: &str = "deleted_roms";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildStatus {
@@ -48,8 +52,10 @@ pub struct BuildProgress {
 #[derive(Debug, Clone)]
 pub struct BuildResult {
     pub total_games: usize,
-    pub matched: usize,
+    pub added: usize,
+    pub exists: usize,
     pub unchanged: usize,
+    pub reused: usize,
     pub missing: usize,
     pub cleaned: usize,
     pub missing_games: Vec<String>,
@@ -60,37 +66,112 @@ pub struct BuildResult {
 
 struct ImportIndex {
     name_to_path: HashMap<String, PathBuf>,
+    /// Pre-computed CRC32 sets per import zip: zip_stem → Set of CRC32 strings
+    zip_crcs: HashMap<String, std::collections::HashSet<String>>,
+    /// Individual non-zip files indexed by CRC32: CRC → file path
+    loose_files: HashMap<String, PathBuf>,
 }
 
 impl ImportIndex {
-    fn scan(dir: &Path) -> Result<Self> {
+    fn scan(dir: &Path, db: &Database, version_id: i64) -> Result<Self> {
         let mut name_to_path = HashMap::new();
+        let mut zip_crcs = HashMap::new();
+        let mut loose_files = HashMap::new();
         if !dir.is_dir() {
-            return Ok(Self { name_to_path });
+            return Ok(Self { name_to_path, zip_crcs, loose_files });
         }
         for entry in walk_files(dir)? {
-            if entry.extension().and_then(|e| e.to_str()) == Some("zip") {
+            let ext = entry.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if ext == "zip" {
                 let stem = entry.file_stem().unwrap_or_default().to_string_lossy().to_string();
-                name_to_path.entry(stem).or_insert(entry);
+                name_to_path.entry(stem.clone()).or_insert_with(|| entry.clone());
+                let crcs = compute_zip_crcs(&entry);
+                if !crcs.is_empty() {
+                    zip_crcs.entry(stem).or_insert(crcs);
+                }
+            } else if !ext.is_empty() && ext != "chd" {
+                // Individual ROM file — compute its CRC and index
+                if let Ok(data) = std::fs::read(&entry) {
+                    let hashes = rom_scraper::compute_hashes_from_bytes(&data);
+                    if !hashes.crc32.is_empty() {
+                        loose_files.entry(hashes.crc32).or_insert(entry);
+                    }
+                }
             }
         }
-        info!("Import index: {} zip files found", name_to_path.len());
-        Ok(Self { name_to_path })
+        info!("Import index: {} zips, {} loose files", name_to_path.len(), loose_files.len());
+        Ok(Self { name_to_path, zip_crcs, loose_files })
     }
 
     fn find_match(&self, game_name: &str, expected_roms: &[RomEntry]) -> Option<PathBuf> {
+        if expected_roms.is_empty() { return None; }
         let path = self.name_to_path.get(game_name)?;
-        if verify_zip_contains(path, expected_roms) {
-            debug!("  {game_name}: matched by filename + hash");
-            Some(path.clone())
-        } else {
-            None
-        }
+        let zip_crc_set = self.zip_crcs.get(game_name)?;
+        // ALL expected CRCs must be present in the zip
+        let all_match = expected_roms.iter()
+            .filter_map(|r| r.crc32.as_deref())
+            .filter(|c| !c.is_empty())
+            .all(|ec| zip_crc_set.contains(ec));
+        if all_match { Some(path.clone()) } else { None }
     }
 
-    /// For a given source zip path, discover CHD files in a same-named sibling directory.
-    /// e.g. `arcade/game1.zip` → check `arcade/game1/*.chd`
-    fn find_chd_files(zip_path: &Path) -> Vec<PathBuf> {
+    /// For a filename-matched zip that has mismatched CRCs, find loose files to patch it.
+    /// Returns (zip_path, missing_roms_with_loose_source)
+    fn find_patches(&self, game_name: &str, expected_roms: &[RomEntry]) -> Option<(PathBuf, Vec<(String, PathBuf)>)> {
+        let path = self.name_to_path.get(game_name)?;
+        let zip_crc_set = self.zip_crcs.get(game_name)?;
+        let mut patches = Vec::new();
+        for rom in expected_roms {
+            if let Some(ref crc) = rom.crc32 {
+                if !crc.is_empty() && !zip_crc_set.contains(crc.as_str()) {
+                    if let Some(src) = self.loose_files.get(crc) {
+                        patches.push((rom.filename.clone(), src.clone()));
+                    } else {
+                        return None; // can't patch all missing files
+                    }
+                }
+            }
+        }
+        if patches.is_empty() { None } else { Some((path.clone(), patches)) }
+    }
+}
+
+/// Compute CRC32 set for all files inside a zip (reads from local file headers, no extraction)
+fn compute_zip_crcs(zip_path: &Path) -> std::collections::HashSet<String> {
+    let mut crcs = std::collections::HashSet::new();
+    let data = match std::fs::read(zip_path) {
+        Ok(d) => d,
+        Err(_) => return crcs,
+    };
+    let mut pos = 0;
+    while pos + 30 <= data.len() {
+        if data[pos] != 0x50 || data[pos + 1] != 0x4b { break; }
+        let sig = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]);
+        if sig == 0x04034b50 {
+            let name_len = u16::from_le_bytes([data[pos+26], data[pos+27]]) as usize;
+            let extra_len = u16::from_le_bytes([data[pos+28], data[pos+29]]) as usize;
+            let crc = u32::from_le_bytes([data[pos+14], data[pos+15], data[pos+16], data[pos+17]]);
+            if name_len > 0 {
+                let name_bytes = &data[pos+30..pos+30+name_len];
+                let name = String::from_utf8_lossy(name_bytes);
+                if !name.ends_with('/') {
+                    crcs.insert(format!("{:08X}", crc));
+                }
+            }
+            let comp_size = u32::from_le_bytes([data[pos+18], data[pos+19], data[pos+20], data[pos+21]]) as usize;
+            pos += 30 + name_len + extra_len + comp_size;
+        } else if sig == 0x02014b50 || sig == 0x06054b50 || sig == 0x06064b50 {
+            break;
+        } else {
+            pos += 1;
+        }
+    }
+    crcs
+}
+
+/// For a given source zip path, discover CHD files in a same-named sibling directory.
+/// e.g. `arcade/game1.zip` → check `arcade/game1/*.chd`
+fn find_chd_files(zip_path: &Path) -> Vec<PathBuf> {
         let chd_dir = zip_path.with_extension("");
         if !chd_dir.is_dir() {
             return Vec::new();
@@ -107,6 +188,32 @@ impl ImportIndex {
         chds.sort();
         chds
     }
+
+/// Check if a game's ROM exists in a prior version's output (identical file by SHA1).
+fn find_in_fallback(
+    game_name: &str,
+    game_map: &HashMap<String, &GameEntry>,
+    collection_dir: Option<&Path>,
+    prior_versions: &[String],
+    db: &Database,
+    version_id: i64,
+) -> Result<bool> {
+    let cd = match collection_dir { Some(d) => d, None => return Ok(false) };
+    if prior_versions.is_empty() { return Ok(false); }
+    let platform = game_map.get(game_name).map(|g| &g.platform).filter(|p| !p.is_empty());
+    for pv in prior_versions {
+        let pv_roms = cd.join(pv).join(ROMS_DIR_NAME);
+        let pv_zip = if let Some(p) = platform {
+            pv_roms.join(p).join(format!("{}.zip", game_name))
+        } else {
+            pv_roms.join(format!("{}.zip", game_name))
+        };
+        if pv_zip.exists() && verify_game_zip(db, version_id, game_name, &pv_zip)? {
+            info!("  {game_name}: reused from prior version {pv}");
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub fn build_version(
@@ -114,6 +221,7 @@ pub fn build_version(
     source: &str,
     import_dir: &Path,
     base_dir: &Path,
+    collection_dir: Option<&Path>,
     force_update: bool,
     on_progress: &dyn Fn(&BuildProgress),
     cancelled: &AtomicBool,
@@ -156,9 +264,16 @@ pub fn build_version(
     check_cancelled(cancelled)?;
     progress(on_progress, "loading", 5, &format!("Version {} loaded", latest.version), 0, 0, latest.total_games as usize, &progress_path);
 
-    let collection_dir = base_dir.join(source).join(&latest.version);
-    let deleted_dir = base_dir.join("deleted_roms");
-    let status_path = collection_dir.join(STATUS_FILENAME);
+    // Determine output directory:
+    //   collection mode: {version_dir}/{version}
+    //   standard mode:   {base_dir}/{source}/{version}
+    let version_dir = if let Some(cd) = collection_dir {
+        cd.join(&latest.version)
+    } else {
+        base_dir.join(source).join(&latest.version)
+    };
+    let deleted_dir = base_dir.join(DELETED_DIR_NAME);
+    let status_path = version_dir.join(STATUS_FILENAME);
     let mode_path = base_dir.join(source).join(MODE_FILENAME);
 
     // Check mode consistency at source level
@@ -218,18 +333,18 @@ pub fn build_version(
     progress(on_progress, "diff", 10, "Diff computed", 0, 0, need_copy.len() + unchanged, &progress_path);
 
     // ── Phase 2: Folder setup ──
-    let roms_dir = collection_dir.join(ROMS_DIR_NAME);
+    let roms_dir = version_dir.join(ROMS_DIR_NAME);
     if force_update {
         if let Some(ref p) = prev {
             let old_dir = base_dir.join(source).join(&p.version);
-            if old_dir.exists() && !collection_dir.exists() {
-                info!("Renaming {} → {}", old_dir.display(), collection_dir.display());
-                std::fs::create_dir_all(collection_dir.parent().unwrap())?;
-                std::fs::rename(&old_dir, &collection_dir)?;
+            if old_dir.exists() && !version_dir.exists() {
+                info!("Renaming {} → {}", old_dir.display(), version_dir.display());
+                std::fs::create_dir_all(version_dir.parent().unwrap())?;
+                std::fs::rename(&old_dir, &version_dir)?;
                 // Migrate flat ROMs into roms/ subfolder
                 if !roms_dir.exists() {
                     std::fs::create_dir_all(&roms_dir)?;
-                    for entry in walk_files(&collection_dir)? {
+                    for entry in walk_files(&version_dir)? {
                         if entry.extension().and_then(|e| e.to_str()) == Some("zip")
                             && entry.file_stem().map(|s| s != "_build_status").unwrap_or(false)
                         {
@@ -271,7 +386,7 @@ pub fn build_version(
 
     // Clean up stale CHD directories (update mode)
     if force_update {
-        let chd_dir = collection_dir.join(CHD_DIR_NAME);
+        let chd_dir = version_dir.join(CHD_DIR_NAME);
         if chd_dir.exists() {
             let game_names: std::collections::HashSet<String> =
                 all_games.iter().map(|g| g.name.clone()).collect();
@@ -312,7 +427,7 @@ pub fn build_version(
     progress(on_progress, "cleanup", 20, "Cleanup complete", status.matched, need_copy.len(), need_copy.len() + unchanged, &progress_path);
 
     // ── Phase 4: Build import index ──
-    let index = ImportIndex::scan(import_dir)?;
+    let index = ImportIndex::scan(import_dir, db, latest.id)?;
 
     check_cancelled(cancelled)?;
     progress(on_progress, "index", 30, "Import index built", 0, need_copy.len(), need_copy.len() + unchanged, &progress_path);
@@ -320,7 +435,17 @@ pub fn build_version(
     // ── Phase 5: Copy matching ROMs + CHDs ──
     let game_map: HashMap<String, &GameEntry> = all_games.iter().map(|g| (g.name.clone(), g)).collect();
 
-    let mut matched = 0usize;
+    // Read prior versions for fallback chain
+    let prior_versions: Vec<String> = collection_dir
+        .map(|cd| cd.join(VERSION_FILE))
+        .filter(|vf| vf.exists())
+        .and_then(|vf| std::fs::read_to_string(vf).ok())
+        .map(|content| content.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty() && l != &latest.version).collect())
+        .unwrap_or_default();
+
+    let mut added = 0usize;
+    let mut exists = 0usize;
+    let mut reused = 0usize;
     let mut missing = Vec::new();
 
     for game_name in &need_copy {
@@ -336,15 +461,22 @@ pub fn build_version(
         }
 
         // Periodic progress + cancellation check
-        if matched % 50 == 0 {
+        if (added + exists) % 50 == 0 {
             check_cancelled(cancelled)?;
-            let pct = 30 + ((matched as u64 * 60) / need_copy.len().max(1) as u64) as u32;
-            progress(on_progress, "copying", pct, &format!("Copying ROMs ({}/{})", matched, need_copy.len()), matched, missing.len(), need_copy.len() + unchanged, &progress_path);
+            let done = added + exists;
+            let pct = 30 + ((done as u64 * 60) / need_copy.len().max(1) as u64) as u32;
+            progress(on_progress, "copying", pct, &format!("Copying ROMs ({}/{})", done, need_copy.len()), done, missing.len(), need_copy.len() + unchanged, &progress_path);
         }
 
         // Skip if already correctly in place
         if dest.exists() && verify_game_zip(db, latest.id, game_name, &dest)? {
-            matched += 1;
+            exists += 1;
+            continue;
+        }
+
+        // Check fallback chain
+        if find_in_fallback(game_name, &game_map, collection_dir, prior_versions.as_ref(), db, latest.id)? {
+            reused += 1;
             continue;
         }
 
@@ -360,16 +492,14 @@ pub fn build_version(
         if let Some(src_path) = index.find_match(game_name, &expected_roms) {
             info!("  Copying {} → {}", src_path.display(), dest.display());
             std::fs::copy(&src_path, &dest)?;
-            matched += 1;
+            added += 1;
 
             // Copy CHD files alongside the game zip (if any)
-            let chds = ImportIndex::find_chd_files(&src_path);
+            let chds = find_chd_files(&src_path);
             if !chds.is_empty() {
-                let chd_dest_base = collection_dir.join(CHD_DIR_NAME).join(game_name);
+                let chd_dest_base = version_dir.join(CHD_DIR_NAME).join(game_name);
                 for chd_src in &chds {
-                    let chd_dest = chd_dest_base.join(
-                        chd_src.file_name().unwrap_or_default(),
-                    );
+                    let chd_dest = chd_dest_base.join(chd_src.file_name().unwrap_or_default());
                     std::fs::create_dir_all(chd_dest.parent().unwrap())?;
                     std::fs::copy(chd_src, &chd_dest)?;
                     info!("  CHD {} → {}", chd_src.display(), chd_dest.display());
@@ -380,10 +510,40 @@ pub fn build_version(
         }
     }
 
-    // ── Phase 5b: Copy samples folder ──
+    // ── Phase 5b: Loose-only builds ──
+    for game_name in &need_copy {
+        let platform = game_map.get(game_name).map(|g| &g.platform).filter(|p| !p.is_empty());
+        let dest = if let Some(p) = platform { roms_dir.join(p).join(format!("{}.zip", game_name)) }
+            else { roms_dir.join(format!("{}.zip", game_name)) };
+        if dest.exists() { continue; }
+        let ge = game_map.get(game_name);
+        let expected_roms = if let Some(g) = ge { db.list_roms_for_game(g.id)? } else { Vec::new() };
+        for rom in &expected_roms {
+            if let Some(ref crc) = rom.crc32 {
+                if let Some(src) = index.loose_files.get(crc) {
+                    if let Some(parent) = dest.parent() { std::fs::create_dir_all(parent)?; }
+                    let file = std::fs::File::create(&dest)?;
+                    let mut zipw = zip::ZipWriter::new(file);
+                    let data = std::fs::read(src)?;
+                    let opts = zip::write::FileOptions::<()>::default()
+                        .compression_method(zip::CompressionMethod::Deflated);
+                    zipw.start_file(&rom.filename, opts)
+                        .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+                    zipw.write_all(&data)?;
+                    zipw.finish()
+                        .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+                    info!("  Built {} from loose file {}", dest.display(), src.display());
+                    added += 1;
+                    break;
+                }
+            }
+        }
+    }
+
+    // ── Phase 5c: Copy samples folder ──
     let import_samples = import_dir.join(SAMPLES_DIR_NAME);
     if import_samples.is_dir() {
-        let dest_samples = collection_dir.join(SAMPLES_DIR_NAME);
+        let dest_samples = version_dir.join(SAMPLES_DIR_NAME);
         std::fs::create_dir_all(&dest_samples)?;
         for entry in walk_files(&import_samples)? {
             if entry.extension().and_then(|e| e.to_str()) == Some("zip") {
@@ -401,9 +561,48 @@ pub fn build_version(
     }
 
     check_cancelled(cancelled)?;
-    progress(on_progress, "copying", 95, &format!("Copy complete ({}/{})", matched, need_copy.len()), matched, missing.len(), need_copy.len() + unchanged, &progress_path);
+    progress(on_progress, "copying", 95, &format!("Copy complete ({}/{} added)", added, need_copy.len()), added, missing.len(), need_copy.len() + unchanged, &progress_path);
 
-    // ── Phase 6: Replace old version (update mode) ──
+    // ── Phase 6: Version dedup (collection mode only) ──
+    let mut deduped = 0usize;
+    if let Some(cd) = collection_dir {
+        if !prior_versions.is_empty() && roms_dir.exists() {
+            info!("Deduplicating against {} prior versions", prior_versions.len());
+            for entry in walk_files(&roms_dir)? {
+                if entry.extension().and_then(|e| e.to_str()) != Some("zip") { continue; }
+                let data = std::fs::read(&entry)?;
+                let sha1 = crypto_hash(&data);
+                for pv in &prior_versions {
+                    let pv_dir = cd.join(pv).join(ROMS_DIR_NAME);
+                    if !pv_dir.exists() { continue; }
+                    // Check matching file by relative path in roms/
+                    let rel = entry.strip_prefix(&roms_dir).unwrap_or(&entry);
+                    let pv_file = pv_dir.join(rel);
+                    if pv_file.exists() {
+                        let pv_data = std::fs::read(&pv_file)?;
+                        if crypto_hash(&pv_data) == sha1 {
+                            std::fs::remove_file(&entry)?;
+                            deduped += 1;
+                            info!("  Dedup: {} (same as v{})", entry.display(), pv);
+                            break;
+                        }
+                    }
+                }
+            }
+            // Clean empty dirs
+            cleanup_empty_dirs(&roms_dir);
+        }
+
+        // Update .version file
+        let version_file = cd.join(VERSION_FILE);
+        let mut all_versions: Vec<String> = prior_versions.clone();
+        all_versions.push(latest.version.clone());
+        all_versions.dedup();
+        std::fs::write(&version_file, all_versions.join("\n") + "\n")?;
+        info!(".version updated: {}", all_versions.join(" → "));
+    }
+
+    // ── Phase 7: Replace old version (update mode) ──
     if force_update {
         if let Some(p) = prev {
             info!("Removing old version: {} {}", source, p.version);
@@ -411,8 +610,8 @@ pub fn build_version(
         }
     }
 
-    // ── Phase 7: Save status + report ──
-    status.matched = matched + status.matched;
+    // ── Phase 8: Save status + report ──
+    status.matched = added + status.matched;
 
     progress(on_progress, "saving", 98, "Saving status...", status.matched, missing.len(), need_copy.len() + unchanged, &progress_path);
     status.missing = missing.len();
@@ -423,8 +622,10 @@ pub fn build_version(
 
     let result = BuildResult {
         total_games: need_copy.len() + unchanged,
-        matched,
+        added,
+        exists,
         unchanged,
+        reused,
         missing: missing.len(),
         cleaned: status.cleaned,
         missing_games: missing,
@@ -433,7 +634,7 @@ pub fn build_version(
         prev_version: prev.map(|p| p.version.clone()),
     };
 
-    progress(on_progress, "done", 100, "Build complete", result.matched, result.missing, result.total_games, &progress_path);
+    progress(on_progress, "done", 100, "Build complete", result.added, result.missing, result.total_games, &progress_path);
 
     Ok(result)
 }
@@ -528,6 +729,24 @@ fn is_leap(y: i64) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
+fn crypto_hash(data: &[u8]) -> String {
+    let h = compute_hashes_from_bytes(data);
+    h.sha1
+}
+
+fn cleanup_empty_dirs(dir: &Path) {
+    if !dir.is_dir() { return; }
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                cleanup_empty_dirs(&path);
+                let _ = std::fs::remove_dir(&path);
+            }
+        }
+    }
+}
+
 fn walk_files(dir: &Path) -> Result<Vec<std::path::PathBuf>> {
     let mut entries = Vec::new();
     if !dir.is_dir() {
@@ -587,6 +806,7 @@ fn verify_zip_contains(zip_path: &Path, expected_roms: &[RomEntry]) -> bool {
     };
 
     let mut found_hashes: HashMap<String, String> = HashMap::new();
+    let mut found_crcs: HashMap<String, String> = HashMap::new();
     for i in 0..archive.len() {
         let Ok(mut entry) = archive.by_index(i) else { continue };
         if entry.is_dir() {
@@ -598,12 +818,19 @@ fn verify_zip_contains(zip_path: &Path, expected_roms: &[RomEntry]) -> bool {
         }
         let hashes = rom_scraper::compute_hashes_from_bytes(&bytes);
         let name = entry.name().to_string();
-        found_hashes.insert(name, hashes.sha1);
+        found_hashes.insert(name.clone(), hashes.sha1);
+        found_crcs.insert(name, hashes.crc32);
     }
 
     for rom in expected_roms {
+        // Check SHA1 first
         if let Some(ref expected_sha1) = rom.sha1 {
             if !found_hashes.values().any(|h| h == expected_sha1) {
+                return false;
+            }
+        // Fallback to CRC32 if SHA1 not available
+        } else if let Some(ref expected_crc) = rom.crc32 {
+            if !found_crcs.values().any(|c| c == expected_crc) {
                 return false;
             }
         }
