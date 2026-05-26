@@ -646,6 +646,17 @@ app.get('/api/games', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/games/scrape-jobs', async (req, res) => {
+  await dbReady;
+  try {
+    const jobs = all('SELECT * FROM scrape_jobs ORDER BY created_at DESC LIMIT 10');
+    res.json(jobs.map(j => ({
+      ...j,
+      result: j.result ? JSON.parse(j.result) : null,
+    })));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/games/:id', async (req, res) => {
   await dbReady;
   try {
@@ -807,19 +818,28 @@ app.post('/api/games/:id/scrape', async (req, res) => {
 app.post('/api/games/batch-scrape', async (req, res) => {
   await dbReady;
   try {
-    let { game_ids, overwrite } = req.body;
+    let { game_ids, overwrite, delay } = req.body;
     if (!Array.isArray(game_ids) || game_ids.length === 0) {
       return res.status(400).json({ error: 'game_ids array required' });
     }
+    if (delay == null) delay = 3000;
 
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
     const jobId = crypto.randomUUID();
     const job = createJob(jobId);
     job._abort = new AbortController();
+
+    run(`INSERT INTO scrape_jobs (id, status, total_games) VALUES (?, 'running', ?)`, [jobId, game_ids.length]);
 
     Promise.resolve().then(async () => {
       const total = game_ids.length;
       let scraped = 0, skipped = 0, failed = 0, cancelled = false, rateLimited = false;
       const errors = [];
+
+      function saveProgress(pct, msg) {
+        updateProgress(jobId, pct, msg);
+        run(`UPDATE scrape_jobs SET progress_msg = ?, updated_at = datetime('now') WHERE id = ?`, [msg, jobId]);
+      }
 
       for (let i = 0; i < total; i++) {
         if (job._abort.signal.aborted) { cancelled = true; break; }
@@ -830,35 +850,43 @@ app.post('/api/games/batch-scrape', async (req, res) => {
             const existing = get('SELECT manufacturer, year FROM game_entries WHERE id = ?', [gid]);
             if (existing?.manufacturer || existing?.year) {
               skipped++;
-              updateProgress(jobId, Math.round((i + 1) / total * 100), `[${i+1}/${total}] Skipped (has metadata) — #${gid}`);
+              saveProgress(Math.round((i + 1) / total * 100), `[${i+1}/${total}] Skipped (has metadata) — #${gid}`);
               continue;
             }
           }
           const result = await scrapeSingleGame(gid);
           if (result.scraped) {
             scraped++;
-            updateProgress(jobId, Math.round((i + 1) / total * 100), `[${i+1}/${total}] ✓ ${result.title || '#'+gid}`);
+            saveProgress(Math.round((i + 1) / total * 100), `[${i+1}/${total}] ✓ ${result.title || '#'+gid}`);
           } else {
             failed++;
             errors.push({ game_id: gid, error: result.error });
-            updateProgress(jobId, Math.round((i + 1) / total * 100), `[${i+1}/${total}] ✗ #${gid} — ${result.error}`);
+            saveProgress(Math.round((i + 1) / total * 100), `[${i+1}/${total}] ✗ #${gid} — ${result.error}`);
           }
         } catch (e) {
           const msg = e.message || '';
           if (/429|rate.?limit|too many requests|quota|allowance|508|Resource Limit/i.test(msg)) {
             rateLimited = true;
             errors.push({ game_id: gid, error: `Rate limited — ${msg}` });
-            updateProgress(jobId, Math.round((i + 1) / total * 100), `[${i+1}/${total}] Rate limited — stopping`);
+            saveProgress(Math.round((i + 1) / total * 100), `[${i+1}/${total}] Rate limited — stopping`);
           } else {
             failed++;
             errors.push({ game_id: gid, error: msg });
-            updateProgress(jobId, Math.round((i + 1) / total * 100), `[${i+1}/${total}] ✗ #${gid} — ${msg}`);
+            saveProgress(Math.round((i + 1) / total * 100), `[${i+1}/${total}] ✗ #${gid} — ${msg}`);
           }
         }
+
+        if (delay > 0 && !cancelled && !rateLimited) await sleep(delay);
       }
 
-      if (job._abort.signal.aborted) return;
-      doneJob(jobId, { total, scraped, skipped, failed, errors, cancelled, rateLimited });
+      if (job._abort.signal.aborted) {
+        run(`UPDATE scrape_jobs SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?`, [jobId]);
+        return;
+      }
+      const resultPayload = { total, scraped, skipped, failed, errors, cancelled, rateLimited };
+      run(`UPDATE scrape_jobs SET status = 'done', scraped = ?, skipped = ?, failed = ?, rate_limited = ?, result = ?, updated_at = datetime('now') WHERE id = ?`,
+        [scraped, skipped, failed, rateLimited ? 1 : 0, JSON.stringify(resultPayload), jobId]);
+      doneJob(jobId, resultPayload);
     });
 
     res.status(202).json({ jobId });

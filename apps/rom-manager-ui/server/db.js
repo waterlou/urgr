@@ -121,6 +121,20 @@ CREATE TABLE IF NOT EXISTS game_ratings (
     FOREIGN KEY (game_entry_id) REFERENCES game_entries(id)
 );
 
+CREATE TABLE IF NOT EXISTS scrape_jobs (
+    id              TEXT PRIMARY KEY,
+    status          TEXT NOT NULL DEFAULT 'running',
+    total_games     INTEGER DEFAULT 0,
+    scraped         INTEGER DEFAULT 0,
+    skipped         INTEGER DEFAULT 0,
+    failed          INTEGER DEFAULT 0,
+    rate_limited    INTEGER DEFAULT 0,
+    progress_msg    TEXT DEFAULT '',
+    result          TEXT,
+    created_at      TEXT DEFAULT (datetime('now')),
+    updated_at      TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS collection_builds (
     id              INTEGER PRIMARY KEY,
     collection_id   INTEGER NOT NULL,

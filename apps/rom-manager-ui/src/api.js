@@ -183,6 +183,9 @@ export function scrapeGameMetadata(gameId) {
 export function batchScrapeGameMetadata(gameIds, overwrite) {
   return fetchWithBody('/games/batch-scrape', 'POST', { game_ids: gameIds, overwrite });
 }
+export function getScrapeJobs() {
+  return fetchJson('/games/scrape-jobs');
+}
 export function scraperDetail(gameId, source) {
   return fetchWithBody('/scraper/detail', 'POST', { game_id: gameId, source });
 }

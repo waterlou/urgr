@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import GameGridCard from './GameGridCard.jsx'
 import GameListItem from './GameListItem.jsx'
-import { getGames, coverUrl, updateGameRating, batchScrapeGameMetadata, subscribeJobSSE, cancelJob } from '../api.js'
+import { getGames, coverUrl, updateGameRating, batchScrapeGameMetadata, subscribeJobSSE, cancelJob, getScrapeJobs } from '../api.js'
 
 export default function GameBrowser({
   games, loading, hasMore, onLoadMore, activeView, activeMeta, totalGames, platforms,
@@ -27,7 +27,7 @@ export default function GameBrowser({
     return () => { if (eventSourceRef.current) eventSourceRef.current.close(); }
   }, [])
 
-  // Reset batch UI when navigating to different games
+  // Reset batch UI on navigation + reconnect to active scrape jobs
   useEffect(() => {
     setBatchShow(false)
     setBatchRunning(false)
@@ -35,6 +35,24 @@ export default function GameBrowser({
     setBatchResult(null)
     setBatchJobId(null)
     if (eventSourceRef.current) { eventSourceRef.current.close(); eventSourceRef.current = null }
+
+    getScrapeJobs().then(jobs => {
+      if (!jobs || jobs.length === 0) return
+      const running = jobs.find(j => j.status === 'running')
+      if (running) {
+        setBatchRunning(true)
+        setBatchProgress(running.progress_msg || 'Running...')
+        setBatchJobId(running.id)
+        eventSourceRef.current = subscribeJobSSE(running.id, {
+          onProgress: (msg) => setBatchProgress(msg.msg || `Progress: ${msg.pct}%`),
+          onResult: (data) => { setBatchResult(data); setBatchRunning(false); setBatchJobId(null) },
+          onError: (err) => { setBatchResult({ error: err }); setBatchRunning(false); setBatchJobId(null) },
+        })
+      } else {
+        const recent = jobs.find(j => j.status !== 'running' && j.result)
+        if (recent) setBatchResult(recent.result)
+      }
+    }).catch(() => {})
   }, [activeView, activeId])
 
   // Infinite scroll via IntersectionObserver
