@@ -117,22 +117,92 @@ html, body, #root {
 .sidebar-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 20px 16px 12px;
+  gap: 12px;
+  padding: 24px 16px 16px;
   cursor: pointer;
   user-select: none;
   border-bottom: 1px solid var(--border);
 }
 
-.sidebar-logo {
-  font-size: 24px;
+.neon-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
-.sidebar-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--accent);
-  letter-spacing: 1px;
+.neon-icon {
+  font-size: 28px;
+  color: #fff;
+  filter: drop-shadow(0 0 6px #00d4ff) drop-shadow(0 0 20px rgba(0,212,255,0.4));
+  animation: neonPulse 2s ease-in-out infinite;
+}
+
+.neon-title {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.neon-text {
+  font-family: 'Tilt Neon', sans-serif;
+  font-size: 18px;
+  font-weight: 400;
+  color: #e0f0ff;
+  text-shadow:
+    0 0 4px #00d4ff,
+    0 0 11px #00d4ff,
+    0 0 21px #00d4ff,
+    0 0 42px rgba(0,212,255,0.5);
+  letter-spacing: 3px;
+  animation: neonPulse 2s ease-in-out infinite;
+}
+
+.neon-text-accent {
+  color: #ffe0f0;
+  text-shadow:
+    0 0 4px #ff2d95,
+    0 0 11px #ff2d95,
+    0 0 21px #ff2d95,
+    0 0 42px rgba(255,45,149,0.5);
+  font-size: 14px;
+  letter-spacing: 4px;
+}
+
+@keyframes neonPulse {
+  0%, 100% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+  50% {
+    opacity: 0.92;
+    filter: brightness(1.15);
+  }
+}
+
+[data-theme="light"] .neon-text {
+  color: #003344;
+  text-shadow:
+    0 0 3px rgba(0,212,255,0.6),
+    0 0 8px rgba(0,212,255,0.3);
+  animation: none;
+}
+
+[data-theme="light"] .neon-text-accent {
+  color: #660033;
+  text-shadow:
+    0 0 3px rgba(255,45,149,0.6),
+    0 0 8px rgba(255,45,149,0.3);
+  animation: none;
+}
+
+[data-theme="light"] .neon-icon {
+  color: #003344;
+  filter: drop-shadow(0 0 4px rgba(0,212,255,0.4));
+  animation: none;
 }
 
 .sidebar-nav {
