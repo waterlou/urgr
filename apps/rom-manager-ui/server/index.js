@@ -811,7 +811,6 @@ app.post('/api/games/batch-scrape', async (req, res) => {
     if (!Array.isArray(game_ids) || game_ids.length === 0) {
       return res.status(400).json({ error: 'game_ids array required' });
     }
-    if (game_ids.length > 100) game_ids = game_ids.slice(0, 100);
 
     const jobId = crypto.randomUUID();
     const job = createJob(jobId);
@@ -819,11 +818,12 @@ app.post('/api/games/batch-scrape', async (req, res) => {
 
     Promise.resolve().then(async () => {
       const total = game_ids.length;
-      let scraped = 0, skipped = 0, failed = 0, cancelled = false;
+      let scraped = 0, skipped = 0, failed = 0, cancelled = false, rateLimited = false;
       const errors = [];
 
       for (let i = 0; i < total; i++) {
         if (job._abort.signal.aborted) { cancelled = true; break; }
+        if (rateLimited) { skipped++; continue; }
         const gid = game_ids[i];
         try {
           if (!overwrite) {
@@ -844,14 +844,21 @@ app.post('/api/games/batch-scrape', async (req, res) => {
             updateProgress(jobId, Math.round((i + 1) / total * 100), `[${i+1}/${total}] ✗ #${gid} — ${result.error}`);
           }
         } catch (e) {
-          failed++;
-          errors.push({ game_id: gid, error: e.message });
-          updateProgress(jobId, Math.round((i + 1) / total * 100), `[${i+1}/${total}] ✗ #${gid} — ${e.message}`);
+          const msg = e.message || '';
+          if (/429|rate.?limit|too many requests|quota|allowance|508|Resource Limit/i.test(msg)) {
+            rateLimited = true;
+            errors.push({ game_id: gid, error: `Rate limited — ${msg}` });
+            updateProgress(jobId, Math.round((i + 1) / total * 100), `[${i+1}/${total}] Rate limited — stopping`);
+          } else {
+            failed++;
+            errors.push({ game_id: gid, error: msg });
+            updateProgress(jobId, Math.round((i + 1) / total * 100), `[${i+1}/${total}] ✗ #${gid} — ${msg}`);
+          }
         }
       }
 
       if (job._abort.signal.aborted) return;
-      doneJob(jobId, { total, scraped, skipped, failed, errors, cancelled });
+      doneJob(jobId, { total, scraped, skipped, failed, errors, cancelled, rateLimited });
     });
 
     res.status(202).json({ jobId });
