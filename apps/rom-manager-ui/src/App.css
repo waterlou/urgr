@@ -702,6 +702,30 @@ html, body, #root {
   background: var(--bg-card);
 }
 
+.add-to-set-menu .remove-from-set-btn {
+  color: #ff6b6b;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+
+.add-to-set-menu .remove-from-set-btn:hover {
+  background: rgba(255,107,107,0.1);
+}
+
+.list-add-to-set-menu button:hover {
+  background: var(--bg-card);
+}
+
+.list-add-to-set-menu .remove-from-set-btn {
+  color: #ff6b6b;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+
+.list-add-to-set-menu .remove-from-set-btn:hover {
+  background: rgba(255,107,107,0.1);
+}
+
 .grid-card-info {
   padding: 10px 12px 12px;
 }

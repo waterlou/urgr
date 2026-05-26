@@ -233,7 +233,12 @@ export default function App() {
 
   async function handleAddToGameSet(gameEntryId, setId) {
     await addGameSetGames(setId, [gameEntryId])
-    await loadGames(activeView, activeId, viewMode, sortField, sortOrder, searchQuery)
+    await loadGames(activeView, activeId, viewMode, sortField, sortOrder, searchQuery, parentsOnly)
+  }
+
+  async function handleRemoveFromGameSet(gameEntryId, setId) {
+    await removeGameSetGame(setId, gameEntryId)
+    await loadGames(activeView, activeId, viewMode, sortField, sortOrder, searchQuery, parentsOnly)
   }
 
   return (
@@ -283,6 +288,7 @@ export default function App() {
             onSearchQueryChange={setSearchQuery}
             onSelectGame={setSelectedGame}
             onAddToGameSet={handleAddToGameSet}
+            onRemoveFromGameSet={handleRemoveFromGameSet}
             gameSets={gameSets}
             activeId={activeId}
             showBackToDetail={activeView === 'collection'}

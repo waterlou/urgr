@@ -7,7 +7,7 @@ export default function GameBrowser({
   games, loading, hasMore, onLoadMore, activeView, activeMeta, totalGames, platforms,
   viewMode, sortField, sortOrder, searchQuery,
   onViewModeChange, onSortFieldChange, onSortOrderChange,
-  onSearchQueryChange, onSelectGame, onAddToGameSet, gameSets, activeId,
+  onSearchQueryChange, onSelectGame, onAddToGameSet, onRemoveFromGameSet, gameSets, activeId,
   showBackToDetail, onBackToDetail,
   parentsOnly, onParentsOnlyChange,
 }) {
@@ -155,6 +155,7 @@ export default function GameBrowser({
   const isList = viewMode === 'list'
   const isGrid = viewMode === 'grid'
   const isLarge = viewMode === 'large'
+  const gameSetId = activeView === 'game-set' ? activeId : null
 
   const SORT_OPTIONS = [
     { field: 'name', label: 'Name' },
@@ -280,7 +281,7 @@ export default function GameBrowser({
               <span className="list-col-year">Year</span>
               <span className="list-col-rating">Rating</span>
               <span className="list-col-fav">Fav</span>
-              {gameSets.length > 0 && <span className="list-col-addset-header">Set</span>}
+              {(gameSets.length > 0 || gameSetId) && <span className="list-col-addset-header"></span>}
             </div>
             {games.map(game => (
               <GameListItem
@@ -290,8 +291,9 @@ export default function GameBrowser({
                 onRating={r => handleRating(game, r)}
                 onFavourite={() => handleFavourite(game)}
                 onAddToGameSet={onAddToGameSet}
+                onRemoveFromGameSet={gameSetId ? onRemoveFromGameSet : undefined}
                 gameSets={gameSets}
-                currentGameSetId={activeId}
+                gameSetId={gameSetId}
               />
             ))}
           </div>
@@ -305,8 +307,9 @@ export default function GameBrowser({
                 onRating={r => handleRating(game, r)}
                 onFavourite={() => handleFavourite(game)}
                 onAddToGameSet={onAddToGameSet}
+                onRemoveFromGameSet={gameSetId ? onRemoveFromGameSet : undefined}
                 gameSets={gameSets}
-                currentGameSetId={activeId}
+                gameSetId={gameSetId}
                 viewMode={viewMode}
               />
             ))}
