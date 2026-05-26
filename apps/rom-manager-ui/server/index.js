@@ -664,130 +664,197 @@ app.get('/api/games/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+async function scrapeSingleGame(gameId) {
+  const game = get('SELECT * FROM game_entries WHERE id = ?', [gameId]);
+  if (!game) return { scraped: false, error: 'Game not found', gameId };
+
+  function trySearch(query, platform) {
+    const args = ['search', query];
+    if (platform) args.push('--platform', platform);
+    const r = execCli(args, { binary: 'scraper' });
+    if (r?.results?.length) return r;
+    return null;
+  }
+
+  const candidates = [];
+
+  // 0. MAME name expansion — look up full game name from DB by short ROM name
+  //     Short arcade names like "sf2ce" are opaque; description holds the real name.
+  if (game.platform === 'arcade' && game.name) {
+    const expanded = get('SELECT description FROM game_entries WHERE name = ? AND description IS NOT NULL AND description != name LIMIT 1', [game.name]);
+    if (expanded?.description) {
+      const clean = expanded.description.replace(/\s*\([^)]*\)\s*/g, '').trim();
+      if (clean && !candidates.includes(clean)) candidates.unshift(clean);
+    }
+  }
+
+  // 1. Description with region/set suffixes stripped
+  if (game.description) {
+    const stripped = game.description.replace(/\s*\([^)]*\)\s*/g, '').trim();
+    if (stripped && !candidates.includes(stripped)) candidates.push(stripped);
+    if (!candidates.includes(game.description)) candidates.push(game.description);
+  }
+
+  // 2. ROM name with spaces at word boundaries
+  if (game.name) {
+    const spaced = game.name.replace(/([a-z])([A-Z0-9])/g, '$1 $2').replace(/([0-9])([A-Za-z])/g, '$1 $2');
+    if (spaced !== game.name && !candidates.includes(spaced)) candidates.push(spaced);
+  }
+
+  // 3. ROM name with known variant suffix stripped
+  if (game.name) {
+    const VARIANT_SUFFIXES = ['j','u','e','a','w','p','h','b','f','s','k','ja','ju','us','ua','uk','eu','hk','tw','kr','fr','de','es','it','nl','br'];
+    for (const sfx of VARIANT_SUFFIXES) {
+      if (game.name.endsWith(sfx) && game.name.length > sfx.length + 2) {
+        const base = game.name.slice(0, -sfx.length);
+        const baseSpaced = base.replace(/([a-z])([A-Z0-9])/g, '$1 $2').replace(/([0-9])([A-Za-z])/g, '$1 $2');
+        if (!candidates.includes(baseSpaced)) candidates.push(baseSpaced);
+        if (!candidates.includes(base)) candidates.push(base);
+        break;
+      }
+    }
+  }
+
+  // 4. Raw ROM name as last resort
+  if (game.name && !candidates.includes(game.name)) candidates.push(game.name);
+
+  // Try searches, preferring arcade-matching results
+  let searchResult = null;
+  let matchedTitle = null;
+  for (const q of candidates) {
+    const r = trySearch(q, game.platform);
+    if (!r) continue;
+    if (game.platform === 'arcade' || !game.platform) {
+      const arcadeMatch = r.results.find(x => x.platform?.toLowerCase().includes('arcade'));
+      if (arcadeMatch) {
+        searchResult = { results: [arcadeMatch] };
+        matchedTitle = arcadeMatch.title;
+        break;
+      }
+    }
+    searchResult = r;
+    matchedTitle = r.results[0].title;
+    break;
+  }
+
+  if (!searchResult) {
+    return { scraped: false, error: 'No matches found in any provider', gameId };
+  }
+
+  const first = searchResult.results[0];
+  let detailResult;
+  try {
+    detailResult = execCli(['detail', first.id], { binary: 'scraper' });
+  } catch {
+    return { scraped: false, error: 'Failed to get game details', gameId };
+  }
+  if (!detailResult || detailResult.error) {
+    return { scraped: false, error: 'Detail fetch failed', gameId };
+  }
+
+  const synopsis = detailResult.synopsis || '';
+  const rawDate = (detailResult.release_date || '').trim();
+  const year = (rawDate && !rawDate.startsWith('1970')) ? rawDate.substring(0, 4) : null;
+  const manufacturer = detailResult.publisher || detailResult.developer || null;
+
+  function upgradeCovers(urls) {
+    return (urls || []).map(u => {
+      const s = u.startsWith('//') ? 'https:' + u : u;
+      return s.replace('/t_thumb/', '/t_cover_big/');
+    });
+  }
+  function upgradeScreenshots(urls) {
+    return (urls || []).map(u => {
+      const s = u.startsWith('//') ? 'https:' + u : u;
+      return s.replace('/t_thumb/', '/t_screenshot_huge/');
+    });
+  }
+
+  if (synopsis || year || manufacturer || detailResult.covers?.length || detailResult.screenshots?.length) {
+    const updates = [];
+    const upParams = [];
+    if (synopsis) { updates.push('synopsis = ?'); upParams.push(synopsis); }
+    if (year) { updates.push('year = ?'); upParams.push(year); }
+    if (manufacturer) { updates.push('manufacturer = ?'); upParams.push(manufacturer); }
+    if (detailResult.covers?.length) {
+      updates.push('covers = ?');
+      upParams.push(JSON.stringify(upgradeCovers(detailResult.covers)));
+    }
+    if (detailResult.screenshots?.length) {
+      updates.push('screenshots = ?');
+      upParams.push(JSON.stringify(upgradeScreenshots(detailResult.screenshots)));
+    }
+    upParams.push(game.id);
+    run(`UPDATE game_entries SET ${updates.join(', ')} WHERE id = ?`, upParams);
+    saveDb();
+  }
+
+  const updated = get('SELECT g.*, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [game.id]);
+  if (typeof updated.covers === 'string') try { updated.covers = JSON.parse(updated.covers); } catch { updated.covers = []; }
+  if (typeof updated.screenshots === 'string') try { updated.screenshots = JSON.parse(updated.screenshots); } catch { updated.screenshots = []; }
+  const hadData = synopsis || year || manufacturer || detailResult.covers?.length || detailResult.screenshots?.length;
+  return { scraped: true, saved: !!hadData, title: matchedTitle || first.title, game: updated, gameId };
+}
+
 app.post('/api/games/:id/scrape', async (req, res) => {
   await dbReady;
   try {
-    const game = get('SELECT * FROM game_entries WHERE id = ?', [req.params.id]);
-    if (!game) return res.status(404).json({ error: 'Game not found' });
+    const result = await scrapeSingleGame(req.params.id);
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
-    function trySearch(query, platform) {
-      const args = ['search', query];
-      if (platform) args.push('--platform', platform);
-      const r = execCli(args, { binary: 'scraper' });
-      if (r?.results?.length) return r;
-      return null;
+app.post('/api/games/batch-scrape', async (req, res) => {
+  await dbReady;
+  try {
+    let { game_ids, overwrite } = req.body;
+    if (!Array.isArray(game_ids) || game_ids.length === 0) {
+      return res.status(400).json({ error: 'game_ids array required' });
     }
+    if (game_ids.length > 100) game_ids = game_ids.slice(0, 100);
 
-    // Build search candidates in priority order
-    const candidates = [];
+    const jobId = crypto.randomUUID();
+    const job = createJob(jobId);
+    job._abort = new AbortController();
 
-    // 1. Description with region/set suffixes stripped (e.g., "2010: The Graphic Action Game (USA)" → "2010: The Graphic Action Game")
-    if (game.description) {
-      const stripped = game.description.replace(/\s*\([^)]*\)\s*/g, '').trim();
-      if (stripped && !candidates.includes(stripped)) candidates.push(stripped);
-      // Also try the raw description
-      if (!candidates.includes(game.description)) candidates.push(game.description);
-    }
+    Promise.resolve().then(async () => {
+      const total = game_ids.length;
+      let scraped = 0, skipped = 0, failed = 0, cancelled = false;
+      const errors = [];
 
-    // 2. ROM name with spaces at word boundaries
-    if (game.name) {
-      const spaced = game.name.replace(/([a-z])([A-Z0-9])/g, '$1 $2').replace(/([0-9])([A-Za-z])/g, '$1 $2');
-      if (spaced !== game.name && !candidates.includes(spaced)) candidates.push(spaced);
-    }
-
-    // 3. ROM name with known variant suffix stripped (e.g., "8eyesj" → "8eyes")
-    if (game.name) {
-      const VARIANT_SUFFIXES = ['j','u','e','a','w','p','h','b','f','s','k','ja','ju','us','ua','uk','eu','hk','tw','kr','fr','de','es','it','nl','br'];
-      for (const sfx of VARIANT_SUFFIXES) {
-        if (game.name.endsWith(sfx) && game.name.length > sfx.length + 2) {
-          const base = game.name.slice(0, -sfx.length);
-          const baseSpaced = base.replace(/([a-z])([A-Z0-9])/g, '$1 $2').replace(/([0-9])([A-Za-z])/g, '$1 $2');
-          if (!candidates.includes(baseSpaced)) candidates.push(baseSpaced);
-          if (!candidates.includes(base)) candidates.push(base);
-          break;
+      for (let i = 0; i < total; i++) {
+        if (job._abort.signal.aborted) { cancelled = true; break; }
+        const gid = game_ids[i];
+        try {
+          if (!overwrite) {
+            const existing = get('SELECT manufacturer, year FROM game_entries WHERE id = ?', [gid]);
+            if (existing?.manufacturer || existing?.year) {
+              skipped++;
+              updateProgress(jobId, Math.round((i + 1) / total * 100), `[${i+1}/${total}] Skipped (has metadata) — #${gid}`);
+              continue;
+            }
+          }
+          const result = await scrapeSingleGame(gid);
+          if (result.scraped) {
+            scraped++;
+            updateProgress(jobId, Math.round((i + 1) / total * 100), `[${i+1}/${total}] ✓ ${result.title || '#'+gid}`);
+          } else {
+            failed++;
+            errors.push({ game_id: gid, error: result.error });
+            updateProgress(jobId, Math.round((i + 1) / total * 100), `[${i+1}/${total}] ✗ #${gid} — ${result.error}`);
+          }
+        } catch (e) {
+          failed++;
+          errors.push({ game_id: gid, error: e.message });
+          updateProgress(jobId, Math.round((i + 1) / total * 100), `[${i+1}/${total}] ✗ #${gid} — ${e.message}`);
         }
       }
-    }
 
-    // 4. Raw ROM name as last resort
-    if (game.name && !candidates.includes(game.name)) candidates.push(game.name);
+      if (job._abort.signal.aborted) return;
+      doneJob(jobId, { total, scraped, skipped, failed, errors, cancelled });
+    });
 
-    // Try searches, preferring arcade-matching results
-    let searchResult = null;
-    for (const q of candidates) {
-      const r = trySearch(q, game.platform);
-      if (!r) continue;
-      // Prefer results whose platform contains 'arcade' when game is arcade
-      if (game.platform === 'arcade' || !game.platform) {
-        const arcadeMatch = r.results.find(x => x.platform?.toLowerCase().includes('arcade'));
-        if (arcadeMatch) {
-          searchResult = { results: [arcadeMatch] };
-          break;
-        }
-      }
-      searchResult = r;
-      break;
-    }
-
-    if (!searchResult) {
-      return res.json({ scraped: false, error: 'No matches found in any provider' });
-    }
-
-    const first = searchResult.results[0];
-    let detailResult;
-    try {
-      detailResult = execCli(['detail', first.id], { binary: 'scraper' });
-    } catch {
-      return res.json({ scraped: false, error: 'Failed to get game details' });
-    }
-    if (!detailResult || detailResult.error) {
-      return res.json({ scraped: false, error: 'Detail fetch failed' });
-    }
-
-    const synopsis = detailResult.synopsis || '';
-    const rawDate = (detailResult.release_date || '').trim();
-    const year = (rawDate && !rawDate.startsWith('1970')) ? rawDate.substring(0, 4) : null;
-    const manufacturer = detailResult.publisher || detailResult.developer || null;
-
-    // Upgrade IGDB thumbnail sizes to larger resolutions
-    function upgradeCovers(urls) {
-      return (urls || []).map(u => {
-        const s = u.startsWith('//') ? 'https:' + u : u;
-        return s.replace('/t_thumb/', '/t_cover_big/');
-      });
-    }
-    function upgradeScreenshots(urls) {
-      return (urls || []).map(u => {
-        const s = u.startsWith('//') ? 'https:' + u : u;
-        return s.replace('/t_thumb/', '/t_screenshot_huge/');
-      });
-    }
-
-    if (synopsis || year || manufacturer || detailResult.covers?.length || detailResult.screenshots?.length) {
-      const updates = [];
-      const upParams = [];
-      if (synopsis) { updates.push('synopsis = ?'); upParams.push(synopsis); }
-      if (year) { updates.push('year = ?'); upParams.push(year); }
-      if (manufacturer) { updates.push('manufacturer = ?'); upParams.push(manufacturer); }
-      if (detailResult.covers?.length) {
-        updates.push('covers = ?');
-        upParams.push(JSON.stringify(upgradeCovers(detailResult.covers)));
-      }
-      if (detailResult.screenshots?.length) {
-        updates.push('screenshots = ?');
-        upParams.push(JSON.stringify(upgradeScreenshots(detailResult.screenshots)));
-      }
-      upParams.push(game.id);
-      run(`UPDATE game_entries SET ${updates.join(', ')} WHERE id = ?`, upParams);
-      saveDb();
-    }
-
-    const updated = get('SELECT g.*, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [game.id]);
-    // Parse JSON columns before returning (sql.js returns TEXT)
-    if (typeof updated.covers === 'string') try { updated.covers = JSON.parse(updated.covers); } catch { updated.covers = []; }
-    if (typeof updated.screenshots === 'string') try { updated.screenshots = JSON.parse(updated.screenshots); } catch { updated.screenshots = []; }
-    const hadData = synopsis || year || manufacturer || detailResult.covers?.length || detailResult.screenshots?.length;
-    res.json({ scraped: true, saved: !!hadData, title: first.title, game: updated });
+    res.status(202).json({ jobId });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -43,7 +43,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
   const [buildProgress, setBuildProgress] = useState({})
   const [buildVersion, setBuildVersion] = useState('')
   const [buildFormat, setBuildFormat] = useState('split')
-  const [buildImportDir, setBuildImportDir] = useState('')
+  const [buildImportDir, setBuildImportDir] = useState(() => localStorage.getItem('rom-manager-import-dir') || '')
   const [buildRunning, setBuildRunning] = useState(false)
   const [buildProgressMsg, setBuildProgressMsg] = useState('')
   const [buildResult, setBuildResult] = useState(null)
@@ -645,7 +645,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
               Previously built versions are checked for matching checksums to avoid duplicates.
             </p>
             <div className="build-form-row">
-              <input type="text" className="build-select" placeholder="Import directory (e.g. /path/to/roms)" value={buildImportDir} onChange={e => setBuildImportDir(e.target.value)} style={{flex:1}} />
+              <input type="text" className="build-select" placeholder="Import directory (e.g. /path/to/roms)" value={buildImportDir} onChange={e => { setBuildImportDir(e.target.value); localStorage.setItem('rom-manager-import-dir', e.target.value); }} style={{flex:1}} />
               <select className="build-select" value={buildVersion} onChange={e => setBuildVersion(e.target.value)}>
                 <option value="">Select version...</option>
                 {versions.map(v => (

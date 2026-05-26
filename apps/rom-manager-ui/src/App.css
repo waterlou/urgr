@@ -1075,7 +1075,12 @@ html, body, #root {
   cursor: pointer;
   transition: all 0.15s;
   border: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1;
 }
+.btn .icon { font-size: 18px; }
 
 .btn-primary {
   background: var(--accent);

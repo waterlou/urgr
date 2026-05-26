@@ -180,6 +180,9 @@ export function hashFile(file) {
 export function scrapeGameMetadata(gameId) {
   return fetchWithBody(`/games/${gameId}/scrape`, 'POST');
 }
+export function batchScrapeGameMetadata(gameIds, overwrite) {
+  return fetchWithBody('/games/batch-scrape', 'POST', { game_ids: gameIds, overwrite });
+}
 export function scraperDetail(gameId, source) {
   return fetchWithBody('/scraper/detail', 'POST', { game_id: gameId, source });
 }
