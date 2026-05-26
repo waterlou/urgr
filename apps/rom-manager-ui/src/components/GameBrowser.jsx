@@ -48,9 +48,6 @@ export default function GameBrowser({
           onResult: (data) => { setBatchResult(data); setBatchRunning(false); setBatchJobId(null) },
           onError: (err) => { setBatchResult({ error: err }); setBatchRunning(false); setBatchJobId(null) },
         })
-      } else {
-        const recent = jobs.find(j => j.status !== 'running' && j.result)
-        if (recent) setBatchResult(recent.result)
       }
     }).catch(() => {})
   }, [activeView, activeId])
@@ -215,12 +212,12 @@ export default function GameBrowser({
           </div>
 
           <div className="toolbar-right">
-            {activeView === 'collection' && games.length > 0 && !batchShow && !batchRunning && !batchResult && (
+            {activeView === 'collection' && games.length > 0 && !batchShow && !batchRunning && (
               <button className="btn btn-sm btn-secondary" onClick={() => setBatchShow(true)} style={{marginRight:8}}>
                 <span className="icon icon-sm">auto_awesome</span> Scrape
               </button>
             )}
-            {batchShow && !batchRunning && !batchResult && (
+            {batchShow && !batchRunning && (
               <div className="batch-scrape-form" style={{display:'flex',alignItems:'center',gap:8,marginRight:8}}>
                 <span className="text-muted" style={{fontSize:12,whiteSpace:'nowrap'}}>{games.length} game{games.length !== 1 ? 's' : ''}</span>
                 <label className="batch-overwrite-label" style={{fontSize:12,display:'flex',alignItems:'center',gap:4,cursor:'pointer',whiteSpace:'nowrap'}}>
