@@ -10,6 +10,7 @@ export default function GameBrowser({
   onSearchQueryChange, onSelectGame, onAddToGameSet, onRemoveFromGameSet, gameSets, activeId,
   showBackToDetail, onBackToDetail,
   parentsOnly, onParentsOnlyChange,
+  onToggleSidebar,
 }) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchResults, setSearchResults] = useState([])
@@ -167,6 +168,7 @@ export default function GameBrowser({
     <div className="browser">
       <div className="browser-header">
         <div className="browser-title-row">
+          <button className="hamburger-btn" onClick={onToggleSidebar} title="Menu"><span className="icon">menu</span></button>
           {showBackToDetail && (
             <button className="back-btn" onClick={onBackToDetail} title="Back to Collection"><span className="icon">arrow_back</span></button>
           )}

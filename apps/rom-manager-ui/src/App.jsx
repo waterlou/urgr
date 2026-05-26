@@ -37,6 +37,7 @@ export default function App() {
   const [versionFilter, setVersionFilter] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [parentsOnly, setParentsOnly] = useState(() => localStorage.getItem('rom-manager-parents-only') === 'true')
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   function handleSetParentsOnly(v) {
     setParentsOnly(v);
@@ -58,6 +59,10 @@ export default function App() {
 
   function handleToggleTheme() {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark')
+  }
+
+  function handleToggleSidebar() {
+    setSidebarOpen(prev => !prev)
   }
 
   const loadSidebar = useCallback(async () => {
@@ -243,21 +248,23 @@ export default function App() {
 
   return (
     <div className="app-layout">
+      <div className={`sidebar-backdrop${sidebarOpen ? ' visible' : ''}`} onClick={() => setSidebarOpen(false)} />
       <Sidebar
         collections={collections}
         gameSets={gameSets}
         activeView={activeView}
         activeId={activeId}
-        onSelect={handleSelect}
-        onNewCollection={() => { setEditTarget(null); setShowCollectionForm(true) }}
-        onNewGameSet={() => { setEditTarget(null); setShowGameSetForm(true) }}
+        sidebarOpen={sidebarOpen}
+        onSelect={(view, id) => { handleSelect(view, id); setSidebarOpen(false) }}
+        onNewCollection={() => { setEditTarget(null); setShowCollectionForm(true); setSidebarOpen(false) }}
+        onNewGameSet={() => { setEditTarget(null); setShowGameSetForm(true); setSidebarOpen(false) }}
         onEditCollection={handleEditCollection}
         onEditGameSet={handleEditGameSet}
         onDeleteCollection={handleDeleteCollection}
         onDeleteGameSet={handleDeleteGameSet}
         theme={theme}
         onToggleTheme={handleToggleTheme}
-        onOpenSettings={() => setShowSettings(true)}
+        onOpenSettings={() => { setShowSettings(true); setSidebarOpen(false) }}
       />
 
       <main className="main-pane">
@@ -269,37 +276,49 @@ export default function App() {
             onRefresh={loadSidebar}
           />
         ) : (
-          <GameBrowser
-            games={games}
-            loading={loading}
-            hasMore={hasMore}
-            onLoadMore={loadMore}
-            activeView={activeView}
-            activeMeta={activeMeta}
-            totalGames={totalGames}
-            platforms={platforms}
-            viewMode={viewMode}
-            sortField={sortField}
-            sortOrder={sortOrder}
-            searchQuery={searchQuery}
-            onViewModeChange={setViewMode}
-            onSortFieldChange={setSortField}
-            onSortOrderChange={setSortOrder}
-            onSearchQueryChange={setSearchQuery}
-            onSelectGame={setSelectedGame}
-            onAddToGameSet={handleAddToGameSet}
-            onRemoveFromGameSet={handleRemoveFromGameSet}
-            gameSets={gameSets}
-            activeId={activeId}
-            showBackToDetail={activeView === 'collection'}
-            onBackToDetail={() => setCollectionSubView('detail')}
-            parentsOnly={parentsOnly}
-            onParentsOnlyChange={handleSetParentsOnly}
-          />
+          <div className={`view-stack${selectedGame ? ' show-detail' : ''}`}>
+            <div className="view-stack-track">
+              <div className="view-stack-page">
+                <GameBrowser
+                  games={games}
+                  loading={loading}
+                  hasMore={hasMore}
+                  onLoadMore={loadMore}
+                  activeView={activeView}
+                  activeMeta={activeMeta}
+                  totalGames={totalGames}
+                  platforms={platforms}
+                  viewMode={viewMode}
+                  sortField={sortField}
+                  sortOrder={sortOrder}
+                  searchQuery={searchQuery}
+                  onViewModeChange={setViewMode}
+                  onSortFieldChange={setSortField}
+                  onSortOrderChange={setSortOrder}
+                  onSearchQueryChange={setSearchQuery}
+                  onSelectGame={setSelectedGame}
+                  onAddToGameSet={handleAddToGameSet}
+                  onRemoveFromGameSet={handleRemoveFromGameSet}
+                  gameSets={gameSets}
+                  activeId={activeId}
+                  showBackToDetail={activeView === 'collection'}
+                  onBackToDetail={() => setCollectionSubView('detail')}
+                  parentsOnly={parentsOnly}
+                  onParentsOnlyChange={handleSetParentsOnly}
+                  onToggleSidebar={handleToggleSidebar}
+                />
+              </div>
+              <div className="view-stack-page">
+                {selectedGame && <GameDetail
+                  gameId={selectedGame.id || selectedGame}
+                  onBack={() => setSelectedGame(null)}
+                  onNavigate={(id) => setSelectedGame({id})}
+                />}
+              </div>
+            </div>
+          </div>
         )}
       </main>
-
-      {selectedGame && <GameDetail gameId={selectedGame.id || selectedGame} onClose={() => setSelectedGame(null)} onNavigate={(id) => setSelectedGame({id})} />}
 
       {showCollectionForm && (
         <CollectionForm

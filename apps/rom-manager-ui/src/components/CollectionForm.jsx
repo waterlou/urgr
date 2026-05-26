@@ -74,41 +74,39 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
   async function handleSubmit(e) {
     e.preventDefault()
     setFormError('')
+
     if (!name) { setFormError('Collection name is required'); return }
-    if (datasetMode === 'preset' && !selectedPreset) { setFormError('Select a preset dataset or choose Manual mode'); return }
 
-    let hasDataset = 0
-    let datasetPreset = null
-    let uploadedVersionId = null
+    if (!isEdit) {
+      if (datasetMode === 'preset' && !selectedPreset) { setFormError('Select a preset dataset or choose Manual mode'); return }
+    }
 
-    if (datasetMode === 'preset' && selectedPreset) {
-      hasDataset = 1
-      datasetPreset = selectedPreset.name
-    } else if (datasetMode === 'upload' && datFile) {
-      setUploading(true)
-      try {
-        const text = await datFile.text()
-        const data = await importDat(text)
-        uploadedVersionId = data.version_id
-        hasDataset = 1
-      } catch (e) {
-        alert('Failed to upload DAT file: ' + e.message)
-        setUploading(false)
-        return
+    const payload = { name, slug, platform, logo: logo || 'folder', folder: slug }
+
+    if (!isEdit) {
+      let hasDataset = 0
+      let datasetPreset = null
+      let uploadedVersionId = null
+      if (datasetMode === 'preset' && selectedPreset) {
+        payload.has_dataset = 1
+        payload.dataset_preset = selectedPreset.name
+      } else if (datasetMode === 'upload' && datFile) {
+        setUploading(true)
+        try {
+          const text = await datFile.text()
+          const data = await importDat(text)
+          payload.uploaded_version_id = data.version_id
+          payload.has_dataset = 1
+        } catch (e) {
+          alert('Failed to upload DAT file: ' + e.message)
+          setUploading(false)
+          return
+        }
       }
     }
 
     try {
-      await onSave({
-        name,
-        slug,
-        platform,
-        logo: logo || 'folder',
-        folder: slug,
-        has_dataset: hasDataset,
-        dataset_preset: datasetPreset,
-        uploaded_version_id: uploadedVersionId,
-      })
+      await onSave(payload)
     } catch (e) {
       setFormError(e.message || 'Failed to save collection')
       setUploading(false)
