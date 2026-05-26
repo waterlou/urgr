@@ -280,6 +280,7 @@ export default function GameBrowser({
               <span className="list-col-year">Year</span>
               <span className="list-col-rating">Rating</span>
               <span className="list-col-fav">Fav</span>
+              {gameSets.length > 0 && <span className="list-col-addset-header">Set</span>}
             </div>
             {games.map(game => (
               <GameListItem
@@ -288,6 +289,9 @@ export default function GameBrowser({
                 onSelect={onSelectGame}
                 onRating={r => handleRating(game, r)}
                 onFavourite={() => handleFavourite(game)}
+                onAddToGameSet={onAddToGameSet}
+                gameSets={gameSets}
+                currentGameSetId={activeId}
               />
             ))}
           </div>

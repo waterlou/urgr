@@ -782,6 +782,83 @@ html, body, #root {
 .list-col-rating { width: 100px; flex-shrink: 0; }
 .list-col-fav { width: 30px; flex-shrink: 0; text-align: center; }
 
+.list-col-addset-header {
+  width: 30px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.list-col-addset {
+  width: 30px;
+  flex-shrink: 0;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.list-add-set-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text-muted);
+  transition: all 0.15s;
+  opacity: 0.4;
+}
+
+.list-item:hover .list-add-set-btn {
+  opacity: 1;
+}
+
+.list-add-set-btn:hover {
+  background: var(--accent);
+  color: #fff;
+  opacity: 1;
+}
+
+.list-add-to-set-wrapper {
+  position: relative;
+}
+
+.list-add-to-set-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
+  min-width: 180px;
+  z-index: 50;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+
+.list-add-to-set-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.list-add-to-set-menu button:hover {
+  background: var(--bg-card);
+}
+
 .fav-star {
   cursor: pointer;
   color: var(--text-muted);
