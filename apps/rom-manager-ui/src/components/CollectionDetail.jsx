@@ -422,7 +422,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
             )}
 
             {/* Already-imported versions with refresh for nightly */}
-            {availableDats.source === 'FBNeo' && availableDats.imported?.length > 0 && (
+            {availableDats.imported?.length > 0 && (
               <div className="info-box" style={{marginTop:12}}>
                 <strong>Imported versions:</strong>
                 <div className="tag-list" style={{marginTop:8}}>
@@ -431,7 +431,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
                     return (
                       <span key={iv.id} className="tag" style={{display:'inline-flex',alignItems:'center',gap:4}}>
                         <span className="icon icon-sm" style={{fontSize:14}}>check</span>
-                        {iv.source} — {iv.version}
+                        {iv.source ? `${iv.source} — ${iv.version}` : iv.version}
                         {isNightly && (
                           <button
                             className="btn btn-sm btn-secondary"

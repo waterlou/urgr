@@ -288,7 +288,7 @@ router.get('/api/versions/available', async (req, res) => {
     }
 
     const imported = all('SELECT id, source, version FROM set_versions WHERE source = ? ORDER BY version', ['MAME']);
-    const importedParsed = imported.map(v => ({ id: v.id, version: v.version, parsed: parseMameVersion(v.version) }));
+    const importedParsed = imported.map(v => ({ id: v.id, source: v.source, version: v.version, parsed: parseMameVersion(v.version) }));
     const availableDats = rows.filter(r => r.hasDat && !importedParsed.some(iv => cmpVersion(iv.parsed, r.parsed) === 0));
     const hasNewer = latestVer ? !importedParsed.some(iv => cmpVersion(iv.parsed, latestVer) === 0) : false;
 
