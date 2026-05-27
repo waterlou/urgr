@@ -134,6 +134,14 @@ let mameDatsCache = null;
 let mameDatsCacheTime = 0;
 const CACHE_TTL = 600_000;
 
+// Match version patterns in filenames for MAME DAT archives
+function mameDatMatches(base, version) {
+  const verDotted = version.toLowerCase();                  // "0.274"
+  const verCompact = version.replace(/\./g, '');            // "0274"
+  const verNumeric = version.replace(/^0\./, '');           // "274"
+  return base.includes(verDotted) || base.includes(verCompact) || base.includes(verNumeric);
+}
+
 const FBNEO_REPO = 'libretro/FBNeo';
 const FBALPHA43_REPO = 'barbudreadmon/fbalpha-backup-dontuse-ty';
 const FBALPHA44_REPO = 'libretro/fbalpha';
@@ -440,7 +448,7 @@ router.post('/api/versions/import-online', async (req, res) => {
 
       const extractDir = path.join('/tmp', `mame_extract_${Date.now()}`);
       fs.mkdirSync(extractDir, { recursive: true });
-      let text = '';
+      let foundDat = null;
       try {
         try {
           execSync(`7z e -y -o"${extractDir}" "${tempFile}"`, { encoding: 'utf-8' });
@@ -461,15 +469,44 @@ router.post('/api/versions/import-online', async (req, res) => {
           }
         };
         walkDir(extractDir);
-        let foundDat = null;
+
+        // Score files: prefer .xml (Logiqx/MAME XML) over .dat (can be ROMCenter/other)
+        // First check for version-matched files; if none found, accept any MAME-named DAT/XML
+        let bestScore = 0;
+        const candidateFiles = [];
 
         for (const fp of allFiles) {
           const base = path.basename(fp).toLowerCase();
-          if (base.endsWith('.dat') && !/without.?crc|nocrc/i.test(base) && base.includes(version.replace('.', ''))) {
-            foundDat = fp; break;
+          const isDat = base.endsWith('.dat') && !/without.?crc|nocrc/i.test(base);
+          const isXml = base.endsWith('.xml');
+          if (!isDat && !isXml) continue;
+
+          const versionMatch = mameDatMatches(base, version);
+          const isMame = /^mame(\s|\b|_)/.test(base);
+          const isQualified = /\(arcade\)|\(mess\)/.test(base);
+
+          let score = 0;
+          if (versionMatch) score = 4;
+          else if (isMame) score = 2;
+
+          if (isQualified) score -= 1;
+          if (isXml) score += 1;
+
+          if (score > 0) {
+            candidateFiles.push({ fp, score });
+            if (score > bestScore) bestScore = score;
           }
-          if (base.endsWith('.xml') && base.includes(version.replace('.', '')) && !foundDat) foundDat = fp;
         }
+
+        // Pick the highest-scored file; prefer .xml on tie
+        let candidates = candidateFiles.filter(c => c.score === bestScore);
+        candidates.sort((a, b) => {
+          // .xml first, then .dat
+          const aExt = a.fp.endsWith('.xml') ? 0 : 1;
+          const bExt = b.fp.endsWith('.xml') ? 0 : 1;
+          return aExt - bExt || a.fp.localeCompare(b.fp);
+        });
+        if (candidates.length > 0) foundDat = candidates[0].fp;
 
         if (!foundDat) {
           for (const fp of allFiles) {
@@ -487,7 +524,7 @@ router.post('/api/versions/import-online', async (req, res) => {
             for (const fp2 of nestedFiles) {
               const b2 = path.basename(fp2).toLowerCase();
               if (b2.endsWith('.dat') && !/without.?crc|nocrc/i.test(b2)) { foundDat = fp2; break; }
-              if (b2.endsWith('.xml') && !foundDat) foundDat = fp2;
+              if (b2.endsWith('.xml') && !foundDat && mameDatMatches(b2, version)) foundDat = fp2;
             }
             if (foundDat) break;
           }
@@ -503,35 +540,22 @@ router.post('/api/versions/import-online', async (req, res) => {
 
         if (!foundDat) throw new Error(`No DAT/XML file found for version "${version}" in the archive`);
 
-        text = fs.readFileSync(foundDat, 'utf-8');
+        const result = execCli(['import', foundDat, 'MAME', version], { binary: 'parse' });
+        if (!result) throw new Error('CLI returned null');
+
+        const versionId = result.version_id;
+        const totalGames = result.games_inserted || 0;
+        if (!versionId) throw new Error(`Failed to create version for MAME "${version}"`);
+
+        run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, versionId]);
+
+        mameDatsCache = null;
+        res.json({ ok: true, version_id: versionId, total_games: totalGames });
+        return;
       } finally {
         try { fs.rmSync(extractDir, { recursive: true }); } catch (_) {}
         try { fs.unlinkSync(tempFile); } catch (_) {}
       }
-
-      if (!text || text.length < 10) throw new Error(`Empty or invalid DAT content (size=${text?.length || 0})`);
-
-      const tmpFile = path.join('/tmp', `mame_import_${Date.now()}_${version.replace(/[^a-zA-Z0-9]/g, '_')}.dat`);
-      fs.writeFileSync(tmpFile, text, 'utf-8');
-      try {
-        execCli(['import', tmpFile, 'MAME', version], { binary: 'parse' });
-      } finally {
-        fs.unlinkSync(tmpFile);
-      }
-
-      let row = get('SELECT id FROM set_versions WHERE source = ? AND version = ?', ['MAME', version]);
-      for (const name of gameNames) {
-        insert.bind([row.id, name, '']);
-        insert.step();
-        insert.reset();
-      }
-      insert.free();
-      saveDb();
-
-      run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, row.id]);
-
-      mameDatsCache = null;
-      res.json({ ok: true, version_id: row.id });
     }
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

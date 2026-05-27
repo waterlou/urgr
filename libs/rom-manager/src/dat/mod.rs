@@ -43,9 +43,9 @@ pub fn detect_format<P: AsRef<Path>>(path: P) -> Result<DatFormat> {
         first
     };
 
-    if check_line.contains("<mame") {
+    if check_line.contains("<mame") || check_line.contains("DOCTYPE mame") {
         Ok(DatFormat::MameListXml)
-    } else if check_line.contains("<datafile") {
+    } else if check_line.contains("<datafile") || check_line.contains("DOCTYPE datafile") {
         Ok(DatFormat::Logiqx)
     } else if check_line.to_lowercase().contains("clrmamepro") {
         Ok(DatFormat::ClrmamePro)

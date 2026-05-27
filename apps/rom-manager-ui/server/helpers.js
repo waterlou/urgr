@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const dbPath = process.env.ROM_DB || path.join(__dirname, '..', '..', '..', 'data', 'roms.db');
-export const dbReady = initDb(dbPath);
+export const dbReady = Promise.resolve(initDb(dbPath));
 
 export function all(sql, params = []) {
   const stmt = getDb().prepare(sql);

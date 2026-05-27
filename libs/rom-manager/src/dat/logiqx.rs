@@ -24,7 +24,7 @@ pub fn parse_logiqx_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>, Vec
 
     loop {
         match xml.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"game" => {
+            Ok(Event::Start(ref e)) if e.name().as_ref() == b"game" || e.name().as_ref() == b"machine" => {
                 let name = e
                     .attributes()
                     .find(|a| a.as_ref().is_ok_and(|a| a.key.as_ref() == b"name"))
