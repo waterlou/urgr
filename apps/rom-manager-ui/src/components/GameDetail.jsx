@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { getGame, coverUrl, scrapeGameMetadata } from '../api.js'
 
-export default function GameDetail({ gameId, onClose, onNavigate }) {
+export default function GameDetail({ gameId, onBack, onNavigate }) {
   const [game, setGame] = useState(null)
   const [scraping, setScraping] = useState(false)
   const [scrapeError, setScrapeError] = useState(null)
@@ -32,11 +33,11 @@ export default function GameDetail({ gameId, onClose, onNavigate }) {
 
   useEffect(() => {
     function handleKey(e) {
-      if (e.key === 'Escape') { if (lightbox) setLightbox(null); else onClose() }
+      if (e.key === 'Escape') { if (lightbox) setLightbox(null); else onBack?.() }
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [onClose, lightbox])
+  }, [onBack, lightbox])
 
   async function handleScrape() {
     setScraping(true)
@@ -57,7 +58,19 @@ export default function GameDetail({ gameId, onClose, onNavigate }) {
     }
   }
 
-  if (!game) return null
+  if (!game) return (
+    <div className="detail-page">
+      <div className="detail-nav">
+        <button className="back-btn" onClick={onBack}>
+          <span className="icon">arrow_back</span>
+        </button>
+        <span className="detail-nav-title">Loading...</span>
+      </div>
+      <div className="detail-page-body">
+        <div className="loading-screen"><div className="loading-spinner" /></div>
+      </div>
+    </div>
+  )
 
   const coverArr = Array.isArray(game.covers) ? game.covers : []
   const screenshotArr = Array.isArray(game.screenshots) ? game.screenshots : []
@@ -65,16 +78,22 @@ export default function GameDetail({ gameId, onClose, onNavigate }) {
   const screenshots = screenshotArr.filter(Boolean)
 
   return (
-    <div className="modal-backdrop" onClick={lightbox ? () => setLightbox(null) : onClose}>
-      <div className="modal-content game-detail-content" onClick={e => e.stopPropagation()}>
-        <button className="modal-close" onClick={lightbox ? () => setLightbox(null) : onClose}><span className="icon">close</span></button>
+    <div className="detail-page">
+      {lightbox && createPortal(
+        <div className="lightbox-overlay" onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt="" className="lightbox-img" />
+        </div>,
+        document.body
+      )}
 
-        {lightbox && (
-          <div className="lightbox-overlay" onClick={() => setLightbox(null)}>
-            <img src={lightbox} alt="" className="lightbox-img" />
-          </div>
-        )}
+      <div className="detail-nav">
+        <button className="back-btn" onClick={onBack}>
+          <span className="icon">arrow_back</span>
+        </button>
+        <span className="detail-nav-title">{game.description || game.name}</span>
+      </div>
 
+      <div className="detail-page-body">
         <div className="detail-header">
           {hasCover && (
             <div className="detail-cover">
@@ -107,99 +126,97 @@ export default function GameDetail({ gameId, onClose, onNavigate }) {
           </div>
         </div>
 
-        <div className="modal-body">
-          {scraping ? (
-            <p className="modal-description"><em>Scraping metadata...</em></p>
-          ) : game.synopsis ? (
-            <p className="modal-description">{game.synopsis}</p>
-          ) : (
-            <p className="modal-description">
-              {game.description && game.description !== game.name ? game.description : 'No description available.'}
-              {scrapeError && <span className="scrape-error"> ({scrapeError})</span>}
-            </p>
-          )}
+        {scraping ? (
+          <p className="modal-description"><em>Scraping metadata...</em></p>
+        ) : game.synopsis ? (
+          <p className="modal-description">{game.synopsis}</p>
+        ) : (
+          <p className="modal-description">
+            {game.description && game.description !== game.name ? game.description : 'No description available.'}
+            {scrapeError && <span className="scrape-error"> ({scrapeError})</span>}
+          </p>
+        )}
 
-          {screenshots.length > 0 && (
-            <section>
-              <h2>Screenshots</h2>
-              <div className="screenshot-grid">
-                {screenshots.map((url, i) => (
-                  <div key={i} className="screenshot-item" onClick={() => setLightbox(url)}>
-                    <img src={url} alt="" loading="lazy" />
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
+        {screenshots.length > 0 && (
+          <section>
+            <h2>Screenshots</h2>
+            <div className="screenshot-grid">
+              {screenshots.map((url, i) => (
+                <div key={i} className="screenshot-item" onClick={() => setLightbox(url)}>
+                  <img src={url} alt="" loading="lazy" />
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
-          {game.clones && game.clones.length > 0 && (
-            <section>
-              <h2>Variants ({game.clones.length})</h2>
-              <div className="variants-list">
-                {game.clones.map(c => (
-                  <div key={c.name} className="variant-item" onClick={() => onNavigate?.(c.id)} style={{cursor:'pointer'}}>
-                    <span className="variant-name">{c.description || c.name}</span>
-                    <span className="variant-romname">{c.name}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
+        {game.clones && game.clones.length > 0 && (
+          <section>
+            <h2>Variants ({game.clones.length})</h2>
+            <div className="variants-list">
+              {game.clones.map(c => (
+                <div key={c.name} className="variant-item" onClick={() => onNavigate?.(c.id)} style={{cursor:'pointer'}}>
+                  <span className="variant-name">{c.description || c.name}</span>
+                  <span className="variant-romname">{c.name}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
-          {game.roms && game.roms.length > 0 && (
-            <section>
-              <h2>ROM Files ({game.roms.length})</h2>
-              <div className="rom-table-wrapper">
-                <table className="rom-table">
-                  <thead>
-                    <tr>
-                      <th>Filename</th>
-                      <th>Size</th>
-                      <th>Status</th>
-                      <th>SHA1</th>
+        {game.roms && game.roms.length > 0 && (
+          <section>
+            <h2>ROM Files ({game.roms.length})</h2>
+            <div className="rom-table-wrapper">
+              <table className="rom-table">
+                <thead>
+                  <tr>
+                    <th>Filename</th>
+                    <th>Size</th>
+                    <th>Status</th>
+                    <th>SHA1</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {game.roms.map(rom => (
+                    <tr key={rom.id}>
+                      <td className="rom-filename">{rom.filename}</td>
+                      <td>{rom.size != null ? formatSize(rom.size) : '-'}</td>
+                      <td><span className={`rom-status rom-status-${rom.status}`}>{rom.status}</span></td>
+                      <td className="rom-hash">{rom.sha1 ? rom.sha1.slice(0, 16) + '...' : '-'}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {game.roms.map(rom => (
-                      <tr key={rom.id}>
-                        <td className="rom-filename">{rom.filename}</td>
-                        <td>{rom.size != null ? formatSize(rom.size) : '-'}</td>
-                        <td><span className={`rom-status rom-status-${rom.status}`}>{rom.status}</span></td>
-                        <td className="rom-hash">{rom.sha1 ? rom.sha1.slice(0, 16) + '...' : '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
 
-          {game.scanned_games && game.scanned_games.length > 0 && (
-            <section>
-              <h2>Scanned Files ({game.scanned_games.length})</h2>
-              <div className="rom-table-wrapper">
-                <table className="rom-table">
-                  <thead>
-                    <tr>
-                      <th>Filename</th>
-                      <th>Size</th>
-                      <th>Status</th>
+        {game.scanned_games && game.scanned_games.length > 0 && (
+          <section>
+            <h2>Scanned Files ({game.scanned_games.length})</h2>
+            <div className="rom-table-wrapper">
+              <table className="rom-table">
+                <thead>
+                  <tr>
+                    <th>Filename</th>
+                    <th>Size</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {game.scanned_games.map(sg => (
+                    <tr key={sg.id}>
+                      <td className="rom-filename">{sg.filename}</td>
+                      <td>{sg.size != null ? formatSize(sg.size) : '-'}</td>
+                      <td><span className={`rom-status rom-status-${sg.status}`}>{sg.status}</span></td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {game.scanned_games.map(sg => (
-                      <tr key={sg.id}>
-                        <td className="rom-filename">{sg.filename}</td>
-                        <td>{sg.size != null ? formatSize(sg.size) : '-'}</td>
-                        <td><span className={`rom-status rom-status-${sg.status}`}>{sg.status}</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
-        </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
       </div>
     </div>
   )

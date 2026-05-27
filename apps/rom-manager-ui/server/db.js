@@ -6,6 +6,13 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let db = null;
 let dbFilePath = null;
+let SQL = null;
+
+async function ensureSqlJs() {
+  if (!SQL) SQL = await initSqlJs();
+  return SQL;
+}
+await ensureSqlJs();
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS set_versions (
@@ -121,6 +128,20 @@ CREATE TABLE IF NOT EXISTS game_ratings (
     FOREIGN KEY (game_entry_id) REFERENCES game_entries(id)
 );
 
+CREATE TABLE IF NOT EXISTS scrape_jobs (
+    id              TEXT PRIMARY KEY,
+    status          TEXT NOT NULL DEFAULT 'running',
+    total_games     INTEGER DEFAULT 0,
+    scraped         INTEGER DEFAULT 0,
+    skipped         INTEGER DEFAULT 0,
+    failed          INTEGER DEFAULT 0,
+    rate_limited    INTEGER DEFAULT 0,
+    progress_msg    TEXT DEFAULT '',
+    result          TEXT,
+    created_at      TEXT DEFAULT (datetime('now')),
+    updated_at      TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS collection_builds (
     id              INTEGER PRIMARY KEY,
     collection_id   INTEGER NOT NULL,
@@ -138,8 +159,7 @@ CREATE TABLE IF NOT EXISTS collection_builds (
 );
 `;
 
-export async function initDb(dbPath) {
-  const SQL = await initSqlJs();
+export function initDb(dbPath) {
   const resolved = path.resolve(dbPath || path.join(__dirname, '..', '..', '..', 'data', 'roms.db'));
   dbFilePath = resolved;
 
@@ -161,10 +181,6 @@ export async function initDb(dbPath) {
   try { db.run("ALTER TABLE game_entries ADD COLUMN covers TEXT DEFAULT '[]'"); } catch (_) {}
   // Migration: add screenshots column if missing
   try { db.run("ALTER TABLE game_entries ADD COLUMN screenshots TEXT DEFAULT '[]'"); } catch (_) {}
-
-  // No default seed data — start empty
-
-  // No default seed data — start empty
 
   return db;
 }

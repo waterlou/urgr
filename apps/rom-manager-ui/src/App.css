@@ -117,22 +117,92 @@ html, body, #root {
 .sidebar-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 20px 16px 12px;
+  gap: 12px;
+  padding: 24px 16px 16px;
   cursor: pointer;
   user-select: none;
   border-bottom: 1px solid var(--border);
 }
 
-.sidebar-logo {
-  font-size: 24px;
+.neon-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
-.sidebar-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--accent);
-  letter-spacing: 1px;
+.neon-icon {
+  font-size: 28px;
+  color: #fff;
+  filter: drop-shadow(0 0 6px #00d4ff) drop-shadow(0 0 20px rgba(0,212,255,0.4));
+  animation: neonPulse 2s ease-in-out infinite;
+}
+
+.neon-title {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.neon-text {
+  font-family: 'Tilt Neon', sans-serif;
+  font-size: 18px;
+  font-weight: 400;
+  color: #e0f0ff;
+  text-shadow:
+    0 0 4px #00d4ff,
+    0 0 11px #00d4ff,
+    0 0 21px #00d4ff,
+    0 0 42px rgba(0,212,255,0.5);
+  letter-spacing: 3px;
+  animation: neonPulse 2s ease-in-out infinite;
+}
+
+.neon-text-accent {
+  color: #ffe0f0;
+  text-shadow:
+    0 0 4px #ff2d95,
+    0 0 11px #ff2d95,
+    0 0 21px #ff2d95,
+    0 0 42px rgba(255,45,149,0.5);
+  font-size: 14px;
+  letter-spacing: 4px;
+}
+
+@keyframes neonPulse {
+  0%, 100% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+  50% {
+    opacity: 0.92;
+    filter: brightness(1.15);
+  }
+}
+
+[data-theme="light"] .neon-text {
+  color: #003344;
+  text-shadow:
+    0 0 3px rgba(0,212,255,0.6),
+    0 0 8px rgba(0,212,255,0.3);
+  animation: none;
+}
+
+[data-theme="light"] .neon-text-accent {
+  color: #660033;
+  text-shadow:
+    0 0 3px rgba(255,45,149,0.6),
+    0 0 8px rgba(255,45,149,0.3);
+  animation: none;
+}
+
+[data-theme="light"] .neon-icon {
+  color: #003344;
+  filter: drop-shadow(0 0 4px rgba(0,212,255,0.4));
+  animation: none;
 }
 
 .sidebar-nav {
@@ -333,6 +403,94 @@ html, body, #root {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+}
+
+/* View Stack — iOS-style push/pop navigation */
+.view-stack {
+  flex: 1;
+  overflow: hidden;
+}
+
+.view-stack-track {
+  display: flex;
+  height: 100%;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+}
+
+.view-stack-page {
+  flex: 0 0 100%;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.show-detail .view-stack-track {
+  transform: translateX(-100%);
+}
+
+/* Detail Page — full-width game detail, slides in from right */
+.detail-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.detail-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg-elevated);
+}
+
+.detail-nav .back-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  border-radius: 50%;
+  font-size: 20px;
+}
+
+.detail-nav-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-page-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 32px 40px;
+}
+
+.detail-page-body .detail-header {
+  padding: 0 0 24px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+
+.detail-page-body section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.detail-page-body h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
 }
 
 /* Browser */
@@ -632,6 +790,30 @@ html, body, #root {
   background: var(--bg-card);
 }
 
+.add-to-set-menu .remove-from-set-btn {
+  color: #ff6b6b;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+
+.add-to-set-menu .remove-from-set-btn:hover {
+  background: rgba(255,107,107,0.1);
+}
+
+.list-add-to-set-menu button:hover {
+  background: var(--bg-card);
+}
+
+.list-add-to-set-menu .remove-from-set-btn {
+  color: #ff6b6b;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+
+.list-add-to-set-menu .remove-from-set-btn:hover {
+  background: rgba(255,107,107,0.1);
+}
+
 .grid-card-info {
   padding: 10px 12px 12px;
 }
@@ -781,6 +963,83 @@ html, body, #root {
 .list-col-year { width: 60px; flex-shrink: 0; color: var(--text-muted); font-size: 12px; }
 .list-col-rating { width: 100px; flex-shrink: 0; }
 .list-col-fav { width: 30px; flex-shrink: 0; text-align: center; }
+
+.list-col-addset-header {
+  width: 30px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.list-col-addset {
+  width: 30px;
+  flex-shrink: 0;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.list-add-set-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text-muted);
+  transition: all 0.15s;
+  opacity: 0.4;
+}
+
+.list-item:hover .list-add-set-btn {
+  opacity: 1;
+}
+
+.list-add-set-btn:hover {
+  background: var(--accent);
+  color: #fff;
+  opacity: 1;
+}
+
+.list-add-to-set-wrapper {
+  position: relative;
+}
+
+.list-add-to-set-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
+  min-width: 180px;
+  z-index: 50;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+
+.list-add-to-set-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.list-add-to-set-menu button:hover {
+  background: var(--bg-card);
+}
 
 .fav-star {
   cursor: pointer;
@@ -1075,7 +1334,12 @@ html, body, #root {
   cursor: pointer;
   transition: all 0.15s;
   border: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1;
 }
+.btn .icon { font-size: 18px; }
 
 .btn-primary {
   background: var(--accent);
@@ -1097,8 +1361,6 @@ html, body, #root {
 }
 
 /* Game Detail */
-.game-detail-content { max-width: 960px; }
-
 .detail-header {
   display: flex;
   gap: 24px;
@@ -1824,8 +2086,59 @@ html, body, #root {
   color: var(--text);
 }
 
+/* Hamburger menu button — hidden on desktop */
+.hamburger-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 50%;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+.hamburger-btn:hover {
+  background: rgba(255,255,255,0.08);
+}
+
+/* Sidebar backdrop for mobile overlay */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 550;
+  background: rgba(0,0,0,0.5);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+}
+
+.sidebar-backdrop.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 @media (max-width: 768px) {
-  .sidebar { display: none; }
+  .hamburger-btn { display: flex; }
+  .sidebar-backdrop { display: block; }
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 600;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    will-change: transform;
+    backface-visibility: hidden;
+  }
+  .sidebar.sidebar-open {
+    transform: translateX(0);
+  }
   .browser-header { padding: 16px; }
   .browser-content { padding: 12px 16px 24px; }
   .browser-toolbar { flex-direction: column; align-items: stretch; }

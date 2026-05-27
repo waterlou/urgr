@@ -6,12 +6,18 @@ export default function Sidebar({
   onEditCollection, onEditGameSet,
   onDeleteCollection, onDeleteGameSet,
   theme, onToggleTheme, onOpenSettings,
+  sidebarOpen,
 }) {
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${sidebarOpen ? ' sidebar-open' : ''}`}>
       <div className="sidebar-header" onClick={() => onSelect('browse', null)}>
-        <span className="icon icon-xl sidebar-logo">sports_esports</span>
-        <span className="sidebar-title">ROM Manager</span>
+        <div className="neon-logo">
+          <span className="icon neon-icon icon-xl">sports_esports</span>
+        </div>
+        <div className="neon-title">
+          <span className="neon-text">ROM</span>
+          <span className="neon-text neon-text-accent">Manager</span>
+        </div>
       </div>
 
       <nav className="sidebar-nav">

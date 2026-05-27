@@ -55,6 +55,9 @@ export function getCollectionGames(id, { limit, offset, sort, order, q, parents_
 export function addCollectionVersion(id, versionId) {
   return fetchWithBody(`/collections/${id}/versions`, 'POST', { version_id: versionId });
 }
+export function getCollectionVersions(id) {
+  return fetchJson(`/collections/${id}/versions`);
+}
 export function removeCollectionVersion(id, versionId) {
   return fetchWithBody(`/collections/${id}/versions/${versionId}`, 'DELETE');
 }
@@ -87,8 +90,8 @@ export function updateCollectionBuild(id, buildId, data) {
 export function runCollectionBuild(id, buildId, { source, import_dir, base_dir, update } = {}) {
   return fetchWithBody(`/collections/${id}/builds/${buildId}/run`, 'POST', { source, import_dir, base_dir, update });
 }
-export function collectionBuild(id, version_id, import_dir) {
-  return fetchWithBody(`/collections/${id}/build`, 'POST', { version_id, import_dir });
+export function collectionBuild(id, version_id, import_dir, scan = false) {
+  return fetchWithBody(`/collections/${id}/build`, 'POST', { version_id, import_dir, scan });
 }
 
 // Exports
@@ -179,6 +182,12 @@ export function hashFile(file) {
 }
 export function scrapeGameMetadata(gameId) {
   return fetchWithBody(`/games/${gameId}/scrape`, 'POST');
+}
+export function batchScrapeGameMetadata(gameIds, overwrite) {
+  return fetchWithBody('/games/batch-scrape', 'POST', { game_ids: gameIds, overwrite });
+}
+export function getScrapeJobs() {
+  return fetchJson('/games/scrape-jobs');
 }
 export function scraperDetail(gameId, source) {
   return fetchWithBody('/scraper/detail', 'POST', { game_id: gameId, source });

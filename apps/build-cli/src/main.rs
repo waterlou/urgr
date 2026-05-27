@@ -127,7 +127,7 @@ fn print_usage() {
     eprintln!("  scan <version-id> <dir>");
     eprintln!("  verify <version-id> <dir> [--fallback <id>]");
     eprintln!("  diff <version-id-a> <version-id-b>");
-    eprintln!("  build <source> <import-dir> [--update] [--base-dir <dir>]");
+    eprintln!("  build <source> <import-dir> [--update] [--dry-run] [--version-id <id>] [--base-dir <dir>]");
     eprintln!();
     eprintln!("  Build automatically detects the latest version for <source> from the");
     eprintln!("  database. Use --update to upgrade in-place (renames old folder, deletes");
@@ -139,6 +139,15 @@ fn print_usage() {
 }
 
 fn main() -> ExitCode {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info".into()),
+        )
+        .with_target(true)
+        .with_writer(std::io::stderr)
+        .init();
+
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         print_usage();
@@ -351,7 +360,7 @@ fn cmd_diff(args: &[String], json: bool) -> ExitCode {
 
 fn cmd_build(args: &[String], json: bool) -> ExitCode {
     if args.len() < 3 {
-        eprintln!("Usage: build-cli build <source> <import-dir> [--update] [--base-dir <dir>] [--collection-dir <dir>] [--progress]");
+        eprintln!("Usage: build-cli build <source> <import-dir> [--update] [--dry-run] [--version-id <id>] [--base-dir <dir>] [--collection-dir <dir>] [--progress]");
         return ExitCode::FAILURE;
     }
     let source = &args[1];
@@ -363,6 +372,10 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
 
     let update = args.iter().any(|a| a == "--update");
     let show_progress = args.iter().any(|a| a == "--progress");
+    let dry_run = args.iter().any(|a| a == "--dry-run");
+    let version_id = args.iter().position(|a| a == "--version-id")
+        .and_then(|p| args.get(p + 1))
+        .and_then(|s| s.parse::<i64>().ok());
     let base_dir = args.iter().position(|a| a == "--base-dir")
         .and_then(|p| args.get(p + 1))
         .map(|s| std::path::PathBuf::from(s))
@@ -385,7 +398,7 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
         }
     };
 
-    match build_version(&db, source, import_dir, &base_dir, collection_dir.as_deref(), update, &progress_cb, &CANCEL_FLAG) {
+    match build_version(&db, source, import_dir, &base_dir, collection_dir.as_deref(), update, dry_run, version_id, &progress_cb, &CANCEL_FLAG) {
         Ok(result) => {
             if json {
                 print_json(&BuildOutput {
@@ -403,8 +416,12 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
                     missing_games: result.missing_games,
                 });
             } else {
-                let mode_label = if update { "update" } else { "delta" };
-                println!("Built {} {} ({} mode)", source, result.version, mode_label);
+                if dry_run {
+                    println!("Scan result for {} {}", source, result.version);
+                } else {
+                    let mode_label = if update { "update" } else { "delta" };
+                    println!("Built {} {} ({} mode)", source, result.version, mode_label);
+                }
                 if let Some(ref pv) = result.prev_version {
                     println!("  from v{} → v{}", pv, result.version);
                 }

@@ -1,9 +1,19 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { coverUrl } from '../api.js'
 import IconDisplay from './IconDisplay.jsx'
 
-export default function GameGridCard({ game, onSelect, onRating, onFavourite, onAddToGameSet, gameSets, currentGameSetId }) {
+export default function GameGridCard({ game, onSelect, onRating, onFavourite, onAddToGameSet, onRemoveFromGameSet, gameSets, gameSetId }) {
   const [showMenu, setShowMenu] = useState(false)
+  const menuRef = useRef(null)
+
+  useEffect(() => {
+    if (!showMenu) return
+    function handleClick(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setShowMenu(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [showMenu])
 
   function handleClickStars(e) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -11,6 +21,8 @@ export default function GameGridCard({ game, onSelect, onRating, onFavourite, on
     const star = Math.ceil((x / rect.width) * 5);
     onRating(Math.min(star, 5));
   }
+
+  const isGameSetView = gameSetId != null
 
   return (
     <div className="grid-card" onClick={() => onSelect(game)}>
@@ -25,16 +37,22 @@ export default function GameGridCard({ game, onSelect, onRating, onFavourite, on
             >
               <span className={`icon ${game.favourite ? 'icon-fill' : ''}`}>star</span>
             </button>
-            {onAddToGameSet && gameSets.length > 0 && (
-              <div className="add-to-set-wrapper" onMouseEnter={() => setShowMenu(true)} onMouseLeave={() => setShowMenu(false)}>
-                <button className="add-set-btn" title="Add to Game Set"><span className="icon">playlist_add</span></button>
+            {gameSets.length > 0 && (
+              <div className="add-to-set-wrapper" ref={menuRef}>
+                <button className="add-set-btn" onClick={() => setShowMenu(v => !v)} title={isGameSetView ? 'Remove from Set' : 'Add to Game Set'}><span className="icon">playlist_add</span></button>
                 {showMenu && (
                   <div className="add-to-set-menu">
-                    {gameSets.filter(gs => gs.id !== currentGameSetId).map(gs => (
-                      <button key={gs.id} onClick={() => onAddToGameSet(game.id, gs.id)}>
-                        <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:4}}><IconDisplay name={gs.icon} fallback="inventory_2" /></span> {gs.name}
+                    {isGameSetView ? (
+                      <button className="remove-from-set-btn" onClick={() => { onRemoveFromGameSet(game.id, gameSetId); setShowMenu(false) }}>
+                        <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:4}}>remove_circle</span> Remove
                       </button>
-                    ))}
+                    ) : (
+                      gameSets.map(gs => (
+                        <button key={gs.id} onClick={() => { onAddToGameSet(game.id, gs.id); setShowMenu(false) }}>
+                          <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:4}}><IconDisplay name={gs.icon} fallback="inventory_2" /></span> {gs.name}
+                        </button>
+                      ))
+                    )}
                   </div>
                 )}
               </div>

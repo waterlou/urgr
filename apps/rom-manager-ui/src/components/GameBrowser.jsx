@@ -1,20 +1,57 @@
 import { useState, useEffect, useRef } from 'react'
 import GameGridCard from './GameGridCard.jsx'
 import GameListItem from './GameListItem.jsx'
-import { getGames, coverUrl, updateGameRating } from '../api.js'
+import { getGames, coverUrl, updateGameRating, batchScrapeGameMetadata, subscribeJobSSE, cancelJob, getScrapeJobs } from '../api.js'
 
 export default function GameBrowser({
   games, loading, hasMore, onLoadMore, activeView, activeMeta, totalGames, platforms,
   viewMode, sortField, sortOrder, searchQuery,
   onViewModeChange, onSortFieldChange, onSortOrderChange,
-  onSearchQueryChange, onSelectGame, onAddToGameSet, gameSets, activeId,
+  onSearchQueryChange, onSelectGame, onAddToGameSet, onRemoveFromGameSet, onUpdateGame, gameSets, activeId,
   showBackToDetail, onBackToDetail,
   parentsOnly, onParentsOnlyChange,
+  onToggleSidebar,
 }) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchResults, setSearchResults] = useState([])
   const [localQuery, setLocalQuery] = useState('')
   const sentinelRef = useRef(null)
+  const [batchShow, setBatchShow] = useState(false)
+  const [batchOverwrite, setBatchOverwrite] = useState(false)
+  const [batchRunning, setBatchRunning] = useState(false)
+  const [batchProgress, setBatchProgress] = useState('')
+  const [batchResult, setBatchResult] = useState(null)
+  const [batchJobId, setBatchJobId] = useState(null)
+  const eventSourceRef = useRef(null)
+
+  useEffect(() => {
+    return () => { if (eventSourceRef.current) eventSourceRef.current.close(); }
+  }, [])
+
+  // Reset batch UI on navigation + reconnect to active scrape jobs
+  useEffect(() => {
+    setBatchShow(false)
+    setBatchRunning(false)
+    setBatchProgress('')
+    setBatchResult(null)
+    setBatchJobId(null)
+    if (eventSourceRef.current) { eventSourceRef.current.close(); eventSourceRef.current = null }
+
+    getScrapeJobs().then(jobs => {
+      if (!jobs || jobs.length === 0) return
+      const running = jobs.find(j => j.status === 'running')
+      if (running) {
+        setBatchRunning(true)
+        setBatchProgress(running.progress_msg || 'Running...')
+        setBatchJobId(running.id)
+        eventSourceRef.current = subscribeJobSSE(running.id, {
+          onProgress: (msg) => setBatchProgress(msg.msg || `Progress: ${msg.pct}%`),
+          onResult: (data) => { setBatchResult(data); setBatchRunning(false); setBatchJobId(null) },
+          onError: (err) => { setBatchResult({ error: err }); setBatchRunning(false); setBatchJobId(null) },
+        })
+      }
+    }).catch(() => {})
+  }, [activeView, activeId])
 
   // Infinite scroll via IntersectionObserver
   useEffect(() => {
@@ -55,21 +92,54 @@ export default function GameBrowser({
   }
 
   async function handleRating(game, rating) {
+    onUpdateGame(game.id, { rating })
     await updateGameRating(game.id, { rating })
-    // Optimistic update
-    game.rating = rating
-    forceUpdate()
   }
 
   async function handleFavourite(game) {
-    await updateGameRating(game.id, { favourite: !game.favourite })
-    game.favourite = game.favourite ? 0 : 1
-    forceUpdate()
+    const newFav = game.favourite ? 0 : 1
+    onUpdateGame(game.id, { favourite: newFav })
+    await updateGameRating(game.id, { favourite: newFav })
   }
 
-  // Force re-render hack
-  const [, setTick] = useState(0)
-  function forceUpdate() { setTick(t => t + 1) }
+  async function handleBatchScrape() {
+    if (games.length === 0) return
+    setBatchRunning(true)
+    setBatchProgress('Starting...')
+    setBatchResult(null)
+    try {
+      const gameIds = games.map(g => g.id)
+      const { jobId } = await batchScrapeGameMetadata(gameIds, batchOverwrite)
+      setBatchJobId(jobId)
+      eventSourceRef.current = subscribeJobSSE(jobId, {
+        onProgress: (msg) => setBatchProgress(msg.msg || `Progress: ${msg.pct}%`),
+        onResult: (data) => {
+          setBatchResult(data)
+          setBatchRunning(false)
+          setBatchJobId(null)
+        },
+        onError: (err) => {
+          setBatchResult({ error: err })
+          setBatchRunning(false)
+          setBatchJobId(null)
+        },
+      })
+    } catch (e) {
+      setBatchResult({ error: e.message })
+      setBatchRunning(false)
+    }
+  }
+
+  async function handleCancelBatch() {
+    if (!batchJobId) return
+    try {
+      await cancelJob(batchJobId)
+      if (eventSourceRef.current) { eventSourceRef.current.close(); eventSourceRef.current = null }
+    } catch (e) { console.error('Cancel error:', e) }
+    setBatchRunning(false)
+    setBatchResult({ cancelled: true })
+    setBatchJobId(null)
+  }
 
   const title = !activeMeta
     ? 'All Games'
@@ -80,6 +150,7 @@ export default function GameBrowser({
   const isList = viewMode === 'list'
   const isGrid = viewMode === 'grid'
   const isLarge = viewMode === 'large'
+  const gameSetId = activeView === 'game-set' ? activeId : null
 
   const SORT_OPTIONS = [
     { field: 'name', label: 'Name' },
@@ -91,6 +162,7 @@ export default function GameBrowser({
     <div className="browser">
       <div className="browser-header">
         <div className="browser-title-row">
+          <button className="hamburger-btn" onClick={onToggleSidebar} title="Menu"><span className="icon">menu</span></button>
           {showBackToDetail && (
             <button className="back-btn" onClick={onBackToDetail} title="Back to Collection"><span className="icon">arrow_back</span></button>
           )}
@@ -137,6 +209,43 @@ export default function GameBrowser({
           </div>
 
           <div className="toolbar-right">
+            {activeView === 'collection' && games.length > 0 && !batchShow && !batchRunning && (
+              <button className="btn btn-sm btn-secondary" onClick={() => setBatchShow(true)} style={{marginRight:8}}>
+                <span className="icon icon-sm">auto_awesome</span> Scrape
+              </button>
+            )}
+            {batchShow && !batchRunning && (
+              <div className="batch-scrape-form" style={{display:'flex',alignItems:'center',gap:8,marginRight:8}}>
+                <span className="text-muted" style={{fontSize:12,whiteSpace:'nowrap'}}>{games.length} game{games.length !== 1 ? 's' : ''}</span>
+                <label className="batch-overwrite-label" style={{fontSize:12,display:'flex',alignItems:'center',gap:4,cursor:'pointer',whiteSpace:'nowrap'}}>
+                  <input type="checkbox" checked={batchOverwrite} onChange={e => setBatchOverwrite(e.target.checked)} />
+                  Overwrite
+                </label>
+                <button className="btn btn-sm btn-primary" onClick={handleBatchScrape}><span className="icon icon-sm">auto_awesome</span> Start</button>
+                <button className="btn btn-sm btn-secondary" onClick={() => setBatchShow(false)}>Cancel</button>
+              </div>
+            )}
+            {batchRunning && (
+              <div className="batch-scrape-progress" style={{display:'flex',alignItems:'center',gap:6,marginRight:8}}>
+                <div className="loading-spinner-sm" />
+                <span className="text-muted" style={{fontSize:12,whiteSpace:'nowrap',maxWidth:300,overflow:'hidden',textOverflow:'ellipsis'}}>{batchProgress}</span>
+                <button className="btn btn-sm btn-danger" onClick={handleCancelBatch} title="Cancel">✕</button>
+              </div>
+            )}
+            {batchResult && !batchRunning && (
+              <div className="batch-scrape-result" style={{display:'flex',alignItems:'center',gap:6,marginRight:8}}>
+                {batchResult.error ? (
+                  <span className="scrape-error" style={{fontSize:12,whiteSpace:'nowrap'}}>Failed: {batchResult.error}</span>
+                ) : batchResult.cancelled ? (
+                  <span className="text-muted" style={{fontSize:12,whiteSpace:'nowrap'}}>Cancelled</span>
+                ) : (
+                  <span className="text-muted" style={{fontSize:12,whiteSpace:'nowrap'}}>
+                    ✓ {batchResult.scraped} · ⏭ {batchResult.skipped} · ✗ {batchResult.failed}
+                  </span>
+                )}
+                <button className="btn btn-sm btn-secondary" onClick={() => { setBatchShow(false); setBatchResult(null); setBatchJobId(null); }}>OK</button>
+              </div>
+            )}
             <div className="browser-search">
               <input
                 type="text"
@@ -168,6 +277,7 @@ export default function GameBrowser({
               <span className="list-col-year">Year</span>
               <span className="list-col-rating">Rating</span>
               <span className="list-col-fav">Fav</span>
+              {(gameSets.length > 0 || gameSetId) && <span className="list-col-addset-header"></span>}
             </div>
             {games.map(game => (
               <GameListItem
@@ -176,6 +286,10 @@ export default function GameBrowser({
                 onSelect={onSelectGame}
                 onRating={r => handleRating(game, r)}
                 onFavourite={() => handleFavourite(game)}
+                onAddToGameSet={onAddToGameSet}
+                onRemoveFromGameSet={gameSetId ? onRemoveFromGameSet : undefined}
+                gameSets={gameSets}
+                gameSetId={gameSetId}
               />
             ))}
           </div>
@@ -189,8 +303,9 @@ export default function GameBrowser({
                 onRating={r => handleRating(game, r)}
                 onFavourite={() => handleFavourite(game)}
                 onAddToGameSet={onAddToGameSet}
+                onRemoveFromGameSet={gameSetId ? onRemoveFromGameSet : undefined}
                 gameSets={gameSets}
-                currentGameSetId={activeId}
+                gameSetId={gameSetId}
                 viewMode={viewMode}
               />
             ))}

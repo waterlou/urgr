@@ -84,6 +84,8 @@ dependencies = [
  "rom-manager",
  "serde",
  "serde_json",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

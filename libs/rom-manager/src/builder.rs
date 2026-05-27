@@ -189,6 +189,26 @@ fn find_chd_files(zip_path: &Path) -> Vec<PathBuf> {
         chds
     }
 
+/// Convert a version string to a sortable numeric vector for ordering.
+/// - Dot-separated segments: leading digits of each part are parsed as u64.
+/// - `"nightly"` is treated as the newest (sorts last).
+fn version_sort_key(v: &str) -> Vec<u64> {
+    if v == "nightly" { return vec![u64::MAX]; }
+    v.split('.')
+     .map(|s| s.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(0))
+     .collect()
+}
+fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    version_sort_key(a).cmp(&version_sort_key(b))
+}
+
+fn filter_prior_versions(all_versions: &[String], current_version: &str) -> Vec<String> {
+    all_versions.iter()
+        .filter(|v| !v.is_empty() && *v != current_version && version_cmp(v, current_version) == std::cmp::Ordering::Less)
+        .cloned()
+        .collect()
+}
+
 /// Check if a game's ROM exists in a prior version's output (identical file by SHA1).
 fn find_in_fallback(
     game_name: &str,
@@ -223,6 +243,8 @@ pub fn build_version(
     base_dir: &Path,
     collection_dir: Option<&Path>,
     force_update: bool,
+    dry_run: bool,
+    version_id: Option<i64>,
     on_progress: &dyn Fn(&BuildProgress),
     cancelled: &AtomicBool,
 ) -> Result<BuildResult> {
@@ -254,9 +276,15 @@ pub fn build_version(
 
     // ── Phase 0: Load versions ──
     progress(on_progress, "loading", 0, "Loading versions...", 0, 0, 0, &progress_path);
-    let latest = db.latest_version(source)?.ok_or_else(|| {
-        Error::Source(format!("No version found for source '{}'", source))
-    })?;
+    let latest = if let Some(vid) = version_id {
+        db.get_version(vid)?.ok_or_else(|| {
+            Error::Source(format!("Version id {} not found", vid))
+        })?
+    } else {
+        db.latest_version(source)?.ok_or_else(|| {
+            Error::Source(format!("No version found for source '{}'", source))
+        })?
+    };
 
     let older = db.find_older_versions(source, &latest.version)?;
     let prev = older.first();
@@ -334,91 +362,96 @@ pub fn build_version(
 
     // ── Phase 2: Folder setup ──
     let roms_dir = version_dir.join(ROMS_DIR_NAME);
-    if force_update {
-        if let Some(ref p) = prev {
-            let old_dir = base_dir.join(source).join(&p.version);
-            if old_dir.exists() && !version_dir.exists() {
-                info!("Renaming {} → {}", old_dir.display(), version_dir.display());
-                std::fs::create_dir_all(version_dir.parent().unwrap())?;
-                std::fs::rename(&old_dir, &version_dir)?;
-                // Migrate flat ROMs into roms/ subfolder
-                if !roms_dir.exists() {
-                    std::fs::create_dir_all(&roms_dir)?;
-                    for entry in walk_files(&version_dir)? {
-                        if entry.extension().and_then(|e| e.to_str()) == Some("zip")
-                            && entry.file_stem().map(|s| s != "_build_status").unwrap_or(false)
-                        {
-                            let dest = roms_dir.join(entry.file_name().unwrap());
-                            std::fs::rename(&entry, &dest)?;
+    if !dry_run {
+        if force_update {
+            if let Some(ref p) = prev {
+                let old_dir = base_dir.join(source).join(&p.version);
+                if old_dir.exists() && !version_dir.exists() {
+                    info!("Renaming {} → {}", old_dir.display(), version_dir.display());
+                    std::fs::create_dir_all(version_dir.parent().unwrap())?;
+                    std::fs::rename(&old_dir, &version_dir)?;
+                    // Migrate flat ROMs into roms/ subfolder
+                    if !roms_dir.exists() {
+                        std::fs::create_dir_all(&roms_dir)?;
+                        for entry in walk_files(&version_dir)? {
+                            if entry.extension().and_then(|e| e.to_str()) == Some("zip")
+                                && entry.file_stem().map(|s| s != "_build_status").unwrap_or(false)
+                            {
+                                let dest = roms_dir.join(entry.file_name().unwrap());
+                                std::fs::rename(&entry, &dest)?;
+                            }
                         }
                     }
                 }
             }
         }
+        std::fs::create_dir_all(&roms_dir)?;
+        std::fs::create_dir_all(&deleted_dir)?;
     }
-    std::fs::create_dir_all(&roms_dir)?;
-    std::fs::create_dir_all(&deleted_dir)?;
 
     progress(on_progress, "setup", 15, "Folders ready", 0, 0, need_copy.len() + unchanged, &progress_path);
 
     // ── Phase 3: Cleanup ──
     let all_games = db.list_games(latest.id)?;
-    if roms_dir.exists() {
-        let keep: std::collections::HashSet<String> = if force_update {
-            all_games.iter().map(|g| g.name.clone()).collect()
-        } else {
-            need_copy.iter().cloned().collect()
-        };
-        for entry in walk_files(&roms_dir)? {
-            if entry.extension().and_then(|e| e.to_str()) != Some("zip") {
-                continue;
-            }
-            let stem = entry.file_stem().unwrap_or_default().to_string_lossy().to_string();
-            if stem == "_build_status" {
-                continue;
-            }
-            if !keep.contains(&stem) {
-                move_to_deleted(&entry, &deleted_dir, &latest, prev)?;
-                status.cleaned += 1;
+    let platform_map: HashMap<&str, &str> = all_games.iter().map(|g| (g.name.as_str(), g.platform.as_str())).collect();
+    if !dry_run {
+        let all_games = db.list_games(latest.id)?;
+        if roms_dir.exists() {
+            let keep: std::collections::HashSet<String> = if force_update {
+                all_games.iter().map(|g| g.name.clone()).collect()
+            } else {
+                need_copy.iter().cloned().collect()
+            };
+            for entry in walk_files(&roms_dir)? {
+                if entry.extension().and_then(|e| e.to_str()) != Some("zip") {
+                    continue;
+                }
+                let stem = entry.file_stem().unwrap_or_default().to_string_lossy().to_string();
+                if stem == "_build_status" {
+                    continue;
+                }
+                if !keep.contains(&stem) {
+                    move_to_deleted(&entry, &deleted_dir, &latest, prev)?;
+                    status.cleaned += 1;
+                }
             }
         }
-    }
 
-    // Clean up stale CHD directories (update mode)
-    if force_update {
-        let chd_dir = version_dir.join(CHD_DIR_NAME);
-        if chd_dir.exists() {
-            let game_names: std::collections::HashSet<String> =
-                all_games.iter().map(|g| g.name.clone()).collect();
-            for entry in std::fs::read_dir(&chd_dir)? {
-                let entry = entry?;
-                if entry.path().is_dir() {
-                    let dir_name = entry.file_name().to_string_lossy().to_string();
-                    if !game_names.contains(&dir_name) {
-                        std::fs::remove_dir_all(entry.path())?;
-                        status.cleaned += 1;
+        // Clean up stale CHD directories (update mode)
+        if force_update {
+            let chd_dir = version_dir.join(CHD_DIR_NAME);
+            if chd_dir.exists() {
+                let game_names: std::collections::HashSet<String> =
+                    all_games.iter().map(|g| g.name.clone()).collect();
+                for entry in std::fs::read_dir(&chd_dir)? {
+                    let entry = entry?;
+                    if entry.path().is_dir() {
+                        let dir_name = entry.file_name().to_string_lossy().to_string();
+                        if !game_names.contains(&dir_name) {
+                            std::fs::remove_dir_all(entry.path())?;
+                            status.cleaned += 1;
+                        }
                     }
                 }
             }
         }
-    }
 
-    // For update mode: remove old versions of changed games from collection
-    if force_update && prev.is_some() {
-        let prev_version = prev.unwrap();
-        let changed: std::collections::HashSet<String> = db.diff_versions(prev_version.id, latest.id)?
-            .changed.into_iter().collect();
-        let platform_map: HashMap<&str, &str> = all_games.iter().map(|g| (g.name.as_str(), g.platform.as_str())).collect();
-        for game_name in &changed {
-            let pf = platform_map.get(game_name.as_str()).copied().unwrap_or("");
-            let zip_path = if pf.is_empty() {
-                roms_dir.join(format!("{}.zip", game_name))
-            } else {
-                roms_dir.join(pf).join(format!("{}.zip", game_name))
-            };
-            if zip_path.exists() && !verify_game_zip(db, latest.id, game_name, &zip_path)? {
-                move_to_deleted(&zip_path, &deleted_dir, &latest, Some(prev_version))?;
-                status.cleaned += 1;
+        // For update mode: remove old versions of changed games from collection
+        if force_update && prev.is_some() {
+            let prev_version = prev.unwrap();
+            let changed: std::collections::HashSet<String> = db.diff_versions(prev_version.id, latest.id)?
+                .changed.into_iter().collect();
+            for game_name in &changed {
+                let pf = platform_map.get(game_name.as_str()).copied().unwrap_or("");
+                let zip_path = if pf.is_empty() {
+                    roms_dir.join(format!("{}.zip", game_name))
+                } else {
+                    roms_dir.join(pf).join(format!("{}.zip", game_name))
+                };
+                if zip_path.exists() && !verify_game_zip(db, latest.id, game_name, &zip_path)? {
+                    move_to_deleted(&zip_path, &deleted_dir, &latest, Some(prev_version))?;
+                    status.cleaned += 1;
+                }
             }
         }
     }
@@ -435,13 +468,15 @@ pub fn build_version(
     // ── Phase 5: Copy matching ROMs + CHDs ──
     let game_map: HashMap<String, &GameEntry> = all_games.iter().map(|g| (g.name.clone(), g)).collect();
 
-    // Read prior versions for fallback chain
-    let prior_versions: Vec<String> = collection_dir
+    // Read prior versions for fallback chain (only older versions, not newer ones)
+    let mut prior_versions: Vec<String> = collection_dir
         .map(|cd| cd.join(VERSION_FILE))
         .filter(|vf| vf.exists())
         .and_then(|vf| std::fs::read_to_string(vf).ok())
-        .map(|content| content.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty() && l != &latest.version).collect())
+        .map(|content| content.lines().map(|l| l.trim().to_string()).collect())
         .unwrap_or_default();
+    prior_versions = filter_prior_versions(&prior_versions, &latest.version);
+    prior_versions.sort_by(|a, b| version_cmp(a, b));
 
     let mut added = 0usize;
     let mut exists = 0usize;
@@ -457,7 +492,7 @@ pub fn build_version(
             roms_dir.join(format!("{}.zip", game_name))
         };
         if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)?;
+            if !dry_run { std::fs::create_dir_all(parent)?; }
         }
 
         // Periodic progress + cancellation check
@@ -465,7 +500,7 @@ pub fn build_version(
             check_cancelled(cancelled)?;
             let done = added + exists;
             let pct = 30 + ((done as u64 * 60) / need_copy.len().max(1) as u64) as u32;
-            progress(on_progress, "copying", pct, &format!("Copying ROMs ({}/{})", done, need_copy.len()), done, missing.len(), need_copy.len() + unchanged, &progress_path);
+            progress(on_progress, "copying", pct, &format!("Scanning ROMs ({}/{})", done, need_copy.len()), done, missing.len(), need_copy.len() + unchanged, &progress_path);
         }
 
         // Skip if already correctly in place
@@ -490,71 +525,77 @@ pub fn build_version(
 
         // Try to find matching ROM in import folder
         if let Some(src_path) = index.find_match(game_name, &expected_roms) {
-            info!("  Copying {} → {}", src_path.display(), dest.display());
-            std::fs::copy(&src_path, &dest)?;
-            added += 1;
+            if !dry_run {
+                info!("  Copying {} → {}", src_path.display(), dest.display());
+                std::fs::copy(&src_path, &dest)?;
 
-            // Copy CHD files alongside the game zip (if any)
-            let chds = find_chd_files(&src_path);
-            if !chds.is_empty() {
-                let chd_dest_base = version_dir.join(CHD_DIR_NAME).join(game_name);
-                for chd_src in &chds {
-                    let chd_dest = chd_dest_base.join(chd_src.file_name().unwrap_or_default());
-                    std::fs::create_dir_all(chd_dest.parent().unwrap())?;
-                    std::fs::copy(chd_src, &chd_dest)?;
-                    info!("  CHD {} → {}", chd_src.display(), chd_dest.display());
+                // Copy CHD files alongside the game zip (if any)
+                let chds = find_chd_files(&src_path);
+                if !chds.is_empty() {
+                    let chd_dest_base = version_dir.join(CHD_DIR_NAME).join(game_name);
+                    for chd_src in &chds {
+                        let chd_dest = chd_dest_base.join(chd_src.file_name().unwrap_or_default());
+                        std::fs::create_dir_all(chd_dest.parent().unwrap())?;
+                        std::fs::copy(chd_src, &chd_dest)?;
+                        info!("  CHD {} → {}", chd_src.display(), chd_dest.display());
+                    }
                 }
             }
+            added += 1;
         } else {
             missing.push(game_name.clone());
         }
     }
 
     // ── Phase 5b: Loose-only builds ──
-    for game_name in &need_copy {
-        let platform = game_map.get(game_name).map(|g| &g.platform).filter(|p| !p.is_empty());
-        let dest = if let Some(p) = platform { roms_dir.join(p).join(format!("{}.zip", game_name)) }
-            else { roms_dir.join(format!("{}.zip", game_name)) };
-        if dest.exists() { continue; }
-        let ge = game_map.get(game_name);
-        let expected_roms = if let Some(g) = ge { db.list_roms_for_game(g.id)? } else { Vec::new() };
-        for rom in &expected_roms {
-            if let Some(ref crc) = rom.crc32 {
-                if let Some(src) = index.loose_files.get(crc) {
-                    if let Some(parent) = dest.parent() { std::fs::create_dir_all(parent)?; }
-                    let file = std::fs::File::create(&dest)?;
-                    let mut zipw = zip::ZipWriter::new(file);
-                    let data = std::fs::read(src)?;
-                    let opts = zip::write::FileOptions::<()>::default()
-                        .compression_method(zip::CompressionMethod::Deflated);
-                    zipw.start_file(&rom.filename, opts)
-                        .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-                    zipw.write_all(&data)?;
-                    zipw.finish()
-                        .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-                    info!("  Built {} from loose file {}", dest.display(), src.display());
-                    added += 1;
-                    break;
+    if !dry_run {
+        for game_name in &need_copy {
+            let platform = game_map.get(game_name).map(|g| &g.platform).filter(|p| !p.is_empty());
+            let dest = if let Some(p) = platform { roms_dir.join(p).join(format!("{}.zip", game_name)) }
+                else { roms_dir.join(format!("{}.zip", game_name)) };
+            if dest.exists() { continue; }
+            let ge = game_map.get(game_name);
+            let expected_roms = if let Some(g) = ge { db.list_roms_for_game(g.id)? } else { Vec::new() };
+            for rom in &expected_roms {
+                if let Some(ref crc) = rom.crc32 {
+                    if let Some(src) = index.loose_files.get(crc) {
+                        if let Some(parent) = dest.parent() { std::fs::create_dir_all(parent)?; }
+                        let file = std::fs::File::create(&dest)?;
+                        let mut zipw = zip::ZipWriter::new(file);
+                        let data = std::fs::read(src)?;
+                        let opts = zip::write::FileOptions::<()>::default()
+                            .compression_method(zip::CompressionMethod::Deflated);
+                        zipw.start_file(&rom.filename, opts)
+                            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+                        zipw.write_all(&data)?;
+                        zipw.finish()
+                            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+                        info!("  Built {} from loose file {}", dest.display(), src.display());
+                        added += 1;
+                        break;
+                    }
                 }
             }
         }
     }
 
     // ── Phase 5c: Copy samples folder ──
-    let import_samples = import_dir.join(SAMPLES_DIR_NAME);
-    if import_samples.is_dir() {
-        let dest_samples = version_dir.join(SAMPLES_DIR_NAME);
-        std::fs::create_dir_all(&dest_samples)?;
-        for entry in walk_files(&import_samples)? {
-            if entry.extension().and_then(|e| e.to_str()) == Some("zip") {
-                let rel = entry.strip_prefix(&import_samples).unwrap_or(&entry);
-                let dst = dest_samples.join(rel);
-                if let Some(parent) = dst.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                if !dst.exists() {
-                    std::fs::copy(&entry, &dst)?;
-                    info!("  Sample {} → {}", entry.display(), dst.display());
+    if !dry_run {
+        let import_samples = import_dir.join(SAMPLES_DIR_NAME);
+        if import_samples.is_dir() {
+            let dest_samples = version_dir.join(SAMPLES_DIR_NAME);
+            std::fs::create_dir_all(&dest_samples)?;
+            for entry in walk_files(&import_samples)? {
+                if entry.extension().and_then(|e| e.to_str()) == Some("zip") {
+                    let rel = entry.strip_prefix(&import_samples).unwrap_or(&entry);
+                    let dst = dest_samples.join(rel);
+                    if let Some(parent) = dst.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    if !dst.exists() {
+                        std::fs::copy(&entry, &dst)?;
+                        info!("  Sample {} → {}", entry.display(), dst.display());
+                    }
                 }
             }
         }
@@ -565,48 +606,51 @@ pub fn build_version(
 
     // ── Phase 6: Version dedup (collection mode only) ──
     let mut deduped = 0usize;
-    if let Some(cd) = collection_dir {
-        if !prior_versions.is_empty() && roms_dir.exists() {
-            info!("Deduplicating against {} prior versions", prior_versions.len());
-            for entry in walk_files(&roms_dir)? {
-                if entry.extension().and_then(|e| e.to_str()) != Some("zip") { continue; }
-                let data = std::fs::read(&entry)?;
-                let sha1 = crypto_hash(&data);
-                for pv in &prior_versions {
-                    let pv_dir = cd.join(pv).join(ROMS_DIR_NAME);
-                    if !pv_dir.exists() { continue; }
-                    // Check matching file by relative path in roms/
-                    let rel = entry.strip_prefix(&roms_dir).unwrap_or(&entry);
-                    let pv_file = pv_dir.join(rel);
-                    if pv_file.exists() {
-                        let pv_data = std::fs::read(&pv_file)?;
-                        if crypto_hash(&pv_data) == sha1 {
-                            std::fs::remove_file(&entry)?;
-                            deduped += 1;
-                            info!("  Dedup: {} (same as v{})", entry.display(), pv);
-                            break;
+    if !dry_run {
+        if let Some(cd) = collection_dir {
+            if !prior_versions.is_empty() && roms_dir.exists() {
+                info!("Deduplicating against {} prior versions", prior_versions.len());
+                for entry in walk_files(&roms_dir)? {
+                    if entry.extension().and_then(|e| e.to_str()) != Some("zip") { continue; }
+                    let data = std::fs::read(&entry)?;
+                    let sha1 = crypto_hash(&data);
+                    for pv in &prior_versions {
+                        let pv_dir = cd.join(pv).join(ROMS_DIR_NAME);
+                        if !pv_dir.exists() { continue; }
+                        // Check matching file by relative path in roms/
+                        let rel = entry.strip_prefix(&roms_dir).unwrap_or(&entry);
+                        let pv_file = pv_dir.join(rel);
+                        if pv_file.exists() {
+                            let pv_data = std::fs::read(&pv_file)?;
+                            if crypto_hash(&pv_data) == sha1 {
+                                std::fs::remove_file(&entry)?;
+                                deduped += 1;
+                                info!("  Dedup: {} (same as v{})", entry.display(), pv);
+                                break;
+                            }
                         }
                     }
                 }
+                // Clean empty dirs
+                cleanup_empty_dirs(&roms_dir);
             }
-            // Clean empty dirs
-            cleanup_empty_dirs(&roms_dir);
+
+            // Update .version file
+            let version_file = cd.join(VERSION_FILE);
+            let mut all_versions: Vec<String> = prior_versions.clone();
+            all_versions.push(latest.version.clone());
+            all_versions.sort_by(|a, b| version_cmp(a, b));
+            all_versions.dedup();
+            std::fs::write(&version_file, all_versions.join("\n") + "\n")?;
+            info!(".version updated: {}", all_versions.join(" → "));
         }
 
-        // Update .version file
-        let version_file = cd.join(VERSION_FILE);
-        let mut all_versions: Vec<String> = prior_versions.clone();
-        all_versions.push(latest.version.clone());
-        all_versions.dedup();
-        std::fs::write(&version_file, all_versions.join("\n") + "\n")?;
-        info!(".version updated: {}", all_versions.join(" → "));
-    }
-
-    // ── Phase 7: Replace old version (update mode) ──
-    if force_update {
-        if let Some(p) = prev {
-            info!("Removing old version: {} {}", source, p.version);
-            db.delete_version(p.id)?;
+        // ── Phase 7: Replace old version (update mode) ──
+        if force_update {
+            if let Some(p) = prev {
+                info!("Removing old version: {} {}", source, p.version);
+                db.delete_version(p.id)?;
+            }
         }
     }
 
@@ -618,7 +662,9 @@ pub fn build_version(
     status.missing_games = missing.clone();
     status.unchanged = unchanged;
     status.last_run = Some(chrono_now());
-    write_status(&status_path, &status)?;
+    if !dry_run {
+        write_status(&status_path, &status)?;
+    }
 
     let result = BuildResult {
         total_games: need_copy.len() + unchanged,
@@ -849,4 +895,206 @@ fn verify_game_zip(db: &Database, version_id: i64, game_name: &str, zip_path: &P
         return Ok(false);
     }
     Ok(verify_zip_contains(zip_path, &expected))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+    use crate::models::GameEntry;
+    use std::io::Write;
+    use std::sync::atomic::AtomicBool;
+
+    fn make_db() -> Database {
+        Database::open_in_memory().expect("in-memory db")
+    }
+
+    fn add_game(db: &Database, vid: i64, name: &str) -> i64 {
+        db.insert_game(
+            vid,
+            &GameEntry {
+                id: 0,
+                version_id: 0,
+                name: name.to_string(),
+                description: String::new(),
+                year: None,
+                manufacturer: None,
+                cloneof: None,
+                platform: String::new(),
+            },
+        )
+        .unwrap()
+    }
+
+    fn add_rom(db: &Database, gid: i64, name: &str, sha1: &str) {
+        db.insert_rom(
+            gid,
+            &RomEntry {
+                id: 0,
+                game_entry_id: 0,
+                filename: name.to_string(),
+                size: Some(4),
+                crc32: None,
+                md5: None,
+                sha1: Some(sha1.to_string()),
+                status: "good".to_string(),
+                merge_target: None,
+            },
+        )
+        .unwrap();
+    }
+
+    fn make_zip_with_content(path: &Path, content: &[u8]) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::FileOptions::<()>::default();
+        zip.start_file("rom.bin", options).unwrap();
+        zip.write_all(content).unwrap();
+        zip.finish().unwrap();
+    }
+
+    /// Compute SHA1 for content to use as expected ROM hash
+    fn content_sha1(content: &[u8]) -> String {
+        rom_scraper::compute_hashes_from_bytes(content).sha1
+    }
+
+    // ── Unit tests for version_sort_key ──
+
+    #[test]
+    fn test_version_sort_key_nightly() {
+        assert_eq!(version_sort_key("nightly"), vec![u64::MAX]);
+    }
+
+    #[test]
+    fn test_version_sort_key_standard() {
+        assert_eq!(version_sort_key("v1.0.0.02"), vec![0, 0, 0, 2]);
+    }
+
+    #[test]
+    fn test_version_sort_key_mame_style() {
+        assert_eq!(version_sort_key("0.37b5"), vec![0, 37]);
+    }
+
+    #[test]
+    fn test_version_sort_key_single() {
+        assert_eq!(version_sort_key("1"), vec![1]);
+    }
+
+    // ── Unit tests for version_cmp ──
+
+    #[test]
+    fn test_version_cmp_older() {
+        assert_eq!(version_cmp("v1.0.0.01", "v1.0.0.02"), std::cmp::Ordering::Less);
+    }
+
+    #[test]
+    fn test_version_cmp_newer() {
+        assert_eq!(version_cmp("v1.0.0.02", "v1.0.0.01"), std::cmp::Ordering::Greater);
+    }
+
+    #[test]
+    fn test_version_cmp_equal() {
+        assert_eq!(version_cmp("v1.0.0.02", "v1.0.0.02"), std::cmp::Ordering::Equal);
+    }
+
+    #[test]
+    fn test_version_cmp_nightly_vs_standard() {
+        assert_eq!(version_cmp("nightly", "v1.0.0.02"), std::cmp::Ordering::Greater);
+    }
+
+    #[test]
+    fn test_version_cmp_standard_vs_nightly() {
+        assert_eq!(version_cmp("v1.0.0.02", "nightly"), std::cmp::Ordering::Less);
+    }
+
+    // ── Tests for filter_prior_versions ──
+
+    fn vlist(versions: &[&str]) -> Vec<String> {
+        versions.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn test_filter_excludes_newer() {
+        let all = vlist(&["v1.0.0.01", "v1.0.0.02", "nightly"]);
+        let result = filter_prior_versions(&all, "v1.0.0.02");
+        assert_eq!(result, vlist(&["v1.0.0.01"]));
+    }
+
+    #[test]
+    fn test_filter_keeps_all_older_when_nightly() {
+        let all = vlist(&["v1.0.0.01", "v1.0.0.02", "nightly"]);
+        let result = filter_prior_versions(&all, "nightly");
+        assert_eq!(result, vlist(&["v1.0.0.01", "v1.0.0.02"]));
+    }
+
+    #[test]
+    fn test_filter_oldest_has_none() {
+        let all = vlist(&["v1.0.0.01", "v1.0.0.02", "nightly"]);
+        let result = filter_prior_versions(&all, "v1.0.0.01");
+        assert_eq!(result, vlist(&[]));
+    }
+
+    #[test]
+    fn test_filter_single_version_excludes_self() {
+        let all = vlist(&["v1.0.0.01"]);
+        let result = filter_prior_versions(&all, "v1.0.0.01");
+        assert_eq!(result, vlist(&[]));
+    }
+
+    #[test]
+    fn test_filter_empty_list() {
+        let result = filter_prior_versions(&[], "v1.0.0.02");
+        assert_eq!(result, vlist(&[]));
+    }
+
+    #[test]
+    fn test_filter_excludes_empty_strings() {
+        let all = vlist(&["", "v1.0.0.01", "v1.0.0.02"]);
+        let result = filter_prior_versions(&all, "v1.0.0.02");
+        assert_eq!(result, vlist(&["v1.0.0.01"]));
+    }
+
+    #[test]
+    fn test_filter_preserves_ordering() {
+        let all = vlist(&["0.37b5", "0.78", "0.106", "0.139", "0.160", "nightly"]);
+        let result = filter_prior_versions(&all, "0.160");
+        assert_eq!(result, vlist(&["0.37b5", "0.78", "0.106", "0.139"]));
+    }
+
+    // ── Integration test: build_version dry-run ──
+
+    #[test]
+    fn test_build_version_simple_dry_run() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+
+        // Setup: one version
+        std::fs::create_dir_all(root.join("v1.0").join("roms")).unwrap();
+        let import_dir = root.join("import");
+        std::fs::create_dir_all(&import_dir).unwrap();
+        std::fs::write(root.join(".version"), "v1.0\n").unwrap();
+
+        let content = b"game data";
+        make_zip_with_content(&root.join("v1.0").join("roms").join("game1.zip"), content);
+        make_zip_with_content(&import_dir.join("game1.zip"), content);
+
+        let sha1 = content_sha1(content);
+        let db = make_db();
+        let vid = db.import_version("test", "v1.0", None).unwrap();
+        let gid = add_game(&db, vid, "game1");
+        add_rom(&db, gid, "rom.bin", &sha1);
+
+        let cancelled = AtomicBool::new(false);
+        let progress = |_: &BuildProgress| {};
+
+        let result = build_version(
+            &db, "test", &import_dir, &root, Some(root),
+            false, true, Some(vid), &progress, &cancelled,
+        ).expect("build_version should succeed");
+
+        assert_eq!(result.version, "v1.0");
+        assert_eq!(result.exists, 1);
+        assert_eq!(result.reused, 0);
+        assert_eq!(result.added, 0);
+    }
 }
