@@ -237,6 +237,7 @@ pub fn build_version(
     collection_dir: Option<&Path>,
     force_update: bool,
     dry_run: bool,
+    version_id: Option<i64>,
     on_progress: &dyn Fn(&BuildProgress),
     cancelled: &AtomicBool,
 ) -> Result<BuildResult> {
@@ -268,9 +269,15 @@ pub fn build_version(
 
     // ── Phase 0: Load versions ──
     progress(on_progress, "loading", 0, "Loading versions...", 0, 0, 0, &progress_path);
-    let latest = db.latest_version(source)?.ok_or_else(|| {
-        Error::Source(format!("No version found for source '{}'", source))
-    })?;
+    let latest = if let Some(vid) = version_id {
+        db.get_version(vid)?.ok_or_else(|| {
+            Error::Source(format!("Version id {} not found", vid))
+        })?
+    } else {
+        db.latest_version(source)?.ok_or_else(|| {
+            Error::Source(format!("No version found for source '{}'", source))
+        })?
+    };
 
     let older = db.find_older_versions(source, &latest.version)?;
     let prev = older.first();

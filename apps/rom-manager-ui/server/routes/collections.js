@@ -267,7 +267,7 @@ router.post('/api/collections/:id/build', async (req, res) => {
 
     setTimeout(async () => {
       try {
-        const args = ['build', sv.source, import_dir, '--base-dir', collectionDir, '--collection-dir', collectionDir, '--progress'];
+        const args = ['build', sv.source, import_dir, '--version-id', String(version_id), '--base-dir', collectionDir, '--collection-dir', collectionDir, '--progress'];
         if (scan) args.push('--dry-run');
         execCliStream(args, {
           binary: 'build',
