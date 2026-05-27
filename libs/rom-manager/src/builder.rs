@@ -189,6 +189,19 @@ fn find_chd_files(zip_path: &Path) -> Vec<PathBuf> {
         chds
     }
 
+/// Convert a version string to a sortable numeric vector for ordering.
+/// - Dot-separated segments: leading digits of each part are parsed as u64.
+/// - `"nightly"` is treated as the newest (sorts last).
+fn version_sort_key(v: &str) -> Vec<u64> {
+    if v == "nightly" { return vec![u64::MAX]; }
+    v.split('.')
+     .map(|s| s.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(0))
+     .collect()
+}
+fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    version_sort_key(a).cmp(&version_sort_key(b))
+}
+
 /// Check if a game's ROM exists in a prior version's output (identical file by SHA1).
 fn find_in_fallback(
     game_name: &str,
@@ -442,12 +455,13 @@ pub fn build_version(
     let game_map: HashMap<String, &GameEntry> = all_games.iter().map(|g| (g.name.clone(), g)).collect();
 
     // Read prior versions for fallback chain
-    let prior_versions: Vec<String> = collection_dir
+    let mut prior_versions: Vec<String> = collection_dir
         .map(|cd| cd.join(VERSION_FILE))
         .filter(|vf| vf.exists())
         .and_then(|vf| std::fs::read_to_string(vf).ok())
         .map(|content| content.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty() && l != &latest.version).collect())
         .unwrap_or_default();
+    prior_versions.sort_by(|a, b| version_cmp(a, b));
 
     let mut added = 0usize;
     let mut exists = 0usize;
@@ -610,6 +624,7 @@ pub fn build_version(
             let version_file = cd.join(VERSION_FILE);
             let mut all_versions: Vec<String> = prior_versions.clone();
             all_versions.push(latest.version.clone());
+            all_versions.sort_by(|a, b| version_cmp(a, b));
             all_versions.dedup();
             std::fs::write(&version_file, all_versions.join("\n") + "\n")?;
             info!(".version updated: {}", all_versions.join(" → "));
