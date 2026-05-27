@@ -202,6 +202,13 @@ fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     version_sort_key(a).cmp(&version_sort_key(b))
 }
 
+fn filter_prior_versions(all_versions: &[String], current_version: &str) -> Vec<String> {
+    all_versions.iter()
+        .filter(|v| !v.is_empty() && *v != current_version && version_cmp(v, current_version) == std::cmp::Ordering::Less)
+        .cloned()
+        .collect()
+}
+
 /// Check if a game's ROM exists in a prior version's output (identical file by SHA1).
 fn find_in_fallback(
     game_name: &str,
@@ -466,11 +473,9 @@ pub fn build_version(
         .map(|cd| cd.join(VERSION_FILE))
         .filter(|vf| vf.exists())
         .and_then(|vf| std::fs::read_to_string(vf).ok())
-        .map(|content| content.lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty() && l != &latest.version && version_cmp(l, &latest.version) == std::cmp::Ordering::Less)
-            .collect())
+        .map(|content| content.lines().map(|l| l.trim().to_string()).collect())
         .unwrap_or_default();
+    prior_versions = filter_prior_versions(&prior_versions, &latest.version);
     prior_versions.sort_by(|a, b| version_cmp(a, b));
 
     let mut added = 0usize;
@@ -890,4 +895,206 @@ fn verify_game_zip(db: &Database, version_id: i64, game_name: &str, zip_path: &P
         return Ok(false);
     }
     Ok(verify_zip_contains(zip_path, &expected))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+    use crate::models::GameEntry;
+    use std::io::Write;
+    use std::sync::atomic::AtomicBool;
+
+    fn make_db() -> Database {
+        Database::open_in_memory().expect("in-memory db")
+    }
+
+    fn add_game(db: &Database, vid: i64, name: &str) -> i64 {
+        db.insert_game(
+            vid,
+            &GameEntry {
+                id: 0,
+                version_id: 0,
+                name: name.to_string(),
+                description: String::new(),
+                year: None,
+                manufacturer: None,
+                cloneof: None,
+                platform: String::new(),
+            },
+        )
+        .unwrap()
+    }
+
+    fn add_rom(db: &Database, gid: i64, name: &str, sha1: &str) {
+        db.insert_rom(
+            gid,
+            &RomEntry {
+                id: 0,
+                game_entry_id: 0,
+                filename: name.to_string(),
+                size: Some(4),
+                crc32: None,
+                md5: None,
+                sha1: Some(sha1.to_string()),
+                status: "good".to_string(),
+                merge_target: None,
+            },
+        )
+        .unwrap();
+    }
+
+    fn make_zip_with_content(path: &Path, content: &[u8]) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::FileOptions::<()>::default();
+        zip.start_file("rom.bin", options).unwrap();
+        zip.write_all(content).unwrap();
+        zip.finish().unwrap();
+    }
+
+    /// Compute SHA1 for content to use as expected ROM hash
+    fn content_sha1(content: &[u8]) -> String {
+        rom_scraper::compute_hashes_from_bytes(content).sha1
+    }
+
+    // ── Unit tests for version_sort_key ──
+
+    #[test]
+    fn test_version_sort_key_nightly() {
+        assert_eq!(version_sort_key("nightly"), vec![u64::MAX]);
+    }
+
+    #[test]
+    fn test_version_sort_key_standard() {
+        assert_eq!(version_sort_key("v1.0.0.02"), vec![0, 0, 0, 2]);
+    }
+
+    #[test]
+    fn test_version_sort_key_mame_style() {
+        assert_eq!(version_sort_key("0.37b5"), vec![0, 37]);
+    }
+
+    #[test]
+    fn test_version_sort_key_single() {
+        assert_eq!(version_sort_key("1"), vec![1]);
+    }
+
+    // ── Unit tests for version_cmp ──
+
+    #[test]
+    fn test_version_cmp_older() {
+        assert_eq!(version_cmp("v1.0.0.01", "v1.0.0.02"), std::cmp::Ordering::Less);
+    }
+
+    #[test]
+    fn test_version_cmp_newer() {
+        assert_eq!(version_cmp("v1.0.0.02", "v1.0.0.01"), std::cmp::Ordering::Greater);
+    }
+
+    #[test]
+    fn test_version_cmp_equal() {
+        assert_eq!(version_cmp("v1.0.0.02", "v1.0.0.02"), std::cmp::Ordering::Equal);
+    }
+
+    #[test]
+    fn test_version_cmp_nightly_vs_standard() {
+        assert_eq!(version_cmp("nightly", "v1.0.0.02"), std::cmp::Ordering::Greater);
+    }
+
+    #[test]
+    fn test_version_cmp_standard_vs_nightly() {
+        assert_eq!(version_cmp("v1.0.0.02", "nightly"), std::cmp::Ordering::Less);
+    }
+
+    // ── Tests for filter_prior_versions ──
+
+    fn vlist(versions: &[&str]) -> Vec<String> {
+        versions.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn test_filter_excludes_newer() {
+        let all = vlist(&["v1.0.0.01", "v1.0.0.02", "nightly"]);
+        let result = filter_prior_versions(&all, "v1.0.0.02");
+        assert_eq!(result, vlist(&["v1.0.0.01"]));
+    }
+
+    #[test]
+    fn test_filter_keeps_all_older_when_nightly() {
+        let all = vlist(&["v1.0.0.01", "v1.0.0.02", "nightly"]);
+        let result = filter_prior_versions(&all, "nightly");
+        assert_eq!(result, vlist(&["v1.0.0.01", "v1.0.0.02"]));
+    }
+
+    #[test]
+    fn test_filter_oldest_has_none() {
+        let all = vlist(&["v1.0.0.01", "v1.0.0.02", "nightly"]);
+        let result = filter_prior_versions(&all, "v1.0.0.01");
+        assert_eq!(result, vlist(&[]));
+    }
+
+    #[test]
+    fn test_filter_single_version_excludes_self() {
+        let all = vlist(&["v1.0.0.01"]);
+        let result = filter_prior_versions(&all, "v1.0.0.01");
+        assert_eq!(result, vlist(&[]));
+    }
+
+    #[test]
+    fn test_filter_empty_list() {
+        let result = filter_prior_versions(&[], "v1.0.0.02");
+        assert_eq!(result, vlist(&[]));
+    }
+
+    #[test]
+    fn test_filter_excludes_empty_strings() {
+        let all = vlist(&["", "v1.0.0.01", "v1.0.0.02"]);
+        let result = filter_prior_versions(&all, "v1.0.0.02");
+        assert_eq!(result, vlist(&["v1.0.0.01"]));
+    }
+
+    #[test]
+    fn test_filter_preserves_ordering() {
+        let all = vlist(&["0.37b5", "0.78", "0.106", "0.139", "0.160", "nightly"]);
+        let result = filter_prior_versions(&all, "0.160");
+        assert_eq!(result, vlist(&["0.37b5", "0.78", "0.106", "0.139"]));
+    }
+
+    // ── Integration test: build_version dry-run ──
+
+    #[test]
+    fn test_build_version_simple_dry_run() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+
+        // Setup: one version
+        std::fs::create_dir_all(root.join("v1.0").join("roms")).unwrap();
+        let import_dir = root.join("import");
+        std::fs::create_dir_all(&import_dir).unwrap();
+        std::fs::write(root.join(".version"), "v1.0\n").unwrap();
+
+        let content = b"game data";
+        make_zip_with_content(&root.join("v1.0").join("roms").join("game1.zip"), content);
+        make_zip_with_content(&import_dir.join("game1.zip"), content);
+
+        let sha1 = content_sha1(content);
+        let db = make_db();
+        let vid = db.import_version("test", "v1.0", None).unwrap();
+        let gid = add_game(&db, vid, "game1");
+        add_rom(&db, gid, "rom.bin", &sha1);
+
+        let cancelled = AtomicBool::new(false);
+        let progress = |_: &BuildProgress| {};
+
+        let result = build_version(
+            &db, "test", &import_dir, &root, Some(root),
+            false, true, Some(vid), &progress, &cancelled,
+        ).expect("build_version should succeed");
+
+        assert_eq!(result.version, "v1.0");
+        assert_eq!(result.exists, 1);
+        assert_eq!(result.reused, 0);
+        assert_eq!(result.added, 0);
+    }
 }
