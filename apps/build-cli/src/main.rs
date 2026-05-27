@@ -145,6 +145,7 @@ fn main() -> ExitCode {
                 .unwrap_or_else(|_| "info".into()),
         )
         .with_target(true)
+        .with_writer(std::io::stderr)
         .init();
 
     let args: Vec<String> = std::env::args().collect();

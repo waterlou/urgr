@@ -26,9 +26,10 @@ router.post('/api/ia/download', async (req, res) => {
     let dest = path.join(baseDir, entry.replace(/^roms\//, ''));
     console.log('[ia-download] collection_id:', collection_id);
     if (collection_id) {
-      const col = get('SELECT id, folder FROM collections WHERE id = ?', [collection_id]);
+      const col = get('SELECT id, folder, slug FROM collections WHERE id = ?', [collection_id]);
       console.log('[ia-download] collection query result:', JSON.stringify(col));
       if (col?.folder) dest = path.join(baseDir, col.folder, entry.replace(/^roms\//, ''));
+      else if (col?.slug) dest = path.join(baseDir, col.slug, entry.replace(/^roms\//, ''));
       console.log('[ia-download] resolved dest:', dest);
     }
     const { RemoteZip } = await import('../remote-zip.js');

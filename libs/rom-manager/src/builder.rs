@@ -461,12 +461,15 @@ pub fn build_version(
     // ── Phase 5: Copy matching ROMs + CHDs ──
     let game_map: HashMap<String, &GameEntry> = all_games.iter().map(|g| (g.name.clone(), g)).collect();
 
-    // Read prior versions for fallback chain
+    // Read prior versions for fallback chain (only older versions, not newer ones)
     let mut prior_versions: Vec<String> = collection_dir
         .map(|cd| cd.join(VERSION_FILE))
         .filter(|vf| vf.exists())
         .and_then(|vf| std::fs::read_to_string(vf).ok())
-        .map(|content| content.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty() && l != &latest.version).collect())
+        .map(|content| content.lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty() && l != &latest.version && version_cmp(l, &latest.version) == std::cmp::Ordering::Less)
+            .collect())
         .unwrap_or_default();
     prior_versions.sort_by(|a, b| version_cmp(a, b));
 

@@ -12,6 +12,7 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
   ])
   const [name, setName] = useState(editTarget?.name || '')
   const [slug, setSlug] = useState(editTarget?.slug || '')
+  const [folder, setFolder] = useState(editTarget?.folder || editTarget?.slug || '')
   const [platform, setPlatform] = useState(editTarget?.platform || '')
   const [logo, setLogo] = useState(editTarget?.logo || '')
   const [suggestions, setSuggestions] = useState(false)
@@ -28,7 +29,11 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
   function handleNameChange(e) {
     const val = e.target.value
     setName(val)
-    if (!isEdit) setSlug(val.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''))
+    if (!isEdit) {
+      const generated = val.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+      setSlug(generated)
+      setFolder(generated)
+    }
     if (val.length > 0) {
       const matched = popularPresets.filter(d =>
         d.name.toLowerCase().includes(val.toLowerCase())
@@ -44,6 +49,7 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
     setDatasetMode('preset')
     setName(ds.name)
     setSlug(ds.slug)
+    setFolder(ds.slug)
     setPlatform(ds.platform)
     setSuggestions(false)
   }
@@ -54,6 +60,7 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
     if (ds) {
       setName(ds.name)
       setSlug(ds.slug)
+      setFolder(ds.slug)
       setPlatform(ds.platform)
     }
   }
@@ -67,7 +74,9 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
     if (!name) {
       const base = file.name.replace(/\.dat$/i, '').replace(/[_-]/g, ' ')
       setName(base)
-      setSlug(base.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''))
+      const generated = base.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+      setSlug(generated)
+      setFolder(generated)
     }
   }
 
@@ -81,7 +90,7 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
       if (datasetMode === 'preset' && !selectedPreset) { setFormError('Select a preset dataset or choose Manual mode'); return }
     }
 
-    const payload = { name, slug, platform, logo: logo || 'folder', folder: slug }
+    const payload = { name, slug, platform, logo: logo || 'folder', folder: folder || slug }
 
     if (!isEdit) {
       let hasDataset = 0
@@ -137,8 +146,13 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
           </div>
 
           <div className="form-group">
-            <label>Slug (folder name)</label>
+            <label>Slug</label>
             <input type="text" value={slug} onChange={e => setSlug(e.target.value)} placeholder="mame-0287" required />
+          </div>
+
+          <div className="form-group">
+            <label>Data folder <span className="hint">(defaults to slug)</span></label>
+            <input type="text" value={folder} onChange={e => setFolder(e.target.value)} placeholder={slug} />
           </div>
 
           {!isEdit && (

@@ -204,6 +204,7 @@ async fn main() -> ExitCode {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "info".into()),
         )
+        .with_writer(std::io::stderr)
         .init();
 
     let args: Vec<String> = std::env::args().collect();

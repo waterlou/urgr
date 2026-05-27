@@ -73,8 +73,8 @@ router.put('/api/collections/:id', async (req, res) => {
     const col = get('SELECT * FROM collections WHERE id = ?', [req.params.id]);
     if (!col) return res.status(404).json({ error: 'Collection not found' });
 
-    const oldSlug = col.slug || col.folder || col.name;
-    const newSlug = slug || folder || oldSlug;
+    const oldFolder = col.folder || col.slug || col.name;
+    const newFolder = folder || slug || oldFolder;
 
     const sets = []; const vals = [];
     if (name != null) { sets.push('name = ?'); vals.push(name); }
@@ -86,11 +86,11 @@ router.put('/api/collections/:id', async (req, res) => {
     vals.push(req.params.id);
     if (sets.length) run(`UPDATE collections SET ${sets.join(', ')} WHERE id = ?`, vals);
 
-    // Rename data folder if slug changed
+    // Rename data folder if it changed
     const __dirname = path.dirname(fileURLToPath(import.meta.url));
-    if (newSlug !== oldSlug) {
-      const oldDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', oldSlug);
-      const newDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', newSlug);
+    if (newFolder !== oldFolder) {
+      const oldDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', oldFolder);
+      const newDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', newFolder);
       if (fs.existsSync(oldDir) && !fs.existsSync(newDir)) {
         fs.renameSync(oldDir, newDir);
       }
