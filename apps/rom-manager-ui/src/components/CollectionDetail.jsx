@@ -402,7 +402,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
                 <div className="tag-list">
                   {availableDats.missing.map(d => {
                     const verKey = d.numeric || d.version;
-                    const label = d.nightly ? 'nightly (HEAD)' : d.source === 'FBAlpha43' || d.source === 'FBAlpha44' ? `${d.version} (FB Alpha)` : d.numeric || d.version;
+                    const label = d.nightly ? 'nightly (HEAD)' : d.source === 'FBAlpha43' || d.source === 'FBAlpha44' ? `${d.version} (FB Alpha)` : d.numeric && d.version !== d.numeric ? `${d.numeric} (${d.version})` : (d.numeric || d.version);
                     return (
                       <button
                         key={verKey}

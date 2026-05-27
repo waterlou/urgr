@@ -274,13 +274,15 @@ router.get('/api/versions/available', async (req, res) => {
         cells.push(cellMatch[0].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
       }
       if (cells.length >= 3) {
-        const rawVer = cells[0].replace(/[()]/g, '').trim();
-        const ver = rawVer.split(/\s+/)[0];
+        const cellText = cells[0];
+        const parenMatch = cellText.match(/\(([^)]+)\)/);
+        const nickname = parenMatch ? parenMatch[1].trim() : null;
+        const ver = cellText.replace(/\([^)]+\)/g, '').replace(/[()]/g, '').trim().split(/\s+/)[0];
         const parsed = parseMameVersion(ver);
         if (parsed[0] > 0 || parsed[1] > 0) {
           const allLinks = [...rowMatch[1].matchAll(/<a[^>]+href="([^"]+)"/gi)];
           const url = allLinks.length > 0 ? allLinks[0][1].replace(/&amp;/g, '&') : null;
-          rows.push({ version: rawVer, parsed, date: cells[1] || '', hasDat: cells[2] !== '-' && cells[2] !== '', year: cells[1].match(/(\d{4})/)?.[1] || '', url });
+          rows.push({ version: nickname || ver, parsed, numeric: ver, date: cells[1] || '', hasDat: cells[2] !== '-' && cells[2] !== '', year: cells[1].match(/(\d{4})/)?.[1] || '', url });
         }
       }
     }
@@ -292,14 +294,14 @@ router.get('/api/versions/available', async (req, res) => {
 
     const _urls = {};
     for (const r of rows) {
-      if (r.url) _urls[fmtVersion(r.parsed)] = r.url;
+      if (r.url) _urls[r.numeric] = r.url;
     }
     const result = {
       source: 'MAME',
       latest: latestVer ? fmtVersion(latestVer) : null, latestParsed: latestVer,
-      available: rows.filter(r => r.hasDat).map(r => ({ version: r.version, numeric: fmtVersion(r.parsed), date: r.date, year: r.year, parsed: r.parsed, url: r.url })),
+      available: rows.filter(r => r.hasDat).map(r => ({ version: r.version, numeric: r.numeric, date: r.date, year: r.year, parsed: r.parsed, url: r.url })),
       imported: importedParsed,
-      missing: availableDats.map(r => ({ version: r.version, numeric: fmtVersion(r.parsed), date: r.date, parsed: r.parsed, url: r.url })),
+      missing: availableDats.map(r => ({ version: r.version, numeric: r.numeric, date: r.date, parsed: r.parsed, url: r.url })),
       hasNewer,
       _urls,
     };
@@ -419,8 +421,10 @@ router.post('/api/versions/import-online', async (req, res) => {
             cells.push(cellMatch[0].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
           }
           if (cells.length >= 3) {
-            const rawVer = cells[0].replace(/[()]/g, '').trim();
-            const ver = rawVer.split(/\s+/)[0];
+            const cellText = cells[0];
+            const parenMatch = cellText.match(/\(([^)]+)\)/);
+            const nickname = parenMatch ? parenMatch[1].trim() : null;
+            const ver = cellText.replace(/\([^)]+\)/g, '').replace(/[()]/g, '').trim().split(/\s+/)[0];
             const parsed = parseMameVersion(ver);
             if (fmtVersion(parsed) === version) {
               const linkMatch = rowMatch[1].match(/<a[^>]+href="([^"]+)"/i);
