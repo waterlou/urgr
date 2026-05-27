@@ -177,6 +177,20 @@ router.get('/api/collections/:id/games', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.get('/api/collections/:id/versions', async (req, res) => {
+  await dbReady;
+  try {
+    const versions = all(`
+      SELECT sv.*, (SELECT COUNT(*) FROM game_entries WHERE version_id = sv.id) as total_games
+      FROM set_versions sv
+      JOIN collection_versions cv ON cv.version_id = sv.id
+      WHERE cv.collection_id = ?
+      ORDER BY sv.created_at DESC
+    `, [req.params.id]);
+    res.json(versions);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.post('/api/collections/:id/versions', async (req, res) => {
   await dbReady;
   try {

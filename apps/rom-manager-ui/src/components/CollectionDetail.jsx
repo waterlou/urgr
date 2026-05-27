@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import IconDisplay from './IconDisplay.jsx'
 import {
   getAvailableVersions, getCollectionBuilds, startCollectionBuild, updateCollectionBuild,
-  exportCollection, getVersions, addCollectionVersion, getCollectionGames,
+  exportCollection, getCollectionVersions, addCollectionVersion, getCollectionGames,
   importOnlineVersion, scanCollection, verifyCollection, subscribeJobSSE,
   runCollectionBuild, cancelJob, downloadFromIA, iaListFiles, iaDownloadEntry,
   collectionBuild,
@@ -128,10 +128,10 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
         const datsPromise = getAvailableVersions(source).catch(() => null);
         const datsTimeout = new Promise(resolve => setTimeout(() => resolve(null), 12000));
         const dats = await Promise.race([datsPromise, datsTimeout]);
-        const [buildsData, vers] = await Promise.all([
-          getCollectionBuilds(collectionId).catch(() => []),
-          getVersions().catch(() => []),
-        ])
+    const [buildsData, vers] = await Promise.all([
+      getCollectionBuilds(collectionId).catch(() => []),
+      getCollectionVersions(collectionId).catch(() => []),
+    ])
         setAvailableDats(dats)
         setBuilds(buildsData)
         setVersions(vers)
@@ -268,7 +268,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
       setInfo(`Version ${version} imported! (${result.total_games} games)`)
       const [dats, vers] = await Promise.all([
         getAvailableVersions(getDatSource()).catch(() => null),
-        getVersions().catch(() => []),
+        getCollectionVersions(collectionId).catch(() => []),
       ])
       setAvailableDats(dats)
       setVersions(vers)

@@ -55,6 +55,9 @@ export function getCollectionGames(id, { limit, offset, sort, order, q, parents_
 export function addCollectionVersion(id, versionId) {
   return fetchWithBody(`/collections/${id}/versions`, 'POST', { version_id: versionId });
 }
+export function getCollectionVersions(id) {
+  return fetchJson(`/collections/${id}/versions`);
+}
 export function removeCollectionVersion(id, versionId) {
   return fetchWithBody(`/collections/${id}/versions/${versionId}`, 'DELETE');
 }
