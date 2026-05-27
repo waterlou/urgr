@@ -90,8 +90,8 @@ export function updateCollectionBuild(id, buildId, data) {
 export function runCollectionBuild(id, buildId, { source, import_dir, base_dir, update } = {}) {
   return fetchWithBody(`/collections/${id}/builds/${buildId}/run`, 'POST', { source, import_dir, base_dir, update });
 }
-export function collectionBuild(id, version_id, import_dir) {
-  return fetchWithBody(`/collections/${id}/build`, 'POST', { version_id, import_dir });
+export function collectionBuild(id, version_id, import_dir, scan = false) {
+  return fetchWithBody(`/collections/${id}/build`, 'POST', { version_id, import_dir, scan });
 }
 
 // Exports

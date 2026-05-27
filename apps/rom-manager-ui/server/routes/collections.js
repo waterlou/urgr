@@ -252,7 +252,7 @@ router.post('/api/collections/:id/verify', async (req, res) => {
 router.post('/api/collections/:id/build', async (req, res) => {
   await dbReady;
   try {
-    const { version_id, import_dir } = req.body;
+    const { version_id, import_dir, scan } = req.body;
     if (!version_id || !import_dir) return res.status(400).json({ error: 'version_id and import_dir required' });
 
     const col = get('SELECT id, slug, folder FROM collections WHERE id = ?', [req.params.id]);
@@ -268,6 +268,7 @@ router.post('/api/collections/:id/build', async (req, res) => {
     setTimeout(async () => {
       try {
         const args = ['build', sv.source, import_dir, '--base-dir', collectionDir, '--collection-dir', collectionDir, '--progress'];
+        if (scan) args.push('--dry-run');
         execCliStream(args, {
           binary: 'build',
           onProgress: (p) => updateProgress(jobId, p.pct || 0, p.msg || ''),

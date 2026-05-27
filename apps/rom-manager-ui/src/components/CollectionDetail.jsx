@@ -42,11 +42,9 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
   const [verifyResult, setVerifyResult] = useState(null)
   const [buildProgress, setBuildProgress] = useState({})
   const [buildVersion, setBuildVersion] = useState('')
-  const [showAllMame, setShowAllMame] = useState(false)
-  const MAME_MILESTONES = new Set(['0.37b5', '0.78', '0.106', '0.139', '0.160'])
-  const [buildFormat, setBuildFormat] = useState('split')
-  const [buildImportDir, setBuildImportDir] = useState(() => localStorage.getItem('rom-manager-import-dir') || '')
   const [buildRunning, setBuildRunning] = useState(false)
+  const [buildScanRunning, setBuildScanRunning] = useState(false)
+  const [buildScanResult, setBuildScanResult] = useState(null)
   const [buildProgressMsg, setBuildProgressMsg] = useState('')
   const [buildResult, setBuildResult] = useState(null)
   const [iaDownloading, setIaDownloading] = useState(false)
@@ -212,6 +210,32 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
       })
     } catch (e) {
       setBuildRunning(false)
+      setError(e.message)
+    }
+  }
+
+  async function handleScanStart() {
+    if (!buildVersion || !buildImportDir) return
+    setBuildScanRunning(true)
+    setBuildProgressMsg('Starting scan...')
+    setBuildScanResult(null)
+    setError(null)
+    try {
+      const { jobId } = await collectionBuild(collectionId, parseInt(buildVersion), buildImportDir, true)
+      subscribeJobSSE(jobId, {
+        onProgress: (msg) => setBuildProgressMsg(msg.msg || `Progress: ${msg.pct}%`),
+        onResult: (data) => {
+          setBuildScanResult(data)
+          setBuildScanRunning(false)
+          setInfo(`Scan complete: ${data.added} would be added, ${data.exists} exist, ${data.reused} reusable, ${data.missing} missing`)
+        },
+        onError: (err) => {
+          setBuildScanRunning(false)
+          setError(err)
+        },
+      })
+    } catch (e) {
+      setBuildScanRunning(false)
       setError(e.message)
     }
   }
@@ -433,7 +457,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
                 </div>
                 {availableDats.source === 'MAME' && (
                   <button className="btn btn-sm btn-secondary" style={{marginTop:8}} onClick={() => setShowAllMame(v => !v)}>
-                    {showAllMame ? 'Show milestones only' : `Show all (${availableDats.missing.length} versions)`}
+                    {showAllMame ? 'Show highlights only' : `Show all (${availableDats.missing.length} versions)`}
                   </button>
                 )}
               </div>
@@ -670,11 +694,19 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
                   <option key={v.id} value={v.id}>{v.source} — {v.version} ({v.total_games} games)</option>
                 ))}
               </select>
-              <button className="btn btn-primary" onClick={handleBuildStart} disabled={!buildVersion || !buildImportDir || buildRunning}>
+              <button className="btn btn-primary" onClick={handleBuildStart} disabled={!buildVersion || !buildImportDir || buildRunning || buildScanRunning}>
                 <span className="icon">build</span> Build
+              </button>
+              <button className="btn btn-secondary" onClick={handleScanStart} disabled={!buildVersion || !buildImportDir || buildRunning || buildScanRunning}>
+                <span className="icon">search</span> Scan
               </button>
             </div>
             {buildRunning && (
+              <div className="info-box" style={{marginTop:12}}>
+                <div className="loading-inline"><div className="loading-spinner-sm" /> {buildProgressMsg}</div>
+              </div>
+            )}
+            {buildScanRunning && (
               <div className="info-box" style={{marginTop:12}}>
                 <div className="loading-inline"><div className="loading-spinner-sm" /> {buildProgressMsg}</div>
               </div>
@@ -688,6 +720,20 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
                     <summary>Missing games ({buildResult.missing})</summary>
                     <div style={{maxHeight:200,overflow:'auto',marginTop:4}}>
                       {buildResult.missing_games.map(g => <div key={g}>{g}</div>)}
+                    </div>
+                  </details>
+                )}
+              </div>
+            )}
+            {buildScanResult && (
+              <div className="info-box" style={{marginTop:12}}>
+                <strong>Scan result</strong> — no files were copied<br />
+                ✓ {buildScanResult.added} would be added · {buildScanResult.exists} exist · ♻ {buildScanResult.reused} reusable · ✗ {buildScanResult.missing} missing
+                {buildScanResult.missing > 0 && buildScanResult.missing_games?.length > 0 && (
+                  <details style={{marginTop:8,fontSize:13}}>
+                    <summary>Missing games ({buildScanResult.missing})</summary>
+                    <div style={{maxHeight:200,overflow:'auto',marginTop:4}}>
+                      {buildScanResult.missing_games.map(g => <div key={g}>{g}</div>)}
                     </div>
                   </details>
                 )}
