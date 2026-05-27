@@ -1,0 +1,164 @@
+import { useState, useEffect } from 'react'
+import { getAvailableVersions, getCollectionVersions, addCollectionVersion, importOnlineVersion } from '../api.js'
+
+const MAME_MILESTONES = new Set(['0.37b5', '0.78', '0.106', '0.139', '0.160'])
+
+function getDatSource(folder) {
+  if (folder === 'fbneo') return 'FBNeo'
+  if (folder === 'fba' || folder === 'fbalpha') return 'FBAlpha44'
+  return 'MAME'
+}
+
+export default function VersionManager({ collectionId, collection, onVersionsChange, onRefresh }) {
+  const [availableDats, setAvailableDats] = useState(null)
+  const [importingVer, setImportingVer] = useState(null)
+  const [showAllMame, setShowAllMame] = useState(false)
+
+  useEffect(() => {
+    const source = getDatSource(collection?.folder)
+    const datsPromise = getAvailableVersions(source).catch(() => null)
+    const datsTimeout = new Promise(resolve => setTimeout(() => resolve(null), 12000))
+    Promise.race([datsPromise, datsTimeout]).then(setAvailableDats)
+  }, [collectionId, collection?.folder])
+
+  async function handleImportOnline(version, source, refresh) {
+    setImportingVer(version)
+    try {
+      const datSource = getDatSource(collection?.folder)
+      await importOnlineVersion(collectionId, version, source || datSource, refresh)
+      const [dats, vers] = await Promise.all([
+        getAvailableVersions(datSource).catch(() => null),
+        getCollectionVersions(collectionId).catch(() => []),
+      ])
+      setAvailableDats(dats)
+      onVersionsChange(vers)
+      onRefresh()
+    } catch (e) {
+      // parent can handle via a shared error mechanism if needed
+      console.error('Import failed:', e.message)
+    } finally {
+      setImportingVer(null)
+    }
+  }
+
+  async function handleLinkVersion(versionId) {
+    try {
+      await addCollectionVersion(collectionId, versionId)
+      onRefresh()
+    } catch (e) {
+      console.error('Link failed:', e.message)
+    }
+  }
+
+  const isMameOrFbneo = collection?.folder === 'mame' || collection?.folder === 'fbneo'
+
+  return (
+    <>
+      {/* MAME / FBNeo DAT Versions */}
+      {availableDats && isMameOrFbneo && (
+        <section className="detail-section">
+          <h2 className="detail-section-title">
+            {collection?.folder === 'mame' ? 'MAME' : 'Final Burn Neo / FB Alpha'} DAT Versions
+            {availableDats.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>Update available! {availableDats.latest}</span>}
+          </h2>
+          <p className="detail-section-desc">
+            {collection?.folder === 'mame' ? 'Latest MAME: ' : 'Latest: '}
+            <strong>{availableDats.latest}</strong>
+            {availableDats.imported?.length > 0 && ` · ${availableDats.imported.length} version(s) imported`}
+            {availableDats.missing?.length > 0 && ` · ${availableDats.missing.length} version(s) not yet imported`}
+          </p>
+
+          {availableDats.source === 'FBNeo' && (
+            <div className="info-box">
+              <strong>Nightly</strong> is the latest FBNeo HEAD &mdash; refreshed when FBNeo is updated.
+              Tagged versions are stable releases. <strong>FB Alpha 0.2.97.x</strong> versions are hardcoded for older retro consoles.
+            </div>
+          )}
+
+          {availableDats.missing?.length > 0 && (
+            <div className="info-box warn">
+              <strong>Versions available to import:</strong>
+              {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing {importingVer}...</div>}
+              <div className="tag-list">
+                {(() => {
+                  let items = availableDats.missing;
+                  if (availableDats.source === 'MAME' && !showAllMame) {
+                    const latest = availableDats.latest;
+                    const milestones = items.filter(d => MAME_MILESTONES.has(d.version));
+                    const latestItem = latest ? items.find(d => d.version === latest) : null;
+                    const seen = new Set();
+                    [...milestones, ...(latestItem ? [latestItem] : [])].forEach(d => { if (d) seen.add(d.numeric || d.version); });
+                    items = items.filter(d => seen.has(d.numeric || d.version));
+                  }
+                  return items;
+                })().map(d => {
+                  const verKey = d.numeric || d.version;
+                  const label = d.nightly ? 'nightly (HEAD)' : d.source === 'FBAlpha43' || d.source === 'FBAlpha44' ? `${d.version} (FB Alpha)` : d.numeric && d.version !== d.numeric ? `${d.numeric} (${d.version})` : (d.numeric || d.version);
+                  return (
+                    <button
+                      key={verKey}
+                      className="tag tag-import"
+                      onClick={() => handleImportOnline(verKey, d.source || availableDats.source)}
+                      disabled={importingVer !== null}
+                      title={d.source || availableDats.source}
+                    >
+                      <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:2}}>{importingVer === verKey ? 'hourglass' : 'add'}</span>
+                      {label}
+                      {d.date && <span className="tag-date">{d.date}</span>}
+                    </button>
+                  )
+                })}
+              </div>
+              {availableDats.source === 'MAME' && (
+                <button className="btn btn-sm btn-secondary" style={{marginTop:8}} onClick={() => setShowAllMame(v => !v)}>
+                  {showAllMame ? 'Show highlights only' : `Show all (${availableDats.missing.length} versions)`}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Already-imported versions with refresh for nightly */}
+          {availableDats.imported?.length > 0 && (
+            <div className="info-box" style={{marginTop:12}}>
+              <strong>Imported versions:</strong>
+              <div className="tag-list" style={{marginTop:8}}>
+                {availableDats.imported.map(iv => {
+                  const isNightly = iv.version === 'nightly';
+                  return (
+                    <span key={iv.id} className="tag" style={{display:'inline-flex',alignItems:'center',gap:4}}>
+                      <span className="icon icon-sm" style={{fontSize:14}}>check</span>
+                      {iv.source ? `${iv.source} — ${iv.version}` : iv.version}
+                      {isNightly && (
+                        <button
+                          className="btn btn-sm btn-secondary"
+                          style={{padding:'1px 6px',fontSize:11,marginLeft:4}}
+                          onClick={() => handleImportOnline(iv.version, 'FBNeo', true)}
+                          disabled={importingVer !== null}
+                        >
+                          Refresh
+                        </button>
+                      )}
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Preset dataset info for non-MAME/non-FBNeo presets */}
+      {collection?.has_dataset === 1 && !isMameOrFbneo && (
+        <section className="detail-section">
+          <h2 className="detail-section-title">
+            Dataset: {collection.folder}
+          </h2>
+          <p className="detail-section-desc">
+            This collection uses a <strong>{collection.folder}</strong> dataset.
+            Versions are managed during the build process. Upload a DAT file to get started.
+          </p>
+        </section>
+      )}
+    </>
+  )
+}

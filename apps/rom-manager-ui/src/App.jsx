@@ -5,6 +5,7 @@ import {
   updateCollection, addCollectionVersion, removeCollectionVersion,
   createGameSet, deleteGameSet, updateGameSet, addGameSetGames, removeGameSetGame,
 } from './api.js'
+import useRouter from './hooks/useRouter.js'
 import Sidebar from './components/Sidebar.jsx'
 import GameBrowser from './components/GameBrowser.jsx'
 import GameDetail from './components/GameDetail.jsx'
@@ -14,12 +15,17 @@ import GameSetForm from './components/GameSetForm.jsx'
 import Settings from './components/Settings.jsx'
 
 export default function App() {
+  const {
+    activeView, setActiveView,
+    activeId, setActiveId,
+    collectionSubView, setCollectionSubView,
+    selectedGame, setSelectedGame,
+    pushViewHistory,
+  } = useRouter()
+
   const [collections, setCollections] = useState([])
   const [gameSets, setGameSets] = useState([])
   const [versions, setVersions] = useState([])
-  const [activeView, setActiveView] = useState('browse')
-  const [activeId, setActiveId] = useState(null)
-  const [collectionSubView, setCollectionSubView] = useState('detail') // 'detail' or 'games'
   const [games, setGames] = useState([])
   const [activeMeta, setActiveMeta] = useState(null)
   const [offset, setOffset] = useState(0)
@@ -27,7 +33,6 @@ export default function App() {
   const [hasMore, setHasMore] = useState(true)
   const [platforms, setPlatforms] = useState([])
   const [loading, setLoading] = useState(true)
-  const [selectedGame, setSelectedGame] = useState(null)
   const [showCollectionForm, setShowCollectionForm] = useState(false)
   const [showGameSetForm, setShowGameSetForm] = useState(false)
   const [editTarget, setEditTarget] = useState(null)
@@ -152,10 +157,12 @@ export default function App() {
   }, [activeView, activeId, viewMode, sortField, sortOrder, searchQuery, parentsOnly, loadGames])
 
   function handleSelect(view, id) {
+    pushViewHistory(view, id)
     setActiveView(view)
     setActiveId(id)
     setSearchQuery('')
     if (view === 'collection') setCollectionSubView('detail')
+    else setSelectedGame(null)
   }
 
   async function handleCreateCollection(data) {
@@ -170,6 +177,7 @@ export default function App() {
     if (!window.confirm(`Are you sure you want to delete "${name}"? This cannot be undone.`)) return
     await deleteCollection(id)
     if (activeView === 'collection' && activeId === id) {
+      pushViewHistory('browse', null)
       setActiveView('browse')
       setActiveId(null)
     }
@@ -185,6 +193,7 @@ export default function App() {
   async function handleDeleteGameSet(id) {
     await deleteGameSet(id)
     if (activeView === 'game-set' && activeId === id) {
+      pushViewHistory('browse', null)
       setActiveView('browse')
       setActiveId(null)
     }
@@ -236,6 +245,33 @@ export default function App() {
     await loadSidebar()
   }
 
+  function handleBrowseGames() {
+    pushViewHistory('collection', activeId, 'games', null)
+    setCollectionSubView('games')
+  }
+
+  function handleBackToDetail() {
+    pushViewHistory('collection', activeId, 'detail', null)
+    setCollectionSubView('detail')
+    setSelectedGame(null)
+  }
+
+  function handleSelectGame(game) {
+    if (game) pushViewHistory(activeView, activeId, collectionSubView, game)
+    setSelectedGame(game)
+  }
+
+  function handleCloseGame() {
+    pushViewHistory(activeView, activeId, collectionSubView, null)
+    setSelectedGame(null)
+  }
+
+  function handleNavigateGame(id) {
+    const game = { id }
+    pushViewHistory(activeView, activeId, collectionSubView, game)
+    setSelectedGame(game)
+  }
+
   async function handleAddToGameSet(gameEntryId, setId) {
     await addGameSetGames(setId, [gameEntryId])
     await loadGames(activeView, activeId, viewMode, sortField, sortOrder, searchQuery, parentsOnly)
@@ -244,6 +280,10 @@ export default function App() {
   async function handleRemoveFromGameSet(gameEntryId, setId) {
     await removeGameSetGame(setId, gameEntryId)
     await loadGames(activeView, activeId, viewMode, sortField, sortOrder, searchQuery, parentsOnly)
+  }
+
+  function handleUpdateGame(gameId, patch) {
+    setGames(prev => prev.map(g => g.id === gameId ? { ...g, ...patch } : g))
   }
 
   return (
@@ -272,7 +312,7 @@ export default function App() {
           <CollectionDetail
             collectionId={activeId}
             collection={collections.find(c => c.id === activeId)}
-            onBrowseGames={() => setCollectionSubView('games')}
+            onBrowseGames={handleBrowseGames}
             onRefresh={loadSidebar}
           />
         ) : (
@@ -296,13 +336,14 @@ export default function App() {
                   onSortFieldChange={setSortField}
                   onSortOrderChange={setSortOrder}
                   onSearchQueryChange={setSearchQuery}
-                  onSelectGame={setSelectedGame}
+                  onSelectGame={handleSelectGame}
                   onAddToGameSet={handleAddToGameSet}
                   onRemoveFromGameSet={handleRemoveFromGameSet}
+                  onUpdateGame={handleUpdateGame}
                   gameSets={gameSets}
                   activeId={activeId}
                   showBackToDetail={activeView === 'collection'}
-                  onBackToDetail={() => setCollectionSubView('detail')}
+                  onBackToDetail={handleBackToDetail}
                   parentsOnly={parentsOnly}
                   onParentsOnlyChange={handleSetParentsOnly}
                   onToggleSidebar={handleToggleSidebar}
@@ -311,8 +352,8 @@ export default function App() {
               <div className="view-stack-page">
                 {selectedGame && <GameDetail
                   gameId={selectedGame.id || selectedGame}
-                  onBack={() => setSelectedGame(null)}
-                  onNavigate={(id) => setSelectedGame({id})}
+                  onBack={handleCloseGame}
+                  onNavigate={handleNavigateGame}
                 />}
               </div>
             </div>

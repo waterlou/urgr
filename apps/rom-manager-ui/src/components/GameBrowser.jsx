@@ -7,7 +7,7 @@ export default function GameBrowser({
   games, loading, hasMore, onLoadMore, activeView, activeMeta, totalGames, platforms,
   viewMode, sortField, sortOrder, searchQuery,
   onViewModeChange, onSortFieldChange, onSortOrderChange,
-  onSearchQueryChange, onSelectGame, onAddToGameSet, onRemoveFromGameSet, gameSets, activeId,
+  onSearchQueryChange, onSelectGame, onAddToGameSet, onRemoveFromGameSet, onUpdateGame, gameSets, activeId,
   showBackToDetail, onBackToDetail,
   parentsOnly, onParentsOnlyChange,
   onToggleSidebar,
@@ -92,16 +92,14 @@ export default function GameBrowser({
   }
 
   async function handleRating(game, rating) {
+    onUpdateGame(game.id, { rating })
     await updateGameRating(game.id, { rating })
-    // Optimistic update
-    game.rating = rating
-    forceUpdate()
   }
 
   async function handleFavourite(game) {
-    await updateGameRating(game.id, { favourite: !game.favourite })
-    game.favourite = game.favourite ? 0 : 1
-    forceUpdate()
+    const newFav = game.favourite ? 0 : 1
+    onUpdateGame(game.id, { favourite: newFav })
+    await updateGameRating(game.id, { favourite: newFav })
   }
 
   async function handleBatchScrape() {
@@ -142,10 +140,6 @@ export default function GameBrowser({
     setBatchResult({ cancelled: true })
     setBatchJobId(null)
   }
-
-  // Force re-render hack
-  const [, setTick] = useState(0)
-  function forceUpdate() { setTick(t => t + 1) }
 
   const title = !activeMeta
     ? 'All Games'
