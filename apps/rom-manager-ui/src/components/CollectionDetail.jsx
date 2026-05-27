@@ -42,6 +42,8 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
   const [verifyResult, setVerifyResult] = useState(null)
   const [buildProgress, setBuildProgress] = useState({})
   const [buildVersion, setBuildVersion] = useState('')
+  const [showAllMame, setShowAllMame] = useState(false)
+  const MAME_MILESTONES = new Set(['0.37b5', '0.78', '0.106', '0.139', '0.160'])
   const [buildFormat, setBuildFormat] = useState('split')
   const [buildImportDir, setBuildImportDir] = useState(() => localStorage.getItem('rom-manager-import-dir') || '')
   const [buildRunning, setBuildRunning] = useState(false)
@@ -400,7 +402,18 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
                 <strong>Versions available to import:</strong>
                 {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing {importingVer}...</div>}
                 <div className="tag-list">
-                  {availableDats.missing.map(d => {
+                  {(() => {
+                    let items = availableDats.missing;
+                    if (availableDats.source === 'MAME' && !showAllMame) {
+                      const latest = availableDats.latest;
+                      const milestones = items.filter(d => MAME_MILESTONES.has(d.version));
+                      const latestItem = latest ? items.find(d => d.version === latest) : null;
+                      const seen = new Set();
+                      [...milestones, ...(latestItem ? [latestItem] : [])].forEach(d => { if (d) seen.add(d.numeric || d.version); });
+                      items = items.filter(d => seen.has(d.numeric || d.version));
+                    }
+                    return items;
+                  })().map(d => {
                     const verKey = d.numeric || d.version;
                     const label = d.nightly ? 'nightly (HEAD)' : d.source === 'FBAlpha43' || d.source === 'FBAlpha44' ? `${d.version} (FB Alpha)` : d.numeric && d.version !== d.numeric ? `${d.numeric} (${d.version})` : (d.numeric || d.version);
                     return (
@@ -418,6 +431,11 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
                     )
                   })}
                 </div>
+                {availableDats.source === 'MAME' && (
+                  <button className="btn btn-sm btn-secondary" style={{marginTop:8}} onClick={() => setShowAllMame(v => !v)}>
+                    {showAllMame ? 'Show milestones only' : `Show all (${availableDats.missing.length} versions)`}
+                  </button>
+                )}
               </div>
             )}
 
