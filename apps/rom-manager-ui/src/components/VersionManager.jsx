@@ -140,10 +140,12 @@ export default function VersionManager({ collectionId, collection, onVersionsCha
               <div className="tag-list" style={{marginTop:8}}>
                 {availableDats.imported.map(iv => {
                   const isNightly = iv.version === 'nightly';
+                  const age = iv.created_at ? getAge(iv.created_at) : null;
                   return (
                     <span key={iv.id} className="tag" style={{display:'inline-flex',alignItems:'center',gap:4}}>
                       <span className="icon icon-sm" style={{fontSize:14}}>check</span>
                       {iv.source ? `${iv.source} — ${iv.version}` : iv.version}
+                      {age && <span className="tag-date">{age}</span>}
                       {isNightly && (
                         <button
                           className="btn btn-sm btn-secondary"
@@ -151,7 +153,7 @@ export default function VersionManager({ collectionId, collection, onVersionsCha
                           onClick={() => handleImportOnline(iv.version, 'FBNeo', true)}
                           disabled={importingVer !== null}
                         >
-                          Refresh
+                          {importingVer === iv.version ? '...' : 'Refresh'}
                         </button>
                       )}
                     </span>

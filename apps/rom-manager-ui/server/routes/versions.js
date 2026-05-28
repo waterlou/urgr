@@ -174,7 +174,7 @@ async function getFBNeoVersions() {
       { version: '0.2.97.44', source: 'FBAlpha44', repo: FBALPHA44_REPO },
     ];
 
-    const imported = all("SELECT id, source, version FROM set_versions WHERE source IN ('FBNeo','FBAlpha43','FBAlpha44') ORDER BY version");
+    const imported = all("SELECT id, source, version, created_at FROM set_versions WHERE source IN ('FBNeo','FBAlpha43','FBAlpha44') ORDER BY version");
     const importedSet = new Set(imported.map(v => `${v.source}:${v.version}`));
 
     const allVersions = [
@@ -561,7 +561,7 @@ router.get('/api/versions/available', async (req, res) => {
       }
     }
 
-    const imported = all('SELECT id, source, version FROM set_versions WHERE source = ? ORDER BY version', ['MAME']);
+    const imported = all('SELECT id, source, version, created_at FROM set_versions WHERE source = ? ORDER BY version', ['MAME']);
     const importedParsed = imported.map(v => ({ id: v.id, source: v.source, version: v.version, parsed: parseMameVersion(v.version) }));
     const availableDats = rows.filter(r => r.hasDat && !importedParsed.some(iv => cmpVersion(iv.parsed, r.parsed) === 0));
     const hasNewer = latestVer ? !importedParsed.some(iv => cmpVersion(iv.parsed, latestVer) === 0) : false;
