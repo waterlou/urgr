@@ -6,6 +6,8 @@ https://www.progettosnaps.net/dats/MAME/
 https://git.libretro.com/libretro/FBNeo/-/tree/master/dats
 https://nopaystation.com
 https://github.com/libretro/libretro-database/tree/master/metadat/no-intro
+http://nointro.free.fr (OfflineList XML format, 40 console DATs)
+https://datomatic.no-intro.org (Logiqx XML format, 28+ systems, auto-download via three-step form flow)
 
 Some rom set contains different versions, and some emulator may support older version only. So we must able to collect rom set for different versions for specific rom sets (MAME, FBNeo for now)
 

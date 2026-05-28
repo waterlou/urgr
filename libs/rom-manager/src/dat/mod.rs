@@ -1,6 +1,7 @@
 mod clrmamepro;
 mod logiqx;
 mod mame;
+mod offlinelist;
 
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -11,6 +12,7 @@ use crate::models::{DatFormat, GameEntry, ParseStats, RomEntry};
 pub use clrmamepro::parse_clrmamepro_dat;
 pub use logiqx::parse_logiqx_dat;
 pub use mame::parse_mame_dat;
+pub use offlinelist::parse_offlinelist_dat;
 
 fn read_nonblank_line(reader: &mut BufReader<std::fs::File>) -> std::io::Result<String> {
     loop {
@@ -37,35 +39,39 @@ pub fn detect_format<P: AsRef<Path>>(path: P) -> Result<DatFormat> {
         )));
     }
 
-    let check_line = if first.trim_start().starts_with("<?xml") {
-        read_nonblank_line(&mut reader)?
+    // If the file starts with <?xml, skip it and scan up to 10 lines for the root element
+    let check_lines: Vec<String> = if first.trim_start().starts_with("<?xml") {
+        let mut lines = Vec::new();
+        for _ in 0..10 {
+            match read_nonblank_line(&mut reader) {
+                Ok(l) if !l.is_empty() => lines.push(l),
+                _ => break,
+            }
+        }
+        lines
     } else {
-        first
+        vec![first]
     };
 
-    if check_line.contains("<mame") || check_line.contains("DOCTYPE mame") {
-        Ok(DatFormat::MameListXml)
-    } else if check_line.contains("<datafile") || check_line.contains("DOCTYPE datafile") {
-        Ok(DatFormat::Logiqx)
-    } else if check_line.to_lowercase().contains("clrmamepro") {
-        Ok(DatFormat::ClrmamePro)
-    } else {
-        let third = read_nonblank_line(&mut reader)?;
-        if third.contains("<datafile") || third.contains("<mame") {
-            if third.contains("<mame") {
-                Ok(DatFormat::MameListXml)
-            } else {
-                Ok(DatFormat::Logiqx)
-            }
-        } else if third.to_lowercase().contains("clrmamepro") {
-            Ok(DatFormat::ClrmamePro)
-        } else {
-            Err(crate::error::Error::Parse(format!(
-                "Unknown DAT format: {}",
-                path.as_ref().display()
-            )))
+    for line in &check_lines {
+        if line.contains("<mame") || line.contains("DOCTYPE mame") {
+            return Ok(DatFormat::MameListXml);
+        }
+        if line.contains("<datafile") || line.contains("DOCTYPE datafile") {
+            return Ok(DatFormat::Logiqx);
+        }
+        if line.to_lowercase().contains("clrmamepro") {
+            return Ok(DatFormat::ClrmamePro);
+        }
+        if line.contains("<dat") {
+            return Ok(DatFormat::OfflineList);
         }
     }
+
+    Err(crate::error::Error::Parse(format!(
+        "Unknown DAT format: {}",
+        path.as_ref().display()
+    )))
 }
 
 pub fn parse_dat<P: AsRef<Path>>(path: P) -> Result<(Vec<GameEntry>, Vec<RomEntry>, ParseStats)> {
@@ -74,5 +80,6 @@ pub fn parse_dat<P: AsRef<Path>>(path: P) -> Result<(Vec<GameEntry>, Vec<RomEntr
         DatFormat::MameListXml => parse_mame_dat(path),
         DatFormat::Logiqx => parse_logiqx_dat(path),
         DatFormat::ClrmamePro => parse_clrmamepro_dat(path),
+        DatFormat::OfflineList => parse_offlinelist_dat(path),
     }
 }

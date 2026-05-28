@@ -169,7 +169,13 @@ List all version sets (from `set_versions` table).
 List games in a specific version set.
 
 ### `GET /versions/available`
-Check for available DAT updates (MAME presets). Returns latest version + list of missing versions.
+Check for available DAT updates. Returns latest version + list of missing versions.
+
+**Query:** `?source=MAME|FBNEO|FBALPHA43|FBALPHA44|OFFLINELIST|DATOMATIC`
+
+- **MAME/FBNeo/FBAlpha**: Fetches available versions from GitHub
+- **OFFLINELIST**: Fetches available DATs from nointro.free.fr (OfflineList XML format)
+- **DATOMATIC**: Returns system list from datomatic.no-intro.org, auto-downloads DATs via form submission
 
 ### `POST /versions/import-dat`
 Import a DAT file. Wraps `parse-cli import`.
@@ -177,9 +183,16 @@ Import a DAT file. Wraps `parse-cli import`.
 **Body:** `{ "file": "/path/to/mame.xml", "source": "mame", "version": "0.29", "dir": "/roms/mame" }`
 
 ### `POST /versions/import-online`
-Download and import a DAT from the internet (MAME presets).
+Download and import a DAT from the internet.
 
-**Body:** `{ "version": "0.29" }`
+**Body:** `{ "version": "0.29", "source": "MAME" }`
+
+**Sources:**
+- `MAME` — Downloads from progettosnaps.net (Logiqx XML)
+- `FBNeo` — Downloads from GitHub (ClrMAMEPro/Logiqx)
+- `FBAlpha43`/`FBAlpha44` — Downloads from GitHub
+- `OFFLINELIST` — Downloads from nointro.free.fr (OfflineList XML)
+- `DATOMATIC` — Downloads from datomatic.no-intro.org (three-step form flow)
 
 ---
 

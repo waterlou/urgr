@@ -6,6 +6,8 @@ const MAME_MILESTONES = new Set(['0.37b5', '0.78', '0.106', '0.139', '0.160'])
 function getDatSource(folder) {
   if (folder === 'fbneo') return 'FBNeo'
   if (folder === 'fba' || folder === 'fbalpha') return 'FBAlpha44'
+  if (folder?.startsWith('offlinelist') || folder === 'offline-list') return 'OFFLINELIST'
+  if (folder?.startsWith('datomatic') || folder === 'dat-o-matic') return 'DATOMATIC'
   return 'MAME'
 }
 
@@ -51,6 +53,8 @@ export default function VersionManager({ collectionId, collection, onVersionsCha
   }
 
   const isMameOrFbneo = collection?.folder === 'mame' || collection?.folder === 'fbneo'
+  const isOfflineList = collection?.folder?.startsWith('offlinelist') || collection?.folder === 'offline-list'
+  const isDatomic = collection?.folder?.startsWith('datomatic') || collection?.folder === 'dat-o-matic'
 
   return (
     <>
@@ -147,8 +151,108 @@ export default function VersionManager({ collectionId, collection, onVersionsCha
         </section>
       )}
 
+      {/* OfflineList DAT Versions */}
+      {availableDats && isOfflineList && (
+        <section className="detail-section">
+          <h2 className="detail-section-title">
+            OfflineList DAT Versions
+            {availableDats.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>New DATs available!</span>}
+          </h2>
+          <p className="detail-section-desc">
+            {availableDats.available?.length} DATs available from OfflineList (nointro.free.fr)
+            {availableDats.imported?.length > 0 && ` · ${availableDats.imported.length} imported`}
+            {availableDats.missing?.length > 0 && ` · ${availableDats.missing.length} not yet imported`}
+          </p>
+
+          {availableDats.missing?.length > 0 && (
+            <div className="info-box warn">
+              <strong>DATs available to import:</strong>
+              {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing {importingVer}...</div>}
+              <div className="tag-list">
+                {availableDats.missing.map(d => (
+                  <button
+                    key={d.version}
+                    className="tag tag-import"
+                    onClick={() => handleImportOnline(d.version, 'OFFLINELIST')}
+                    disabled={importingVer !== null}
+                    title={d.url}
+                  >
+                    <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:2}}>{importingVer === d.version ? 'hourglass' : 'add'}</span>
+                    {d.version}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {availableDats.imported?.length > 0 && (
+            <div className="info-box" style={{marginTop:12}}>
+              <strong>Imported DATs:</strong>
+              <div className="tag-list" style={{marginTop:8}}>
+                {availableDats.imported.map(iv => (
+                  <span key={iv.id} className="tag" style={{display:'inline-flex',alignItems:'center',gap:4}}>
+                    <span className="icon icon-sm" style={{fontSize:14}}>check</span>
+                    {iv.version}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* DAT-O-MATIC DAT Versions */}
+      {availableDats && isDatomic && (
+        <section className="detail-section">
+          <h2 className="detail-section-title">
+            DAT-O-MATIC DAT Versions
+            {availableDats.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>DATs available!</span>}
+          </h2>
+          <p className="detail-section-desc">
+            {availableDats.available?.length} systems available from DAT-O-MATIC (datomatic.no-intro.org)
+            {availableDats.imported?.length > 0 && ` · ${availableDats.imported.length} imported`}
+            {availableDats.missing?.length > 0 && ` · ${availableDats.missing.length} not yet imported`}
+          </p>
+
+          {availableDats.missing?.length > 0 && (
+            <div className="info-box warn">
+              <strong>Systems available to import:</strong>
+              {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing {importingVer}... (this may take a minute)</div>}
+              <div className="tag-list">
+                {availableDats.missing.map(d => (
+                  <button
+                    key={d.version}
+                    className="tag tag-import"
+                    onClick={() => handleImportOnline(d.version, 'DATOMATIC')}
+                    disabled={importingVer !== null}
+                    title={d.url}
+                  >
+                    <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:2}}>{importingVer === d.version ? 'hourglass' : 'add'}</span>
+                    {d.version}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {availableDats.imported?.length > 0 && (
+            <div className="info-box" style={{marginTop:12}}>
+              <strong>Imported systems:</strong>
+              <div className="tag-list" style={{marginTop:8}}>
+                {availableDats.imported.map(iv => (
+                  <span key={iv.id} className="tag" style={{display:'inline-flex',alignItems:'center',gap:4}}>
+                    <span className="icon icon-sm" style={{fontSize:14}}>check</span>
+                    {iv.version}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Preset dataset info for non-MAME/non-FBNeo presets */}
-      {collection?.has_dataset === 1 && !isMameOrFbneo && (
+      {collection?.has_dataset === 1 && !isMameOrFbneo && !isOfflineList && !isDatomic && (
         <section className="detail-section">
           <h2 className="detail-section-title">
             Dataset: {collection.folder}

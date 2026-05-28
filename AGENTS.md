@@ -45,7 +45,8 @@ cargo build -p db-cli --release
 - **Rust changes require recompilation**: run `cargo build -p <name> --release` after modifying Rust source
 - DB path injection: `execCli` automatically appends `--json --db <path>` for Rust binaries
 - `findBinary` checks: env var → PATH → `target/release/` → `target/debug/` → `/usr/local/bin/`
-- `parse-cli import` handles Logiqx, ClrMamePro, and MAME XML DAT formats
+- `parse-cli import` handles Logiqx, ClrMamePro, MAME XML, and OfflineList XML DAT formats
+- DAT sources: MAME (progettosnaps.net), FBNeo (GitHub), OfflineList (nointro.free.fr), DAT-O-MATIC (datomatic.no-intro.org, auto-download)
 
 ## Git Workflow
 

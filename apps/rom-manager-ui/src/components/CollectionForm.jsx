@@ -9,6 +9,8 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
   const popularPresets = (datasets?.popular?.length ? datasets.popular : [
     { name: 'MAME', slug: 'mame', platform: 'Arcade' },
     { name: 'Final Burn Neo', slug: 'fbneo', platform: 'Arcade' },
+    { name: 'OfflineList (No-Intro)', slug: 'offlinelist', platform: 'Console', isOfflineList: true },
+    { name: 'DAT-O-MATIC', slug: 'datomatic', platform: 'Console', isDatomic: true },
   ])
   const [name, setName] = useState(editTarget?.name || '')
   const [slug, setSlug] = useState(editTarget?.slug || '')
@@ -24,7 +26,81 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
   const [datFileName, setDatFileName] = useState('')
   const [uploading, setUploading] = useState(false)
   const [formError, setFormError] = useState('')
+  const [selectedConsole, setSelectedConsole] = useState('')
   const fileRef = useRef()
+
+  const OFFLINELIST_CONSOLES = [
+    'Nintendo Gameboy',
+    'Nintendo Gameboy Color',
+    'Nintendo Gameboy Advance',
+    'Nintendo NES - Famicom',
+    'Nintendo Super NES - Super Famicom',
+    'Nintendo 64',
+    'Nintendo Dual Screen',
+    'Nintendo Virtualboy',
+    'Sega Genesis Megadrive 32X',
+    'Sega Master System',
+    'Sega GameGear',
+    'Sega SG1000-SC3000',
+    'Atari Lynx',
+    'Atari 5200',
+    'Atari Jaguar',
+    'Bandai WonderSwan',
+    'Bandai WonderSwan Color',
+    'Coleco ColecoVision',
+    'NEC PC Engine TurboGrafx 16',
+    'SNK NeoGeo Pocket',
+    'SNK NeoGeo Pocket Color',
+    'GCE Vectrex',
+    'Commodore 64',
+    'Pokemon Mini',
+  ]
+
+  const DATOMATIC_SYSTEMS = [
+    { id: '45', name: 'Nintendo - Nintendo Entertainment System' },
+    { id: '49', name: 'Nintendo - Super Nintendo Entertainment System' },
+    { id: '46', name: 'Nintendo - Game Boy' },
+    { id: '47', name: 'Nintendo - Game Boy Color' },
+    { id: '23', name: 'Nintendo - Game Boy Advance' },
+    { id: '24', name: 'Nintendo - Nintendo 64' },
+    { id: '28', name: 'Nintendo - Nintendo DS' },
+    { id: '54', name: 'Nintendo - Nintendo DSi' },
+    { id: '64', name: 'Nintendo - Nintendo 3DS' },
+    { id: '31', name: 'Nintendo - Family Computer Disk System' },
+    { id: '15', name: 'Nintendo - Virtual Boy' },
+    { id: '83', name: 'Nintendo - Nintendo 64DD' },
+    { id: '14', name: 'Nintendo - Pokemon Mini' },
+    { id: '32', name: 'Sega - Mega Drive - Genesis' },
+    { id: '26', name: 'Sega - Master System - Mark III' },
+    { id: '25', name: 'Sega - Game Gear' },
+    { id: '17', name: 'Sega - 32X' },
+    { id: '19', name: 'Sega - SG-1000 - SC-3000' },
+    { id: '88', name: 'Atari - Atari 2600' },
+    { id: '1', name: 'Atari - Atari 5200' },
+    { id: '74', name: 'Atari - Atari 7800' },
+    { id: '2', name: 'Atari - Atari Jaguar' },
+    { id: '30', name: 'Atari - Atari Lynx' },
+    { id: '12', name: 'NEC - PC Engine - TurboGrafx-16' },
+    { id: '13', name: 'NEC - PC Engine SuperGrafx' },
+    { id: '35', name: 'SNK - NeoGeo Pocket' },
+    { id: '36', name: 'SNK - NeoGeo Pocket Color' },
+    { id: '50', name: 'Bandai - WonderSwan' },
+    { id: '51', name: 'Bandai - WonderSwan Color' },
+    { id: '7', name: 'GCE - Vectrex' },
+    { id: '3', name: 'Coleco - ColecoVision' },
+    { id: '42', name: 'Commodore - Commodore 64' },
+    { id: '10', name: 'Microsoft - MSX' },
+    { id: '11', name: 'Microsoft - MSX2' },
+    { id: '105', name: 'Mattel - Intellivision' },
+    { id: '6', name: 'Fairchild - Channel F' },
+    { id: '22', name: 'Watara - Supervision' },
+    { id: '20', name: 'Tiger - Game.com' },
+    { id: '9', name: 'Magnavox - Odyssey 2' },
+    { id: '33', name: 'Commodore - Plus-4' },
+    { id: '34', name: 'Commodore - VIC-20' },
+    { id: '40', name: 'Commodore - Amiga' },
+    { id: '43', name: 'Commodore - Commodore 64 (PP)' },
+  ]
 
   function handleNameChange(e) {
     const val = e.target.value
@@ -57,11 +133,32 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
   function handlePresetChange(e) {
     const ds = popularPresets.find(d => d.name === e.target.value)
     setSelectedPreset(ds || null)
+    setSelectedConsole('')
     if (ds) {
       setName(ds.name)
       setSlug(ds.slug)
       setFolder(ds.slug)
       setPlatform(ds.platform)
+    }
+  }
+
+  function handleOfflineListConsoleChange(e) {
+    const consoleName = e.target.value
+    setSelectedConsole(consoleName)
+    if (consoleName) {
+      setName(`OfflineList ${consoleName}`)
+      setSlug(`offlinelist-${consoleName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`)
+      setFolder(`offlinelist-${consoleName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`)
+    }
+  }
+
+  function handleDatomicSystemChange(e) {
+    const systemName = e.target.value
+    setSelectedConsole(systemName)
+    if (systemName) {
+      setName(`DAT-O-MATIC ${systemName}`)
+      setSlug(`datomatic-${systemName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`)
+      setFolder(`datomatic-${systemName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`)
     }
   }
 
@@ -98,7 +195,13 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
       let uploadedVersionId = null
       if (datasetMode === 'preset' && selectedPreset) {
         payload.has_dataset = 1
-        payload.dataset_preset = selectedPreset.name
+        if (selectedPreset.isOfflineList) {
+          payload.dataset_preset = 'OFFLINELIST'
+        } else if (selectedPreset.isDatomic) {
+          payload.dataset_preset = 'DATOMATIC'
+        } else {
+          payload.dataset_preset = selectedPreset.name
+        }
       } else if (datasetMode === 'upload' && datFile) {
         setUploading(true)
         try {
@@ -194,6 +297,30 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
                 <option value="">— Choose a preset —</option>
                 {popularPresets.map(ds => (
                   <option key={ds.name} value={ds.name}>{ds.name} ({ds.platform})</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {datasetMode === 'preset' && selectedPreset?.isOfflineList && !isEdit && (
+            <div className="form-group">
+              <label>Select Console</label>
+              <select value={selectedConsole} onChange={handleOfflineListConsoleChange}>
+                <option value="">— Choose a console —</option>
+                {OFFLINELIST_CONSOLES.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {datasetMode === 'preset' && selectedPreset?.isDatomic && !isEdit && (
+            <div className="form-group">
+              <label>Select System</label>
+              <select value={selectedConsole} onChange={handleDatomicSystemChange}>
+                <option value="">— Choose a system —</option>
+                {DATOMATIC_SYSTEMS.map(s => (
+                  <option key={s.id} value={s.name}>{s.name}</option>
                 ))}
               </select>
             </div>

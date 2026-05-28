@@ -202,6 +202,272 @@ async function getFBNeoVersions() {
   }
 }
 
+const OFFLINELIST_BASE_URL = 'http://nointro.free.fr';
+let offlinelistDatsCache = null;
+let offlinelistDatsCacheTime = 0;
+
+async function getOfflineListVersions() {
+  if (offlinelistDatsCache && Date.now() - offlinelistDatsCacheTime < CACHE_TTL) return offlinelistDatsCache;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  try {
+    const resp = await fetch(`${OFFLINELIST_BASE_URL}`, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' },
+    });
+    clearTimeout(timeoutId);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const html = await resp.text();
+
+    // Parse DAT file links: href="datas/Official No-Intro <Platform>.zip"
+    const linkRegex = /href="datas\/(Official No-Intro [^"]*\.zip)"/gi;
+    const allVersions = [];
+    let match;
+    while ((match = linkRegex.exec(html)) !== null) {
+      const zipName = match[1];
+      // Extract platform name: "Official No-Intro Nintendo Gameboy.zip" → "Nintendo Gameboy"
+      const platform = zipName.replace('Official No-Intro ', '').replace('.zip', '');
+      allVersions.push({
+        version: platform,
+        source: 'OFFLINELIST',
+        zipName,
+        url: `${OFFLINELIST_BASE_URL}/datas/${encodeURIComponent(zipName)}`,
+      });
+    }
+
+    const imported = all("SELECT id, source, version FROM set_versions WHERE source = 'OFFLINELIST' ORDER BY version");
+    const importedSet = new Set(imported.map(v => v.version));
+    const missing = allVersions.filter(v => !importedSet.has(v.version));
+
+    const result = {
+      source: 'OFFLINELIST',
+      latest: allVersions.length > 0 ? allVersions[0].version : null,
+      hasNewer: missing.length > 0,
+      available: allVersions,
+      imported,
+      missing,
+    };
+
+    offlinelistDatsCache = result;
+    offlinelistDatsCacheTime = Date.now();
+    return result;
+  } catch (e) {
+    clearTimeout(timeoutId);
+    throw e;
+  }
+}
+
+// DAT-O-MATIC system list (from datomatic.no-intro.org)
+const DATOMATIC_SYSTEMS = [
+  { id: '45', name: 'Nintendo - Nintendo Entertainment System' },
+  { id: '49', name: 'Nintendo - Super Nintendo Entertainment System' },
+  { id: '46', name: 'Nintendo - Game Boy' },
+  { id: '47', name: 'Nintendo - Game Boy Color' },
+  { id: '23', name: 'Nintendo - Game Boy Advance' },
+  { id: '24', name: 'Nintendo - Nintendo 64' },
+  { id: '28', name: 'Nintendo - Nintendo DS' },
+  { id: '54', name: 'Nintendo - Nintendo DSi' },
+  { id: '64', name: 'Nintendo - Nintendo 3DS' },
+  { id: '31', name: 'Nintendo - Family Computer Disk System' },
+  { id: '15', name: 'Nintendo - Virtual Boy' },
+  { id: '83', name: 'Nintendo - Nintendo 64DD' },
+  { id: '14', name: 'Nintendo - Pokemon Mini' },
+  { id: '32', name: 'Sega - Mega Drive - Genesis' },
+  { id: '26', name: 'Sega - Master System - Mark III' },
+  { id: '25', name: 'Sega - Game Gear' },
+  { id: '17', name: 'Sega - 32X' },
+  { id: '19', name: 'Sega - SG-1000 - SC-3000' },
+  { id: '88', name: 'Atari - Atari 2600' },
+  { id: '1', name: 'Atari - Atari 5200' },
+  { id: '74', name: 'Atari - Atari 7800' },
+  { id: '2', name: 'Atari - Atari Jaguar' },
+  { id: '30', name: 'Atari - Atari Lynx' },
+  { id: '12', name: 'NEC - PC Engine - TurboGrafx-16' },
+  { id: '13', name: 'NEC - PC Engine SuperGrafx' },
+  { id: '35', name: 'SNK - NeoGeo Pocket' },
+  { id: '36', name: 'SNK - NeoGeo Pocket Color' },
+  { id: '50', name: 'Bandai - WonderSwan' },
+  { id: '51', name: 'Bandai - WonderSwan Color' },
+  { id: '7', name: 'GCE - Vectrex' },
+  { id: '3', name: 'Coleco - ColecoVision' },
+  { id: '42', name: 'Commodore - Commodore 64' },
+  { id: '10', name: 'Microsoft - MSX' },
+  { id: '11', name: 'Microsoft - MSX2' },
+  { id: '105', name: 'Mattel - Intellivision' },
+  { id: '6', name: 'Fairchild - Channel F' },
+  { id: '22', name: 'Watara - Supervision' },
+  { id: '20', name: 'Tiger - Game.com' },
+  { id: '9', name: 'Magnavox - Odyssey 2' },
+  { id: '33', name: 'Commodore - Plus-4' },
+  { id: '34', name: 'Commodore - VIC-20' },
+  { id: '40', name: 'Commodore - Amiga' },
+  { id: '43', name: 'Commodore - Commodore 64 (PP)' },
+];
+
+function getDatomicVersions() {
+  const imported = all("SELECT id, source, version FROM set_versions WHERE source = 'DATOMATIC' ORDER BY version");
+  const importedSet = new Set(imported.map(v => v.version));
+
+  const allVersions = DATOMATIC_SYSTEMS.map(s => ({
+    version: s.name,
+    source: 'DATOMATIC',
+    systemId: s.id,
+    url: `https://datomatic.no-intro.org/index.php?page=download&op=dat&s=${s.id}`,
+  }));
+
+  const missing = allVersions.filter(v => !importedSet.has(v.version));
+
+  return {
+    source: 'DATOMATIC',
+    latest: null,
+    hasNewer: missing.length > 0,
+    available: allVersions,
+    imported,
+    missing,
+  };
+}
+
+const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+/**
+ * Download a DAT from DAT-O-MATIC via 3-step form submission:
+ * 1. GET the page to get session cookie + find dat_dl_<hash> button
+ * 2. POST with system_selection + dat_dl button → redirect to download page
+ * 3. POST the Download... button on the result page → get ZIP file
+ */
+async function downloadDatomicDat(systemId) {
+  const cookieJar = {};
+
+  function parseCookies(headers) {
+    const setCookies = headers['set-cookie'] || [];
+    for (const c of (Array.isArray(setCookies) ? setCookies : [setCookies])) {
+      const [kv] = c.split(';');
+      const [k, ...v] = kv.split('=');
+      cookieJar[k.trim()] = v.join('=').trim();
+    }
+  }
+
+  function cookieHeader() {
+    return Object.entries(cookieJar).map(([k, v]) => `${k}=${v}`).join('; ');
+  }
+
+  // Step 1: GET the download page to get session + Prepare button
+  const pageUrl = `https://datomatic.no-intro.org/index.php?page=download&op=dat&s=${systemId}`;
+  let resp1;
+  try {
+    resp1 = await fetch(pageUrl, {
+      headers: { 'User-Agent': UA, 'Cookie': cookieHeader() },
+      redirect: 'manual',
+    });
+  } catch (e) {
+    throw new Error(`[DAT-O-MATIC step1] Failed to fetch page for system ${systemId}: ${e.message}`);
+  }
+  if (!resp1.ok && resp1.status !== 302) {
+    throw new Error(`[DAT-O-MATIC step1] Page returned HTTP ${resp1.status} for system ${systemId} (${pageUrl})`);
+  }
+  parseCookies(Object.fromEntries(resp1.headers.entries()));
+  const html1 = await resp1.text();
+
+  // Find the dat_dl_<hash> button
+  const buttonMatch = html1.match(/name="(dat_dl_[a-f0-9-]+)"\s+value="Prepare"/);
+  if (!buttonMatch) {
+    const hasDatDl = html1.includes('dat_dl_');
+    const hasPrepare = html1.includes('Prepare');
+    throw new Error(`[DAT-O-MATIC step1] Prepare button not found for system ${systemId}. Page has dat_dl=${hasDatDl}, Prepare=${hasPrepare}. Page length=${html1.length}`);
+  }
+  const buttonName = buttonMatch[1];
+
+  // Step 2: POST with system_selection + Prepare to trigger DAT generation
+  let resp2;
+  try {
+    resp2 = await fetch(pageUrl, {
+      method: 'POST',
+      headers: {
+        'User-Agent': UA,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Cookie': cookieHeader(),
+      },
+      body: `system_selection=${systemId}&${buttonName}=Prepare`,
+      redirect: 'manual',
+    });
+  } catch (e) {
+    throw new Error(`[DAT-O-MATIC step2] POST Prepare failed for system ${systemId}: ${e.message}`);
+  }
+  parseCookies(Object.fromEntries(resp2.headers.entries()));
+
+  const location = resp2.headers.get('location');
+  if (!location) {
+    throw new Error(`[DAT-O-MATIC step2] No redirect after Prepare for system ${systemId}. HTTP ${resp2.status}`);
+  }
+
+  // Step 3: GET the manager/download page
+  const managerUrl = location.startsWith('http') ? location : `https://datomatic.no-intro.org/${location}`;
+  let resp3;
+  try {
+    resp3 = await fetch(managerUrl, {
+      headers: { 'User-Agent': UA, 'Cookie': cookieHeader() },
+      redirect: 'manual',
+    });
+  } catch (e) {
+    throw new Error(`[DAT-O-MATIC step3] Failed to fetch manager page (${managerUrl}): ${e.message}`);
+  }
+  parseCookies(Object.fromEntries(resp3.headers.entries()));
+  const html3 = await resp3.text();
+
+  // Find the Download... button hash
+  const dlMatch = html3.match(/name="([a-f0-9]+)"\s+value="Download\.\.\."/) ||
+                  html3.match(/name="([a-f0-9]+)"\s+value="Download"/);
+  if (!dlMatch) {
+    throw new Error(`[DAT-O-MATIC step3] Download button not found on manager page for system ${systemId}. URL=${managerUrl}, page length=${html3.length}`);
+  }
+  const dlHash = dlMatch[1];
+
+  // Step 4: POST the Download button to get the ZIP file
+  let resp4;
+  try {
+    resp4 = await fetch(managerUrl, {
+      method: 'POST',
+      headers: {
+        'User-Agent': UA,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Cookie': cookieHeader(),
+      },
+      body: `${dlHash}=Download...`,
+      redirect: 'manual',
+    });
+  } catch (e) {
+    throw new Error(`[DAT-O-MATIC step4] POST Download failed for system ${systemId}: ${e.message}`);
+  }
+  parseCookies(Object.fromEntries(resp4.headers.entries()));
+
+  const contentType = resp4.headers.get('content-type') || '';
+  if (!contentType.includes('zip') && !contentType.includes('octet-stream')) {
+    // Follow one more redirect if needed
+    const loc2 = resp4.headers.get('location');
+    if (loc2) {
+      const step5Url = loc2.startsWith('http') ? loc2 : `https://datomatic.no-intro.org/${loc2}`;
+      let resp5;
+      try {
+        resp5 = await fetch(step5Url, {
+          headers: { 'User-Agent': UA, 'Cookie': cookieHeader() },
+          redirect: 'follow',
+        });
+      } catch (e) {
+        throw new Error(`[DAT-O-MATIC step4] Redirect follow failed (${step5Url}): ${e.message}`);
+      }
+      const ct5 = resp5.headers.get('content-type') || '';
+      if (!ct5.includes('zip') && !ct5.includes('octet-stream')) {
+        throw new Error(`[DAT-O-MATIC step4] Expected ZIP but got ${ct5} for system ${systemId} after redirect to ${step5Url}`);
+      }
+      return Buffer.from(await resp5.arrayBuffer());
+    }
+    throw new Error(`[DAT-O-MATIC step4] Expected ZIP but got ${contentType} for system ${systemId}. HTTP ${resp4.status}`);
+  }
+
+  return Buffer.from(await resp4.arrayBuffer());
+}
+
 router.get('/api/versions', async (req, res) => {
   await dbReady;
   try {
@@ -231,6 +497,14 @@ router.get('/api/versions/available', async (req, res) => {
     if (source === 'FBNEO') {
       const fbneo = await getFBNeoVersions();
       return res.json(fbneo);
+    }
+    if (source === 'OFFLINELIST') {
+      const offlinelist = await getOfflineListVersions();
+      return res.json(offlinelist);
+    }
+    if (source === 'DATOMATIC') {
+      const datomatic = getDatomicVersions();
+      return res.json(datomatic);
     }
     if (source === 'FBALPHA43' || source === 'FBALPHA44') {
       const is43 = source === 'FBALPHA43';
@@ -319,6 +593,155 @@ router.post('/api/versions/import-online', async (req, res) => {
     if (!collection_id || !version) return res.status(400).json({ error: 'collection_id and version required' });
 
     const source = reqSource || 'MAME';
+
+    if (source === 'DATOMATIC') {
+      // DAT-O-MATIC: download via form submission, extract ZIP, import
+      const system = DATOMATIC_SYSTEMS.find(s => s.name === version);
+      if (!system) throw new Error(`Unknown DAT-O-MATIC system: ${version}`);
+
+      const tempZip = path.join('/tmp', `datomatic_${Date.now()}.zip`);
+      const extractDir = path.join('/tmp', `datomatic_extract_${Date.now()}`);
+      fs.mkdirSync(extractDir, { recursive: true });
+
+      try {
+        const zipBuffer = await downloadDatomicDat(system.id);
+        fs.writeFileSync(tempZip, zipBuffer);
+
+        // Extract ZIP
+        execSync(`unzip -o "${tempZip}" -d "${extractDir}"`, { encoding: 'utf-8' });
+
+        // Find the DAT file
+        const datFiles = fs.readdirSync(extractDir).filter(f => f.endsWith('.dat') || f.endsWith('.xml'));
+        if (datFiles.length === 0) throw new Error('No DAT file found in ZIP');
+
+        const datPath = path.join(extractDir, datFiles[0]);
+        const result = execCli(['import', datPath, 'DATOMATIC', version], { binary: 'parse' });
+        if (!result) throw new Error('CLI returned null');
+
+        const versionId = result.version_id;
+        const totalGames = result.games_inserted || 0;
+        if (!versionId) throw new Error(`Failed to create version for DATOMATIC "${version}"`);
+
+        run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, versionId]);
+
+        res.json({ ok: true, version_id: versionId, total_games: totalGames });
+        return;
+      } finally {
+        try { fs.unlinkSync(tempZip); } catch (_) {}
+        try { fs.rmSync(extractDir, { recursive: true }); } catch (_) {}
+      }
+    }
+
+    if (source === 'OFFLINELIST') {
+      // OfflineList: download ZIP from nointro.free.fr, extract XML, import
+      const zipUrl = `${OFFLINELIST_BASE_URL}/datas/${encodeURIComponent('Official No-Intro ' + version + '.zip')}`;
+      const tempZip = path.join('/tmp', `nointro_${Date.now()}.zip`);
+      const extractDir = path.join('/tmp', `nointro_extract_${Date.now()}`);
+      fs.mkdirSync(extractDir, { recursive: true });
+
+      try {
+        // Download ZIP
+        const dlController = new AbortController();
+        const dlTimeout = setTimeout(() => dlController.abort(), 60_000);
+        let dlRes;
+        try {
+          dlRes = await fetch(zipUrl, {
+            signal: dlController.signal,
+            headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' },
+          });
+        } catch (e) {
+          throw new Error(`[OfflineList] Failed to download ${zipUrl}: ${e.message}`);
+        }
+        clearTimeout(dlTimeout);
+        if (!dlRes.ok) throw new Error(`[OfflineList] Download returned HTTP ${dlRes.status} for "${version}" (${zipUrl})`);
+        fs.writeFileSync(tempZip, Buffer.from(await dlRes.arrayBuffer()));
+
+        // Extract ZIP
+        try {
+          execSync(`unzip -o "${tempZip}" -d "${extractDir}"`, { encoding: 'utf-8' });
+        } catch (e) {
+          throw new Error(`[OfflineList] Failed to extract ZIP for "${version}": ${e.message}`);
+        }
+
+        // Find the XML file
+        const xmlFiles = fs.readdirSync(extractDir).filter(f => f.endsWith('.xml'));
+        if (xmlFiles.length === 0) throw new Error(`[OfflineList] No XML file found in ZIP for "${version}" (files: ${fs.readdirSync(extractDir).join(', ')})`);
+
+        const xmlPath = path.join(extractDir, xmlFiles[0]);
+        let result;
+        try {
+          result = execCli(['import', xmlPath, 'OFFLINELIST', version], { binary: 'parse' });
+        } catch (e) {
+          throw new Error(`[OfflineList] parse-cli import failed for "${version}": ${e.message}`);
+        }
+        if (!result) throw new Error(`[OfflineList] parse-cli returned null for "${version}"`);
+
+        const versionId = result.version_id;
+        const totalGames = result.games_inserted || 0;
+        if (!versionId) throw new Error(`[OfflineList] Failed to create version for "${version}"`);
+
+        run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, versionId]);
+
+        offlinelistDatsCache = null;
+        res.json({ ok: true, version_id: versionId, total_games: totalGames });
+        return;
+      } finally {
+        try { fs.unlinkSync(tempZip); } catch (_) {}
+        try { fs.rmSync(extractDir, { recursive: true }); } catch (_) {}
+      }
+    }
+
+    if (source === 'DATOMATIC') {
+      // DAT-O-MATIC: three-step download flow
+      const system = DATOMATIC_SYSTEMS.find(s => s.name === version);
+      if (!system) throw new Error(`Unknown DAT-O-MATIC system: ${version}`);
+
+      const tempZip = path.join('/tmp', `datomatic_${Date.now()}.zip`);
+      const extractDir = path.join('/tmp', `datomatic_extract_${Date.now()}`);
+      fs.mkdirSync(extractDir, { recursive: true });
+
+      try {
+        let zipBuffer;
+        try {
+          ({ zipBuffer } = await downloadDatomicDat(system.id));
+        } catch (e) {
+          throw new Error(`[DAT-O-MATIC] Download failed for "${version}" (system ${system.id}): ${e.message}`);
+        }
+        fs.writeFileSync(tempZip, zipBuffer);
+
+        // Extract ZIP
+        try {
+          execSync(`unzip -o "${tempZip}" -d "${extractDir}"`, { encoding: 'utf-8' });
+        } catch (e) {
+          throw new Error(`[DAT-O-MATIC] Failed to extract ZIP for "${version}": ${e.message}`);
+        }
+
+        // Find the DAT file (.dat or .xml)
+        const datFiles = fs.readdirSync(extractDir).filter(f => f.endsWith('.dat') || f.endsWith('.xml'));
+        if (datFiles.length === 0) throw new Error(`[DAT-O-MATIC] No DAT file found in ZIP for "${version}" (files: ${fs.readdirSync(extractDir).join(', ')})`);
+
+        const datPath = path.join(extractDir, datFiles[0]);
+        let result;
+        try {
+          result = execCli(['import', datPath, 'DATOMATIC', version], { binary: 'parse' });
+        } catch (e) {
+          throw new Error(`[DAT-O-MATIC] parse-cli import failed for "${version}": ${e.message}`);
+        }
+        if (!result) throw new Error(`[DAT-O-MATIC] parse-cli returned null for "${version}"`);
+
+        const versionId = result.version_id;
+        const totalGames = result.games_inserted || 0;
+        if (!versionId) throw new Error(`[DAT-O-MATIC] Failed to create version for "${version}"`);
+
+        run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, versionId]);
+
+        res.json({ ok: true, version_id: versionId, total_games: totalGames });
+        return;
+      } finally {
+        try { fs.unlinkSync(tempZip); } catch (_) {}
+        try { fs.rmSync(extractDir, { recursive: true }); } catch (_) {}
+      }
+    }
 
     if (source !== 'MAME') {
       let repo, ref, srcLabel;

@@ -49,6 +49,7 @@ pub enum DatFormat {
     MameListXml,
     Logiqx,
     ClrmamePro,
+    OfflineList,
 }
 
 #[derive(Debug, Clone)]

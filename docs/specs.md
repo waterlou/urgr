@@ -54,7 +54,7 @@ A retro game ROM collection manager. Import DAT files, scrape metadata from onli
 ```
 set_versions
   id          INTEGER PRIMARY KEY
-  source      TEXT NOT NULL           -- e.g. "mame", "no-intro"
+  source      TEXT NOT NULL           -- e.g. "mame", "fbneo", "offlinelist", "datomatic"
   version     TEXT NOT NULL           -- e.g. "0.261", "2024-01-01"
   dir         TEXT                    -- ROM directory path
   created_at  TEXT
@@ -129,7 +129,7 @@ Imports ROM DAT files into the database.
 parse-cli import <file> <source> <version> [--dir <dir>] [--json] --db <path>
 ```
 
-**Format detection:** MAME ListXML, Logiqx XML, ClrMAMEPro (auto-detected).
+**Format detection:** MAME ListXML, Logiqx XML, ClrMAMEPro, OfflineList XML (auto-detected).
 
 **Writes to:** `set_versions`, `game_entries`, `rom_entries`.
 
@@ -309,6 +309,36 @@ scraper-cli scrape /roms/mame/sf2.zip --source igdb --download
 parse-cli import mame0263.xml mame 0.263 --db data/roms.db
 build-cli diff 1 3 --db data/roms.db
 build-cli build mame /roms/import/ --update --base-dir /roms/ --db data/roms.db
+```
+
+### OfflineList (No-Intro) Collection Example
+
+OfflineList DATs from nointro.free.fr use a proprietary XML format with CRC32 checksums only (no MD5/SHA1).
+
+```bash
+# 1. Download DAT from http://nointro.free.fr
+# 2. Import the DAT
+parse-cli import "Official No-Intro Nintendo Gameboy.xml" offlinelist "Nintendo Gameboy" --db data/roms.db
+
+# 3. Build ROM set (same as MAME)
+build-cli build offlinelist-nintendo-gameboy /roms/import/ --base-dir /roms/ --db data/roms.db
+```
+
+### DAT-O-MATIC Collection Example
+
+DAT-O-MATIC (datomatic.no-intro.org) provides No-Intro DATs in Logiqx XML format. DATs are downloaded automatically via a three-step form flow.
+
+```bash
+# Import via server (auto-download):
+# POST /api/versions/import-online { collection_id: 1, version: "Nintendo - Game Boy", source: "DATOMATIC" }
+
+# Or import manually:
+# 1. Download DAT from https://datomatic.no-intro.org/index.php?page=download
+# 2. Import the DAT
+parse-cli import "Nintendo - Game Boy.dat" datomatic "Nintendo - Game Boy" --db data/roms.db
+
+# 3. Build ROM set
+build-cli build datomatic-nintendo-game-boy /roms/import/ --base-dir /roms/ --db data/roms.db
 ```
 
 ### UI Workflow

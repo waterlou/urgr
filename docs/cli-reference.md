@@ -42,9 +42,9 @@ parse-cli import <file> <source> <version> [--dir <dir>] [--json] --db <path>
 
 | Argument | Type | Description |
 |----------|------|-------------|
-| `<file>` | path | DAT file (.dat, .xml, .txt) — auto-detects MAME listxml, Logiqx XML, ClrMAMEPro |
-| `<source>` | string | Source label (e.g., `mame`, `fbneo`, `no-intro`, `redump`) |
-| `<version>` | string | Version identifier stored verbatim (e.g., `0.261`, `2024-01-01`) |
+| `<file>` | path | DAT file (.dat, .xml, .txt) — auto-detects MAME listxml, Logiqx XML, ClrMAMEPro, OfflineList XML |
+| `<source>` | string | Source label (e.g., `mame`, `fbneo`, `offlinelist`, `datomatic`) |
+| `<version>` | string | Version identifier stored verbatim (e.g., `0.261`, `2024-01-01`, `Nintendo Game Boy`) |
 
 ### Options
 
@@ -56,7 +56,7 @@ parse-cli import <file> <source> <version> [--dir <dir>] [--json] --db <path>
 
 ### Behavior
 
-1. Opens the DAT file, auto-detects format (MAME ListXML / Logiqx XML / ClrMAMEPro)
+1. Opens the DAT file, auto-detects format (MAME ListXML / Logiqx XML / ClrMAMEPro / OfflineList XML)
 2. Parses all `<game>`/`<machine>` entries into `GameEntry` records
 3. Parses all `<rom>` entries, linked to their parent game
 4. Creates a row in `set_versions` with the given source and version
@@ -88,7 +88,8 @@ parse-cli import <file> <source> <version> [--dir <dir>] [--json] --db <path>
 ```bash
 parse-cli import mame.xml mame 0.261 --db roms.db
 parse-cli import fbneo.dat fbneo 1.0.3 --dir /roms/fbneo --db roms.db
-parse-cli import nes.xml no-intro 2024-01-01 --json --db roms.db
+parse-cli import "Official No-Intro Nintendo Gameboy.xml" offlinelist "Nintendo Gameboy" --json --db roms.db
+parse-cli import "Nintendo - Game Boy.dat" datomatic "Nintendo - Game Boy" --json --db roms.db
 ```
 
 ---

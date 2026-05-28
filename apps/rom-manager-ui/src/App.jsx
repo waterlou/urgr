@@ -51,6 +51,8 @@ export default function App() {
   const POPULAR_DATASETS = [
     { name: 'MAME', slug: 'mame', platform: 'Arcade' },
     { name: 'Final Burn Neo', slug: 'fbneo', platform: 'Arcade' },
+    { name: 'OfflineList (No-Intro)', slug: 'offlinelist', platform: 'Console', isOfflineList: true },
+    { name: 'DAT-O-MATIC', slug: 'datomatic', platform: 'Console', isDatomic: true },
   ]
   const [datasets, setDatasets] = useState({ popular: POPULAR_DATASETS, imported: [] })
   const [knownPlatforms, setKnownPlatforms] = useState([])
