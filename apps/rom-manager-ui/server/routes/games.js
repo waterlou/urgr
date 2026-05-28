@@ -13,7 +13,7 @@ const router = Router();
 router.get('/', async (req, res) => {
   await dbReady;
   try {
-    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, collection_id, version_id, parents_only, favourites_only } = req.query;
+    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, collection_id, version_id, parents_only, favourites_only, roms_only } = req.query;
     const sortCol = sort === 'rating' ? 'COALESCE(r.rating, 0)' : sort === 'play_count' ? 'COALESCE(r.play_count, 0)' : 'g.name';
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
 
@@ -42,6 +42,31 @@ router.get('/', async (req, res) => {
       where.push('COALESCE(r.favourite, 0) = 1');
     }
 
+    // For roms_only filter, we need to check filesystem after querying
+    let romsOnlyGames = null;
+    if (roms_only === 'true' && collection_id) {
+      // Find latest completed build for this collection
+      const latestBuild = get(`
+        SELECT cb.version_id, sv.version, c.folder
+        FROM collection_builds cb
+        JOIN set_versions sv ON sv.id = cb.version_id
+        JOIN collections c ON c.id = cb.collection_id
+        WHERE cb.collection_id = ? AND cb.status = 'complete'
+        ORDER BY cb.completed_at DESC LIMIT 1
+      `, [collection_id]);
+
+      if (latestBuild) {
+        const romsDir = path.join(process.cwd(), 'data', 'roms', latestBuild.folder, latestBuild.version, 'roms');
+        if (fs.existsSync(romsDir)) {
+          romsOnlyGames = new Set();
+          const files = fs.readdirSync(romsDir).filter(f => f.endsWith('.zip'));
+          for (const f of files) {
+            romsOnlyGames.add(f.replace('.zip', ''));
+          }
+        }
+      }
+    }
+
     const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
     const countSql = `SELECT COUNT(DISTINCT g.name) as c FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id ${whereClause}`;
     const total = params.length ? get(countSql, params).c : get(countSql).c;
@@ -67,7 +92,13 @@ router.get('/', async (req, res) => {
       delete g.versions_tags;
       return { ...g, versions };
     });
-    res.json({ games, total, limit: Number(limit), offset: Number(offset) });
+
+    // Apply roms_only filter if requested
+    if (romsOnlyGames) {
+      games = games.filter(g => romsOnlyGames.has(g.name));
+    }
+
+    res.json({ games, total: romsOnlyGames ? games.length : total, limit: Number(limit), offset: Number(offset) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -124,7 +124,7 @@ router.get('/api/collections/:id/games', async (req, res) => {
   await dbReady;
   try {
     const { id } = req.params;
-    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, parents_only, favourites_only } = req.query;
+    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, parents_only, favourites_only, roms_only } = req.query;
     const collection = get('SELECT * FROM collections WHERE id = ?', [id]);
     if (!collection) return res.status(404).json({ error: 'not found' });
 
@@ -147,6 +147,31 @@ router.get('/api/collections/:id/games', async (req, res) => {
     }
     if (favourites_only === 'true') {
       whereExtra += ' AND COALESCE(r.favourite, 0) = 1';
+    }
+
+    // For roms_only filter, we need to check filesystem after querying
+    let romsOnlyGames = null;
+    if (roms_only === 'true') {
+      // Find latest completed build for this collection
+      const latestBuild = get(`
+        SELECT cb.version_id, sv.version, c.folder
+        FROM collection_builds cb
+        JOIN set_versions sv ON sv.id = cb.version_id
+        JOIN collections c ON c.id = cb.collection_id
+        WHERE cb.collection_id = ? AND cb.status = 'complete'
+        ORDER BY cb.completed_at DESC LIMIT 1
+      `, [id]);
+
+      if (latestBuild) {
+        const romsDir = path.join(process.cwd(), 'data', 'roms', latestBuild.folder, latestBuild.version, 'roms');
+        if (fs.existsSync(romsDir)) {
+          romsOnlyGames = new Set();
+          const files = fs.readdirSync(romsDir).filter(f => f.endsWith('.zip'));
+          for (const f of files) {
+            romsOnlyGames.add(f.replace('.zip', ''));
+          }
+        }
+      }
     }
 
     const total = get(`SELECT COUNT(DISTINCT g.name) as c FROM game_entries g WHERE g.version_id IN (${ph}) ${whereExtra}`, [...vids, ...extraParams]).c;
@@ -174,9 +199,14 @@ router.get('/api/collections/:id/games', async (req, res) => {
       return { ...g, versions };
     });
 
+    // Apply roms_only filter if requested
+    if (romsOnlyGames) {
+      games = games.filter(g => romsOnlyGames.has(g.name));
+    }
+
     const platforms = all(`SELECT DISTINCT sv.source as platform FROM set_versions sv WHERE sv.id IN (${ph})`, vids).map(p => p.platform);
 
-    res.json({ collection, games, platforms, total, limit: Number(limit), offset: Number(offset) });
+    res.json({ collection, games, platforms, total: romsOnlyGames ? games.length : total, limit: Number(limit), offset: Number(offset) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

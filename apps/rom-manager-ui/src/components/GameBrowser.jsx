@@ -11,6 +11,7 @@ export default function GameBrowser({
   showBackToDetail, onBackToDetail,
   parentsOnly, onParentsOnlyChange,
   favouritesOnly, onFavouritesOnlyChange,
+  romsOnly, onRomsOnlyChange,
   onToggleSidebar,
 }) {
   const [searchOpen, setSearchOpen] = useState(false)
@@ -195,6 +196,16 @@ export default function GameBrowser({
                 style={{marginRight:8}}
               >
                 <span className="icon icon-sm">star</span> {favouritesOnly ? 'Favs' : 'All'}
+              </button>
+            )}
+            {onRomsOnlyChange && (activeView === 'collection' || activeView === 'browse') && (
+              <button
+                className={`btn btn-sm ${romsOnly ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => onRomsOnlyChange(!romsOnly)}
+                title="Show only games with ROM files available"
+                style={{marginRight:8}}
+              >
+                <span className="icon icon-sm">inventory_2</span> {romsOnly ? 'ROMs' : 'All'}
               </button>
             )}
             <div className="view-mode-toggle">
