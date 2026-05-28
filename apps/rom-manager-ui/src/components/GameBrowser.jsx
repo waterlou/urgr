@@ -10,6 +10,7 @@ export default function GameBrowser({
   onSearchQueryChange, onSelectGame, onAddToGameSet, onRemoveFromGameSet, onUpdateGame, gameSets, activeId,
   showBackToDetail, onBackToDetail,
   parentsOnly, onParentsOnlyChange,
+  favouritesOnly, onFavouritesOnlyChange,
   onToggleSidebar,
 }) {
   const [searchOpen, setSearchOpen] = useState(false)
@@ -155,7 +156,6 @@ export default function GameBrowser({
   const SORT_OPTIONS = [
     { field: 'name', label: 'Name' },
     { field: 'rating', label: 'Rating' },
-    { field: 'favourite', label: 'Favourite' },
   ]
 
   return (
@@ -185,6 +185,16 @@ export default function GameBrowser({
                 style={{marginRight:8}}
               >
                 <span className="icon icon-sm">account_tree</span> {parentsOnly ? 'Parents' : 'All'}
+              </button>
+            )}
+            {onFavouritesOnlyChange && (activeView === 'collection' || activeView === 'browse') && (
+              <button
+                className={`btn btn-sm ${favouritesOnly ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => onFavouritesOnlyChange(!favouritesOnly)}
+                title="Show favourites only"
+                style={{marginRight:8}}
+              >
+                <span className="icon icon-sm">star</span> {favouritesOnly ? 'Favs' : 'All'}
               </button>
             )}
             <div className="view-mode-toggle">

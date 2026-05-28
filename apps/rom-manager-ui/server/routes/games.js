@@ -13,8 +13,8 @@ const router = Router();
 router.get('/', async (req, res) => {
   await dbReady;
   try {
-    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, collection_id, version_id, parents_only } = req.query;
-    const sortCol = sort === 'rating' ? 'COALESCE(r.rating, 0)' : sort === 'favourite' ? 'COALESCE(r.favourite, 0)' : sort === 'play_count' ? 'COALESCE(r.play_count, 0)' : 'g.name';
+    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, collection_id, version_id, parents_only, favourites_only } = req.query;
+    const sortCol = sort === 'rating' ? 'COALESCE(r.rating, 0)' : sort === 'play_count' ? 'COALESCE(r.play_count, 0)' : 'g.name';
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
 
     let where = [];
@@ -38,12 +38,15 @@ router.get('/', async (req, res) => {
     if (parents_only === 'true') {
       where.push('g.cloneof IS NULL');
     }
+    if (favourites_only === 'true') {
+      where.push('COALESCE(r.favourite, 0) = 1');
+    }
 
     const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
     const countSql = `SELECT COUNT(DISTINCT g.name) as c FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id ${whereClause}`;
     const total = params.length ? get(countSql, params).c : get(countSql).c;
 
-    const sortCol2 = sort === 'rating' ? 'MAX(COALESCE(r.rating, 0))' : sort === 'favourite' ? 'MAX(COALESCE(r.favourite, 0))' : sort === 'play_count' ? 'MAX(COALESCE(r.play_count, 0))' : 'g.name';
+    const sortCol2 = sort === 'rating' ? 'MAX(COALESCE(r.rating, 0))' : sort === 'play_count' ? 'MAX(COALESCE(r.play_count, 0))' : 'g.name';
     const pageParams = params.slice();
     pageParams.push(Number(limit), Number(offset));
     let games = all(`

@@ -42,11 +42,17 @@ export default function App() {
   const [versionFilter, setVersionFilter] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [parentsOnly, setParentsOnly] = useState(() => localStorage.getItem('rom-manager-parents-only') === 'true')
+  const [favouritesOnly, setFavouritesOnly] = useState(() => localStorage.getItem('rom-manager-favourites-only') === 'true')
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   function handleSetParentsOnly(v) {
     setParentsOnly(v);
     localStorage.setItem('rom-manager-parents-only', v);
+  }
+
+  function handleSetFavouritesOnly(v) {
+    setFavouritesOnly(v);
+    localStorage.setItem('rom-manager-favourites-only', v);
   }
   const POPULAR_DATASETS = [
     { name: 'MAME', slug: 'mame', platform: 'Arcade' },
@@ -92,19 +98,19 @@ export default function App() {
   const PAGE_SIZE = 500
   const loadingMoreRef = useRef(false)
 
-  const loadGames = useCallback(async (view, id, mode, sort, order, q, po) => {
+  const loadGames = useCallback(async (view, id, mode, sort, order, q, po, fo) => {
     setLoading(true)
     setOffset(0)
     try {
       if (view === 'browse') {
-        const data = await getGames({ limit: PAGE_SIZE, sort, order, q, parents_only: po ? 'true' : undefined })
+        const data = await getGames({ limit: PAGE_SIZE, sort, order, q, parents_only: po ? 'true' : undefined, favourites_only: fo ? 'true' : undefined })
         setGames(data.games)
         setTotalGames(data.total)
         setActiveMeta(null)
         setPlatforms([])
         setHasMore(data.games.length < data.total)
       } else if (view === 'collection') {
-        const data = await getCollectionGames(id, { limit: PAGE_SIZE, sort, order, q, parents_only: po ? 'true' : undefined })
+        const data = await getCollectionGames(id, { limit: PAGE_SIZE, sort, order, q, parents_only: po ? 'true' : undefined, favourites_only: fo ? 'true' : undefined })
         setGames(data.games)
         setActiveMeta(data.collection)
         setPlatforms(data.platforms || [])
@@ -133,9 +139,9 @@ export default function App() {
     try {
       let data
       if (activeView === 'browse') {
-        data = await getGames({ limit: PAGE_SIZE, offset: offset + PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery, parents_only: parentsOnly ? 'true' : undefined })
+        data = await getGames({ limit: PAGE_SIZE, offset: offset + PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery, parents_only: parentsOnly ? 'true' : undefined, favourites_only: favouritesOnly ? 'true' : undefined })
       } else if (activeView === 'collection') {
-        data = await getCollectionGames(activeId, { limit: PAGE_SIZE, offset: offset + PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery, parents_only: parentsOnly ? 'true' : undefined })
+        data = await getCollectionGames(activeId, { limit: PAGE_SIZE, offset: offset + PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery, parents_only: parentsOnly ? 'true' : undefined, favourites_only: favouritesOnly ? 'true' : undefined })
       } else if (activeView === 'game-set') {
         data = await getGameSetGames(activeId, { limit: PAGE_SIZE, offset: offset + PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery })
       }
@@ -155,8 +161,8 @@ export default function App() {
   useEffect(() => { loadSidebar() }, [loadSidebar])
 
   useEffect(() => {
-    loadGames(activeView, activeId, viewMode, sortField, sortOrder, searchQuery, parentsOnly)
-  }, [activeView, activeId, viewMode, sortField, sortOrder, searchQuery, parentsOnly, loadGames])
+    loadGames(activeView, activeId, viewMode, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly)
+  }, [activeView, activeId, viewMode, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, loadGames])
 
   function handleSelect(view, id) {
     pushViewHistory(view, id)
@@ -348,6 +354,8 @@ export default function App() {
                   onBackToDetail={handleBackToDetail}
                   parentsOnly={parentsOnly}
                   onParentsOnlyChange={handleSetParentsOnly}
+                  favouritesOnly={favouritesOnly}
+                  onFavouritesOnlyChange={handleSetFavouritesOnly}
                   onToggleSidebar={handleToggleSidebar}
                 />
               </div>

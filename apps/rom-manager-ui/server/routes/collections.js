@@ -124,7 +124,7 @@ router.get('/api/collections/:id/games', async (req, res) => {
   await dbReady;
   try {
     const { id } = req.params;
-    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, parents_only } = req.query;
+    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, parents_only, favourites_only } = req.query;
     const collection = get('SELECT * FROM collections WHERE id = ?', [id]);
     if (!collection) return res.status(404).json({ error: 'not found' });
 
@@ -133,7 +133,7 @@ router.get('/api/collections/:id/games', async (req, res) => {
 
     const vids = versions.map(v => v.version_id);
     const ph = vids.map(() => '?').join(',');
-    const sortCol = sort === 'rating' ? 'MAX(COALESCE(r.rating, 0))' : sort === 'favourite' ? 'MAX(COALESCE(r.favourite, 0))' : sort === 'play_count' ? 'MAX(COALESCE(r.play_count, 0))' : 'g.name';
+    const sortCol = sort === 'rating' ? 'MAX(COALESCE(r.rating, 0))' : sort === 'play_count' ? 'MAX(COALESCE(r.play_count, 0))' : 'g.name';
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
 
     let whereExtra = '';
@@ -144,6 +144,9 @@ router.get('/api/collections/:id/games', async (req, res) => {
     }
     if (parents_only === 'true') {
       whereExtra += ' AND g.cloneof IS NULL';
+    }
+    if (favourites_only === 'true') {
+      whereExtra += ' AND COALESCE(r.favourite, 0) = 1';
     }
 
     const total = get(`SELECT COUNT(DISTINCT g.name) as c FROM game_entries g WHERE g.version_id IN (${ph}) ${whereExtra}`, [...vids, ...extraParams]).c;
