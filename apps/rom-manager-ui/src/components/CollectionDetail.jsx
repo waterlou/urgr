@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import IconDisplay from './IconDisplay.jsx'
 import { getCollectionVersions, getCollectionGames } from '../api.js'
 import VersionManager from './VersionManager.jsx'
-import ScanVerify from './ScanVerify.jsx'
 import IaDownload from './IaDownload.jsx'
 import BuildManager from './BuildManager.jsx'
 import ExportPanel from './ExportPanel.jsx'
@@ -86,11 +85,6 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
           collection={collection}
           onVersionsChange={setVersions}
           onRefresh={onRefresh}
-        />
-
-        <ScanVerify
-          collectionId={collectionId}
-          versions={versions}
         />
 
         <IaDownload collectionId={collectionId} />
