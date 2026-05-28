@@ -171,10 +171,18 @@ router.get('/api/collections/:id/games', async (req, res) => {
             romsOnlyGames.add(f.replace('.zip', ''));
           }
         }
+      } else {
+        // No builds found, return empty result
+        return res.json({ collection, games: [], platforms: [], total: 0, limit: Number(limit), offset: Number(offset) });
       }
     }
 
-    const total = get(`SELECT COUNT(DISTINCT g.name) as c FROM game_entries g WHERE g.version_id IN (${ph}) ${whereExtra}`, [...vids, ...extraParams]).c;
+    // Use JOIN with game_ratings when filtering by favourites
+    const joinClause = favourites_only === 'true'
+      ? 'JOIN game_ratings r ON r.game_entry_id = g.id'
+      : 'LEFT JOIN game_ratings r ON r.game_entry_id = g.id';
+
+    const total = get(`SELECT COUNT(DISTINCT g.name) as c FROM game_entries g ${joinClause} WHERE g.version_id IN (${ph}) ${whereExtra}`, [...vids, ...extraParams]).c;
 
     let games = all(`
       SELECT g.name, g.description, g.year, g.manufacturer, g.cloneof, g.platform,
@@ -185,7 +193,7 @@ router.get('/api/collections/:id/games', async (req, res) => {
         MAX(COALESCE(r.play_count, 0)) as play_count
       FROM game_entries g
       JOIN set_versions sv ON sv.id = g.version_id
-      LEFT JOIN game_ratings r ON r.game_entry_id = g.id
+      ${joinClause}
       WHERE g.version_id IN (${ph}) ${whereExtra}
       GROUP BY g.name
       ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?
