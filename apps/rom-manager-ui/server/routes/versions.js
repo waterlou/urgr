@@ -236,7 +236,7 @@ async function getOfflineListVersions() {
       });
     }
 
-    const imported = all("SELECT id, source, version FROM set_versions WHERE source = 'OFFLINELIST' ORDER BY version");
+    const imported = all("SELECT id, source, version, created_at FROM set_versions WHERE source = 'OFFLINELIST' ORDER BY version");
     const importedSet = new Set(imported.map(v => v.version));
     const missing = allVersions.filter(v => !importedSet.has(v.version));
 
@@ -306,7 +306,7 @@ const DATOMATIC_SYSTEMS = [
 ];
 
 function getDatomicVersions() {
-  const imported = all("SELECT id, source, version FROM set_versions WHERE source = 'DATOMATIC' ORDER BY version");
+  const imported = all("SELECT id, source, version, created_at FROM set_versions WHERE source = 'DATOMATIC' ORDER BY version");
   const importedSet = new Set(imported.map(v => v.version));
 
   const allVersions = DATOMATIC_SYSTEMS.map(s => ({

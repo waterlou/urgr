@@ -3,6 +3,18 @@ import { getAvailableVersions, getCollectionVersions, addCollectionVersion, impo
 
 const MAME_MILESTONES = new Set(['0.37b5', '0.78', '0.106', '0.139', '0.160'])
 
+function getAge(dateStr) {
+  const d = new Date(dateStr.replace(' ', 'T'))
+  const now = new Date()
+  const days = Math.floor((now - d) / (1000 * 60 * 60 * 24))
+  if (days === 0) return 'today'
+  if (days === 1) return 'yesterday'
+  if (days < 7) return `${days}d ago`
+  if (days < 30) return `${Math.floor(days / 7)}w ago`
+  if (days < 365) return `${Math.floor(days / 30)}mo ago`
+  return `${Math.floor(days / 365)}y ago`
+}
+
 function getDatSource(folder) {
   if (folder === 'fbneo') return 'FBNeo'
   if (folder === 'fba' || folder === 'fbalpha') return 'FBAlpha44'
@@ -189,12 +201,23 @@ export default function VersionManager({ collectionId, collection, onVersionsCha
             <div className="info-box" style={{marginTop:12}}>
               <strong>Imported DATs:</strong>
               <div className="tag-list" style={{marginTop:8}}>
-                {availableDats.imported.map(iv => (
-                  <span key={iv.id} className="tag" style={{display:'inline-flex',alignItems:'center',gap:4}}>
-                    <span className="icon icon-sm" style={{fontSize:14}}>check</span>
-                    {iv.version}
-                  </span>
-                ))}
+                {availableDats.imported.map(iv => {
+                  const age = iv.created_at ? getAge(iv.created_at) : null
+                  return (
+                    <button
+                      key={iv.id}
+                      className="tag"
+                      style={{display:'inline-flex',alignItems:'center',gap:4,cursor:'pointer'}}
+                      onClick={() => handleImportOnline(iv.version, 'OFFLINELIST')}
+                      disabled={importingVer !== null}
+                      title="Click to re-import latest DAT"
+                    >
+                      <span className="icon icon-sm" style={{fontSize:14}}>{importingVer === iv.version ? 'hourglass' : 'check'}</span>
+                      {iv.version}
+                      {age && <span className="tag-date">{age}</span>}
+                    </button>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -239,12 +262,23 @@ export default function VersionManager({ collectionId, collection, onVersionsCha
             <div className="info-box" style={{marginTop:12}}>
               <strong>Imported systems:</strong>
               <div className="tag-list" style={{marginTop:8}}>
-                {availableDats.imported.map(iv => (
-                  <span key={iv.id} className="tag" style={{display:'inline-flex',alignItems:'center',gap:4}}>
-                    <span className="icon icon-sm" style={{fontSize:14}}>check</span>
-                    {iv.version}
-                  </span>
-                ))}
+                {availableDats.imported.map(iv => {
+                  const age = iv.created_at ? getAge(iv.created_at) : null
+                  return (
+                    <button
+                      key={iv.id}
+                      className="tag"
+                      style={{display:'inline-flex',alignItems:'center',gap:4,cursor:'pointer'}}
+                      onClick={() => handleImportOnline(iv.version, 'DATOMATIC')}
+                      disabled={importingVer !== null}
+                      title="Click to re-import latest DAT"
+                    >
+                      <span className="icon icon-sm" style={{fontSize:14}}>{importingVer === iv.version ? 'hourglass' : 'check'}</span>
+                      {iv.version}
+                      {age && <span className="tag-date">{age}</span>}
+                    </button>
+                  )
+                })}
               </div>
             </div>
           )}
