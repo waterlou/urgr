@@ -112,6 +112,34 @@ async function scrapeSingleGame(gameId) {
     return null;
   }
 
+  function normalizeTitle(s) {
+    return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function rankResults(results, query, gameName, platform) {
+    const q = normalizeTitle(query);
+    const gameNorm = normalizeTitle(gameName);
+    return results.map(r => {
+      const t = normalizeTitle(r.title);
+      let score = 0;
+      if (t === q || t === gameNorm) score += 100;
+      else if (t.startsWith(q) || t.startsWith(gameNorm)) score += 80;
+      else if (t.includes(q) || t.includes(gameNorm)) score += 60;
+      else {
+        const qWords = q.split(/\w+/).filter(w => w.length > 2);
+        const matchedWords = qWords.filter(w => t.includes(w));
+        score += matchedWords.length * 10;
+      }
+      if (platform) {
+        const rp = (r.platform || '').toLowerCase();
+        const platNorm = normalizeTitle(platform);
+        if (rp === platNorm) score += 30;
+        else if (rp.includes(platNorm) || platNorm.includes(rp)) score += 15;
+      }
+      return { ...r, _score: score };
+    }).sort((a, b) => b._score - a._score);
+  }
+
   const candidates = [];
 
   if (game.platform === 'arcade' && game.name) {
@@ -153,16 +181,10 @@ async function scrapeSingleGame(gameId) {
   for (const q of candidates) {
     const r = trySearch(q, game.platform);
     if (!r) continue;
-    if (game.platform === 'arcade' || !game.platform) {
-      const arcadeMatch = r.results.find(x => x.platform?.toLowerCase().includes('arcade'));
-      if (arcadeMatch) {
-        searchResult = { results: [arcadeMatch] };
-        matchedTitle = arcadeMatch.title;
-        break;
-      }
-    }
-    searchResult = r;
-    matchedTitle = r.results[0].title;
+    const ranked = rankResults(r.results, q, game.name, game.platform);
+    const best = ranked[0];
+    searchResult = { results: [best] };
+    matchedTitle = best.title;
     break;
   }
 
