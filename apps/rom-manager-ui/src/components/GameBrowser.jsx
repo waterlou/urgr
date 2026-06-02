@@ -215,24 +215,27 @@ export default function GameBrowser({
               <button className={`view-btn ${isLarge ? 'active' : ''}`} onClick={() => handleViewChange('large')} title="Large Icons"><span className="icon">view_module</span></button>
             </div>
 
-            {isList && onListImageModeChange && (
-              <div className="view-mode-toggle" style={{marginLeft: 8}}>
-                <button
-                  className={`view-btn ${listImageMode === 'cover' ? 'active' : ''}`}
-                  onClick={() => onListImageModeChange('cover')}
-                  title="Show cover in list"
-                ><span className="icon">image</span></button>
-                <button
-                  className={`view-btn ${listImageMode === 'screenshot' ? 'active' : ''}`}
-                  onClick={() => onListImageModeChange('screenshot')}
-                  title="Show screenshot in list"
-                ><span className="icon">photo_library</span></button>
-                <button
-                  className={`view-btn ${listImageMode === 'none' ? 'active' : ''}`}
-                  onClick={() => onListImageModeChange('none')}
-                  title="Hide images in list"
-                ><span className="icon">visibility_off</span></button>
-              </div>
+            {onListImageModeChange && (
+              <>
+                <span className="sort-label" style={{marginLeft:8}}>Images:</span>
+                <div className="view-mode-toggle">
+                  <button
+                    className={`view-btn ${listImageMode === 'cover' ? 'active' : ''}`}
+                    onClick={() => onListImageModeChange('cover')}
+                    title="Show cover in list"
+                  ><span className="icon">image</span></button>
+                  <button
+                    className={`view-btn ${listImageMode === 'screenshot' ? 'active' : ''}`}
+                    onClick={() => onListImageModeChange('screenshot')}
+                    title="Show screenshot in list"
+                  ><span className="icon">photo_library</span></button>
+                  <button
+                    className={`view-btn ${listImageMode === 'none' ? 'active' : ''}`}
+                    onClick={() => onListImageModeChange('none')}
+                    title="Hide images in list"
+                  ><span className="icon">visibility_off</span></button>
+                </div>
+              </>
             )}
 
             <div className="sort-controls">
@@ -350,6 +353,7 @@ export default function GameBrowser({
                 gameSets={gameSets}
                 gameSetId={gameSetId}
                 viewMode={viewMode}
+                listImageMode={listImageMode}
               />
             ))}
           </div>

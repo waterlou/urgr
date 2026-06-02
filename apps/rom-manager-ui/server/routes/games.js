@@ -56,7 +56,9 @@ router.get('/', async (req, res) => {
         GROUP_CONCAT(sv.source || '||' || sv.version, '||') as versions_tags,
         MAX(COALESCE(r.rating, 0)) as rating,
         MAX(COALESCE(r.favourite, 0)) as favourite,
-        MAX(COALESCE(r.play_count, 0)) as play_count
+        MAX(COALESCE(r.play_count, 0)) as play_count,
+        MAX(CASE WHEN g.covers != '[]' THEN g.covers ELSE NULL END) as covers_json,
+        MAX(CASE WHEN g.screenshots != '[]' THEN g.screenshots ELSE NULL END) as screenshots_json
       FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id
       ${joinClause}
       ${whereClause} GROUP BY g.name ORDER BY ${sortCol2} ${sortDir} LIMIT ? OFFSET ?
@@ -66,7 +68,13 @@ router.get('/', async (req, res) => {
       const versions = [];
       for (let i = 0; i < tags.length; i += 2) versions.push(tags[i + 1]);
       delete g.versions_tags;
-      return { ...g, versions };
+      let covers = [];
+      let screenshots = [];
+      try { covers = JSON.parse(g.covers_json) || []; } catch {}
+      try { screenshots = JSON.parse(g.screenshots_json) || []; } catch {}
+      delete g.covers_json;
+      delete g.screenshots_json;
+      return { ...g, versions, covers, screenshots };
     });
 
     res.json({ games, total, limit: Number(limit), offset: Number(offset) });

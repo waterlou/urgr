@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { coverUrl } from '../api.js'
 import IconDisplay from './IconDisplay.jsx'
 
-export default function GameGridCard({ game, onSelect, onRating, onFavourite, onAddToGameSet, onRemoveFromGameSet, gameSets, gameSetId }) {
+export default function GameGridCard({ game, onSelect, onRating, onFavourite, onAddToGameSet, onRemoveFromGameSet, gameSets, gameSetId, listImageMode }) {
   const [showMenu, setShowMenu] = useState(false)
   const menuRef = useRef(null)
 
@@ -24,10 +24,13 @@ export default function GameGridCard({ game, onSelect, onRating, onFavourite, on
 
   const isGameSetView = gameSetId != null
 
+  const useScreenshot = listImageMode === 'screenshot' && game.screenshots?.length > 0
+  const imgUrl = listImageMode === 'none' ? null : useScreenshot ? (() => { let u = game.screenshots[0]; if (u.startsWith('//')) u = 'https:' + u; return u; })() : coverUrl(game.id)
+
   return (
     <div className="grid-card" onClick={() => onSelect(game)}>
-      <div className="grid-card-image">
-        <img src={coverUrl(game.id)} alt={game.name} loading="lazy" />
+      <div className={`grid-card-image${listImageMode === 'screenshot' ? ' grid-card-image-screenshot' : ''}`}>
+        {imgUrl ? <img src={imgUrl} alt={game.name} loading="lazy" /> : <div className="grid-card-no-image"><span className="icon">image_not_supported</span></div>}
         <div className="grid-card-overlay">
           <div className="grid-card-actions" onClick={e => e.stopPropagation()}>
             <button
