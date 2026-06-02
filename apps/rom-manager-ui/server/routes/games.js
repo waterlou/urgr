@@ -8,6 +8,7 @@ import { execCli } from '../cli.js';
 import { createJob, updateProgress, doneJob, failJob } from '../jobs.js';
 import { all, get, run, runNow, dbReady } from '../helpers.js';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = Router();
 
 router.get('/', async (req, res) => {
@@ -42,30 +43,27 @@ router.get('/', async (req, res) => {
       where.push('COALESCE(r.favourite, 0) = 1');
     }
 
-    // For roms_only filter, we need to check filesystem after querying
+    // For roms_only filter, scan the collection's ROM directory recursively
     let romsOnlyGames = null;
     if (roms_only === 'true' && collection_id) {
-      // Find latest completed build for this collection
-      const latestBuild = get(`
-        SELECT cb.version_id, sv.version, c.folder
-        FROM collection_builds cb
-        JOIN set_versions sv ON sv.id = cb.version_id
-        JOIN collections c ON c.id = cb.collection_id
-        WHERE cb.collection_id = ? AND cb.status = 'complete'
-        ORDER BY cb.completed_at DESC LIMIT 1
-      `, [collection_id]);
-
-      if (latestBuild) {
-        const romsDir = path.join(process.cwd(), 'data', 'roms', latestBuild.folder, latestBuild.version, 'roms');
-        if (fs.existsSync(romsDir)) {
+      const collection = get('SELECT folder FROM collections WHERE id = ?', [collection_id]);
+      if (collection) {
+        const collectionRomsDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', collection.folder);
+        if (fs.existsSync(collectionRomsDir)) {
           romsOnlyGames = new Set();
-          const files = fs.readdirSync(romsDir).filter(f => f.endsWith('.zip'));
-          for (const f of files) {
-            romsOnlyGames.add(f.replace('.zip', ''));
+          function scanDir(dir) {
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              if (entry.isDirectory()) {
+                scanDir(path.join(dir, entry.name));
+              } else if (entry.name.endsWith('.zip')) {
+                romsOnlyGames.add(entry.name.replace('.zip', ''));
+              }
+            }
           }
+          scanDir(collectionRomsDir);
         }
-      } else {
-        // No builds found, return empty result
+      }
+      if (!romsOnlyGames || romsOnlyGames.size === 0) {
         return res.json({ games: [], total: 0, limit: Number(limit), offset: Number(offset) });
       }
     }
