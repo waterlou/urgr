@@ -12,6 +12,7 @@ export default function GameBrowser({
   parentsOnly, onParentsOnlyChange,
   favouritesOnly, onFavouritesOnlyChange,
   romsOnly, onRomsOnlyChange,
+  listImageMode, onListImageModeChange,
   onToggleSidebar,
 }) {
   const [searchOpen, setSearchOpen] = useState(false)
@@ -214,6 +215,26 @@ export default function GameBrowser({
               <button className={`view-btn ${isLarge ? 'active' : ''}`} onClick={() => handleViewChange('large')} title="Large Icons"><span className="icon">view_module</span></button>
             </div>
 
+            {isList && onListImageModeChange && (
+              <div className="view-mode-toggle" style={{marginLeft: 8}}>
+                <button
+                  className={`view-btn ${listImageMode === 'cover' ? 'active' : ''}`}
+                  onClick={() => onListImageModeChange('cover')}
+                  title="Show cover in list"
+                ><span className="icon">image</span></button>
+                <button
+                  className={`view-btn ${listImageMode === 'screenshot' ? 'active' : ''}`}
+                  onClick={() => onListImageModeChange('screenshot')}
+                  title="Show screenshot in list"
+                ><span className="icon">photo_library</span></button>
+                <button
+                  className={`view-btn ${listImageMode === 'none' ? 'active' : ''}`}
+                  onClick={() => onListImageModeChange('none')}
+                  title="Hide images in list"
+                ><span className="icon">visibility_off</span></button>
+              </div>
+            )}
+
             <div className="sort-controls">
               <span className="sort-label">Sort:</span>
               {SORT_OPTIONS.map(opt => (
@@ -311,6 +332,7 @@ export default function GameBrowser({
                 onRemoveFromGameSet={gameSetId ? onRemoveFromGameSet : undefined}
                 gameSets={gameSets}
                 gameSetId={gameSetId}
+                listImageMode={listImageMode}
               />
             ))}
           </div>

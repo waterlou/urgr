@@ -44,6 +44,7 @@ export default function App() {
   const [parentsOnly, setParentsOnly] = useState(() => localStorage.getItem('rom-manager-parents-only') === 'true')
   const [favouritesOnly, setFavouritesOnly] = useState(() => localStorage.getItem('rom-manager-favourites-only') === 'true')
   const [romsOnly, setRomsOnly] = useState(() => localStorage.getItem('rom-manager-roms-only') === 'true')
+  const [listImageMode, setListImageMode] = useState(() => localStorage.getItem('rom-manager-list-image') || 'cover')
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   function handleSetParentsOnly(v) {
@@ -59,6 +60,11 @@ export default function App() {
   function handleSetRomsOnly(v) {
     setRomsOnly(v);
     localStorage.setItem('rom-manager-roms-only', v);
+  }
+
+  function handleSetListImageMode(v) {
+    setListImageMode(v);
+    localStorage.setItem('rom-manager-list-image', v);
   }
   const POPULAR_DATASETS = [
     { name: 'MAME', slug: 'mame', platform: 'Arcade' },
@@ -364,6 +370,8 @@ export default function App() {
                   onFavouritesOnlyChange={handleSetFavouritesOnly}
                   romsOnly={romsOnly}
                   onRomsOnlyChange={handleSetRomsOnly}
+                  listImageMode={listImageMode}
+                  onListImageModeChange={handleSetListImageMode}
                   onToggleSidebar={handleToggleSidebar}
                 />
               </div>

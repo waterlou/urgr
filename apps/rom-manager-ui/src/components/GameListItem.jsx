@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { coverUrl } from '../api.js'
 import IconDisplay from './IconDisplay.jsx'
 
-export default function GameListItem({ game, onSelect, onRating, onFavourite, onAddToGameSet, onRemoveFromGameSet, gameSets, gameSetId }) {
+export default function GameListItem({ game, onSelect, onRating, onFavourite, onAddToGameSet, onRemoveFromGameSet, gameSets, gameSetId, listImageMode }) {
   const [showSetMenu, setShowSetMenu] = useState(false)
   const menuRef = useRef(null)
 
@@ -24,10 +24,21 @@ export default function GameListItem({ game, onSelect, onRating, onFavourite, on
 
   const isGameSetView = gameSetId != null
 
+  function getGameImage() {
+    if (listImageMode === 'none') return null
+    if (listImageMode === 'screenshot' && game.screenshots?.length > 0) {
+      let url = game.screenshots[0]
+      if (url.startsWith('//')) url = 'https:' + url
+      return url
+    }
+    return coverUrl(game.id)
+  }
+  const imgUrl = getGameImage()
+
   return (
     <div className="list-item" onClick={() => onSelect(game)}>
       <span className="list-col-name">
-        <img src={coverUrl(game.id)} alt="" className="list-thumb" loading="lazy" onError={e => { e.target.style.display = 'none' }} />
+        {imgUrl && <img src={imgUrl} alt="" className={`list-thumb${listImageMode === 'screenshot' ? ' list-thumb-screenshot' : ''}`} loading="lazy" onError={e => { e.target.style.display = 'none' }} />}
         <span className="list-name-text">{game.description || game.name}</span>
         {game.description && <span className="list-desc">{game.name}</span>}
       </span>

@@ -943,6 +943,11 @@ html, body, #root {
   flex-shrink: 0;
 }
 
+.list-thumb-screenshot {
+  width: 56px;
+  height: 42px;
+}
+
 .list-name-text {
   font-weight: 500;
   white-space: nowrap;
