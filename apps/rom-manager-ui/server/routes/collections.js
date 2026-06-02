@@ -230,6 +230,18 @@ router.post('/api/collections/:id/scan', async (req, res) => {
     const job = createJob(jobId);
     setTimeout(() => {
       try {
+        // Reset available=0 for all games in this version before scan
+        try {
+          runNow(`
+            INSERT INTO game_state (game_entry_id, available, updated_at)
+            SELECT ge.id, 0, datetime('now')
+            FROM game_entries ge
+            WHERE ge.version_id = ?
+            ON CONFLICT(game_entry_id) DO UPDATE SET
+              available = 0,
+              updated_at = datetime('now')
+          `, [version_id]);
+        } catch (_) {}
         const result = execCli(['scan', String(version_id), dir]);
         // Update game_state.available from scanned_games after scan
         try {
@@ -299,6 +311,33 @@ router.post('/api/collections/:id/build', async (req, res) => {
           onProgress: (p) => updateProgress(jobId, p.pct || 0, p.msg || ''),
           signal: job._abort.signal,
         }).then(result => {
+          // Scan output dir to set game_state.available for built games
+          try {
+            const foundGames = new Set();
+            function scanDir(dir) {
+              for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                if (entry.isDirectory()) scanDir(path.join(dir, entry.name));
+                else if (entry.name.endsWith('.zip')) foundGames.add(entry.name.replace('.zip', ''));
+              }
+            }
+            if (fs.existsSync(collectionDir)) scanDir(collectionDir);
+            // Reset all games to available=0, then set found ones to available=1
+            runNow(`
+              INSERT INTO game_state (game_entry_id, available, updated_at)
+              SELECT ge.id, 0, datetime('now') FROM game_entries ge WHERE ge.version_id = ?
+              ON CONFLICT(game_entry_id) DO UPDATE SET available = 0, updated_at = datetime('now')
+            `, [version_id]);
+            if (foundGames.size > 0) {
+              const names = [...foundGames];
+              const ph = names.map(() => '?').join(',');
+              runNow(`
+                INSERT INTO game_state (game_entry_id, available, updated_at)
+                SELECT ge.id, 1, datetime('now') FROM game_entries ge
+                WHERE ge.version_id = ? AND ge.name IN (${ph})
+                ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')
+              `, [version_id, ...names]);
+            }
+          } catch (_) {}
           doneJob(jobId, result);
         }).catch(err => {
           failJob(jobId, err.message);
@@ -417,20 +456,33 @@ router.post('/api/collections/:id/builds/:buildId/run', async (req, res) => {
       signal: abort.signal,
     }).then((result) => {
       runNow("UPDATE collection_builds SET status = 'complete', games_built = ?, games_missing = ?, completed_at = datetime('now') WHERE id = ?",
-        [result.matched || 0, result.missing || 0, buildId]);
-      // Mark all games in this version as available after successful build
+        [result.added || 0, result.missing || 0, buildId]);
+      // Scan output dir to set game_state.available for built games
       try {
-        const build = get('SELECT version_id FROM collection_builds WHERE id = ?', [buildId]);
-        if (build) {
+        const buildDir = base_dir || path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', build.source);
+        const foundGames = new Set();
+        function scanDir(dir) {
+          for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (entry.isDirectory()) scanDir(path.join(dir, entry.name));
+            else if (entry.name.endsWith('.zip')) foundGames.add(entry.name.replace('.zip', ''));
+          }
+        }
+        if (fs.existsSync(buildDir)) scanDir(buildDir);
+        const versionId = build.version_id;
+        runNow(`
+          INSERT INTO game_state (game_entry_id, available, updated_at)
+          SELECT ge.id, 0, datetime('now') FROM game_entries ge WHERE ge.version_id = ?
+          ON CONFLICT(game_entry_id) DO UPDATE SET available = 0, updated_at = datetime('now')
+        `, [versionId]);
+        if (foundGames.size > 0) {
+          const names = [...foundGames];
+          const ph = names.map(() => '?').join(',');
           runNow(`
             INSERT INTO game_state (game_entry_id, available, updated_at)
-            SELECT ge.id, 1, datetime('now')
-            FROM game_entries ge
-            WHERE ge.version_id = ?
-            ON CONFLICT(game_entry_id) DO UPDATE SET
-              available = 1,
-              updated_at = datetime('now')
-          `, [build.version_id]);
+            SELECT ge.id, 1, datetime('now') FROM game_entries ge
+            WHERE ge.version_id = ? AND ge.name IN (${ph})
+            ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')
+          `, [versionId, ...names]);
         }
       } catch (_) {}
       doneJob(jobId, result);
