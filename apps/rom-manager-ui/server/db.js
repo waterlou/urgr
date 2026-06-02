@@ -118,15 +118,18 @@ CREATE TABLE IF NOT EXISTS game_set_games (
     UNIQUE(game_set_id, game_entry_id)
 );
 
-CREATE TABLE IF NOT EXISTS game_ratings (
-    id            INTEGER PRIMARY KEY,
-    game_entry_id INTEGER NOT NULL UNIQUE,
-    rating        INTEGER DEFAULT 0,
+CREATE TABLE IF NOT EXISTS game_state (
+    game_entry_id INTEGER PRIMARY KEY,
+    available     INTEGER NOT NULL DEFAULT 0,
+    rating        INTEGER NOT NULL DEFAULT 0,
     favourite     INTEGER NOT NULL DEFAULT 0,
-    play_count    INTEGER DEFAULT 0,
+    play_count    INTEGER NOT NULL DEFAULT 0,
     updated_at    TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (game_entry_id) REFERENCES game_entries(id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_game_state_favourite ON game_state(favourite);
+CREATE INDEX IF NOT EXISTS idx_game_state_available ON game_state(available);
 
 CREATE TABLE IF NOT EXISTS scrape_jobs (
     id              TEXT PRIMARY KEY,
@@ -181,6 +184,26 @@ export function initDb(dbPath) {
   try { db.run("ALTER TABLE game_entries ADD COLUMN covers TEXT DEFAULT '[]'"); } catch (_) {}
   // Migration: add screenshots column if missing
   try { db.run("ALTER TABLE game_entries ADD COLUMN screenshots TEXT DEFAULT '[]'"); } catch (_) {}
+  // Migration: game_ratings -> game_state (consolidate app state table)
+  try {
+    db.run(`CREATE TABLE IF NOT EXISTS game_state (
+      game_entry_id INTEGER PRIMARY KEY,
+      available     INTEGER NOT NULL DEFAULT 0,
+      rating        INTEGER NOT NULL DEFAULT 0,
+      favourite     INTEGER NOT NULL DEFAULT 0,
+      play_count    INTEGER NOT NULL DEFAULT 0,
+      updated_at    TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (game_entry_id) REFERENCES game_entries(id)
+    )`);
+    // Check if game_ratings table exists before migrating
+    const hasRatings = db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='game_ratings'");
+    if (hasRatings.length && hasRatings[0].values.length > 0) {
+      db.run(`INSERT INTO game_state (game_entry_id, rating, favourite, play_count, updated_at)
+              SELECT game_entry_id, COALESCE(rating, 0), COALESCE(favourite, 0), COALESCE(play_count, 0), updated_at
+              FROM game_ratings`);
+      db.run('DROP TABLE game_ratings');
+    }
+  } catch (_) {}
 
   return db;
 }

@@ -145,37 +145,18 @@ router.get('/api/collections/:id/games', async (req, res) => {
     if (parents_only === 'true') {
       whereExtra += ' AND g.cloneof IS NULL';
     }
+
+    // For roms_only filter, use game_state.available flag
+    if (roms_only === 'true') {
+      whereExtra += ' AND COALESCE(r.available, 0) = 1';
+    }
+    // For favourites_only filter, use game_state.favourite flag
     if (favourites_only === 'true') {
       whereExtra += ' AND COALESCE(r.favourite, 0) = 1';
     }
 
-    // For roms_only filter, scan the collection's ROM directory recursively
-    let romsOnlyGames = null;
-    if (roms_only === 'true') {
-      const collectionRomsDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', collection.folder);
-      if (fs.existsSync(collectionRomsDir)) {
-        romsOnlyGames = new Set();
-        // Recursively find all .zip files
-        function scanDir(dir) {
-          for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-            if (entry.isDirectory()) {
-              scanDir(path.join(dir, entry.name));
-            } else if (entry.name.endsWith('.zip')) {
-              romsOnlyGames.add(entry.name.replace('.zip', ''));
-            }
-          }
-        }
-        scanDir(collectionRomsDir);
-      }
-      if (!romsOnlyGames || romsOnlyGames.size === 0) {
-        return res.json({ collection, games: [], platforms: [], total: 0, limit: Number(limit), offset: Number(offset) });
-      }
-    }
-
-    // Use JOIN with game_ratings when filtering by favourites
-    const joinClause = favourites_only === 'true'
-      ? 'JOIN game_ratings r ON r.game_entry_id = g.id'
-      : 'LEFT JOIN game_ratings r ON r.game_entry_id = g.id';
+    // Always LEFT JOIN game_state for available/favourite/rating data
+    const joinClause = 'LEFT JOIN game_state r ON r.game_entry_id = g.id';
 
     const total = get(`SELECT COUNT(DISTINCT g.name) as c FROM game_entries g ${joinClause} WHERE g.version_id IN (${ph}) ${whereExtra}`, [...vids, ...extraParams]).c;
 
@@ -202,14 +183,9 @@ router.get('/api/collections/:id/games', async (req, res) => {
       return { ...g, versions };
     });
 
-    // Apply roms_only filter if requested
-    if (romsOnlyGames) {
-      games = games.filter(g => romsOnlyGames.has(g.name));
-    }
-
     const platforms = all(`SELECT DISTINCT sv.source as platform FROM set_versions sv WHERE sv.id IN (${ph})`, vids).map(p => p.platform);
 
-    res.json({ collection, games, platforms, total: romsOnlyGames ? games.length : total, limit: Number(limit), offset: Number(offset) });
+    res.json({ collection, games, platforms, total, limit: Number(limit), offset: Number(offset) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -255,6 +231,19 @@ router.post('/api/collections/:id/scan', async (req, res) => {
     setTimeout(() => {
       try {
         const result = execCli(['scan', String(version_id), dir]);
+        // Update game_state.available from scanned_games after scan
+        try {
+          runNow(`
+            INSERT INTO game_state (game_entry_id, available, updated_at)
+            SELECT ge.id, CASE WHEN sg.status IN ('ok', 'mismatch') THEN 1 ELSE 0 END, datetime('now')
+            FROM game_entries ge
+            LEFT JOIN scanned_games sg ON sg.version_id = ge.version_id AND sg.name = ge.name
+            WHERE ge.version_id = ?
+            ON CONFLICT(game_entry_id) DO UPDATE SET
+              available = excluded.available,
+              updated_at = datetime('now')
+          `, [version_id]);
+        } catch (_) {}
         doneJob(jobId, result);
       } catch (e) {
         failJob(jobId, e.message);
@@ -429,6 +418,21 @@ router.post('/api/collections/:id/builds/:buildId/run', async (req, res) => {
     }).then((result) => {
       runNow("UPDATE collection_builds SET status = 'complete', games_built = ?, games_missing = ?, completed_at = datetime('now') WHERE id = ?",
         [result.matched || 0, result.missing || 0, buildId]);
+      // Mark all games in this version as available after successful build
+      try {
+        const build = get('SELECT version_id FROM collection_builds WHERE id = ?', [buildId]);
+        if (build) {
+          runNow(`
+            INSERT INTO game_state (game_entry_id, available, updated_at)
+            SELECT ge.id, 1, datetime('now')
+            FROM game_entries ge
+            WHERE ge.version_id = ?
+            ON CONFLICT(game_entry_id) DO UPDATE SET
+              available = 1,
+              updated_at = datetime('now')
+          `, [build.version_id]);
+        }
+      } catch (_) {}
       doneJob(jobId, result);
     }).catch((err) => {
       const msg = err.message || String(err);

@@ -1,14 +1,10 @@
 import { Router } from 'express';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
 import crypto, { createHash } from 'crypto';
 import { getDb } from '../db.js';
 import { execCli } from '../cli.js';
 import { createJob, updateProgress, doneJob, failJob } from '../jobs.js';
 import { all, get, run, runNow, dbReady } from '../helpers.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = Router();
 
 router.get('/', async (req, res) => {
@@ -42,37 +38,12 @@ router.get('/', async (req, res) => {
     if (favourites_only === 'true') {
       where.push('COALESCE(r.favourite, 0) = 1');
     }
-
-    // For roms_only filter, scan the collection's ROM directory recursively
-    let romsOnlyGames = null;
-    if (roms_only === 'true' && collection_id) {
-      const collection = get('SELECT folder FROM collections WHERE id = ?', [collection_id]);
-      if (collection) {
-        const collectionRomsDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', collection.folder);
-        if (fs.existsSync(collectionRomsDir)) {
-          romsOnlyGames = new Set();
-          function scanDir(dir) {
-            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-              if (entry.isDirectory()) {
-                scanDir(path.join(dir, entry.name));
-              } else if (entry.name.endsWith('.zip')) {
-                romsOnlyGames.add(entry.name.replace('.zip', ''));
-              }
-            }
-          }
-          scanDir(collectionRomsDir);
-        }
-      }
-      if (!romsOnlyGames || romsOnlyGames.size === 0) {
-        return res.json({ games: [], total: 0, limit: Number(limit), offset: Number(offset) });
-      }
+    if (roms_only === 'true') {
+      where.push('COALESCE(r.available, 0) = 1');
     }
 
     const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
-    // Use JOIN with game_ratings when filtering by favourites
-    const joinClause = favourites_only === 'true'
-      ? 'JOIN game_ratings r ON r.game_entry_id = g.id'
-      : 'LEFT JOIN game_ratings r ON r.game_entry_id = g.id';
+    const joinClause = 'LEFT JOIN game_state r ON r.game_entry_id = g.id';
     const countSql = `SELECT COUNT(DISTINCT g.name) as c FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id ${joinClause} ${whereClause}`;
     const total = params.length ? get(countSql, params).c : get(countSql).c;
 
@@ -98,12 +69,7 @@ router.get('/', async (req, res) => {
       return { ...g, versions };
     });
 
-    // Apply roms_only filter if requested
-    if (romsOnlyGames) {
-      games = games.filter(g => romsOnlyGames.has(g.name));
-    }
-
-    res.json({ games, total: romsOnlyGames ? games.length : total, limit: Number(limit), offset: Number(offset) });
+    res.json({ games, total, limit: Number(limit), offset: Number(offset) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -128,9 +94,9 @@ router.get('/:id', async (req, res) => {
     if (typeof game.synopsis === 'string') try { game.synopsis = JSON.parse(game.synopsis); } catch {}
     const roms = all('SELECT * FROM rom_entries WHERE game_entry_id = ?', [game.id]);
     const scanned = all('SELECT * FROM scanned_games WHERE name = ? AND version_id = ?', [game.name, game.version_id]);
-    const rating = get('SELECT * FROM game_ratings WHERE game_entry_id = ?', [game.id]);
+    const state = get('SELECT * FROM game_state WHERE game_entry_id = ?', [game.id]);
     const clones = all('SELECT id, name, description, cloneof FROM game_entries WHERE cloneof = ? AND version_id = ? ORDER BY name', [game.name, game.version_id]);
-    res.json({ ...game, roms, scanned_games: scanned, rating, clones });
+    res.json({ ...game, roms, scanned_games: scanned, rating: state, clones });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -348,12 +314,12 @@ router.put('/:id/rating', async (req, res) => {
   await dbReady;
   try {
     const { rating, favourite } = req.body;
-    const existing = get('SELECT id FROM game_ratings WHERE game_entry_id = ?', [req.params.id]);
+    const existing = get('SELECT game_entry_id FROM game_state WHERE game_entry_id = ?', [req.params.id]);
     if (existing) {
-      if (rating != null) run("UPDATE game_ratings SET rating = ?, updated_at = datetime('now') WHERE game_entry_id = ?", [rating, req.params.id]);
-      if (favourite != null) run("UPDATE game_ratings SET favourite = ?, updated_at = datetime('now') WHERE game_entry_id = ?", [favourite ? 1 : 0, req.params.id]);
+      if (rating != null) run("UPDATE game_state SET rating = ?, updated_at = datetime('now') WHERE game_entry_id = ?", [rating, req.params.id]);
+      if (favourite != null) run("UPDATE game_state SET favourite = ?, updated_at = datetime('now') WHERE game_entry_id = ?", [favourite ? 1 : 0, req.params.id]);
     } else {
-      run('INSERT INTO game_ratings (game_entry_id, rating, favourite) VALUES (?, ?, ?)', [req.params.id, rating ?? 0, favourite ? 1 : 0]);
+      run('INSERT INTO game_state (game_entry_id, rating, favourite) VALUES (?, ?, ?)', [req.params.id, rating ?? 0, favourite ? 1 : 0]);
     }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
