@@ -27,7 +27,7 @@ export default function GameSetForm({ platforms, editTarget, onSave, onClose }) 
     })
   }
 
-  const ICON_OPTIONS = ['inventory_2', 'ads_click', 'emoji_events', 'star', 'diamond', 'local_fire_department', 'diversity_3', 'palette', 'playing_cards', 'rainbow']
+  const ICON_OPTIONS = ['inventory_2', 'ads_click', 'emoji_events', 'star', 'diamond', 'local_fire_department', 'diversity_3', 'palette', 'playing_cards', 'rainbow', 'sports_esports', 'videogame_asset', 'stadia_controller', 'smart_toy', 'toys', 'rocket', 'auto_awesome', 'psychiatry', 'flutter_dash', 'fort', 'park', 'celebration', 'whatshot', 'spa', 'music_note']
 
   return (
     <div className="modal-backdrop" onClick={onClose}>

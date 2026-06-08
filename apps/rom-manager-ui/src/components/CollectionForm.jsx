@@ -136,6 +136,7 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
     setSlug(ds.slug)
     setFolder(ds.slug)
     setPlatform(ds.platform)
+    setLogo(PLATFORM_ICONS[ds.name] || platformToLogo(ds.platform))
     setSuggestions(false)
   }
 
@@ -151,6 +152,19 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
     }
   }
 
+  function handlePresetChange(e) {
+    const ds = popularPresets.find(d => d.name === e.target.value)
+    setSelectedPreset(ds || null)
+    setSelectedConsole('')
+    if (ds) {
+      setName(ds.name)
+      setSlug(ds.slug)
+      setFolder(ds.slug)
+      setPlatform(ds.platform)
+      setLogo(PLATFORM_ICONS[ds.name] || platformToLogo(ds.platform))
+    }
+  }
+
   function handleOfflineListConsoleChange(e) {
     const consoleName = e.target.value
     setSelectedConsole(consoleName)
@@ -158,6 +172,7 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
       setName(`OfflineList ${consoleName}`)
       setSlug(`offlinelist-${consoleName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`)
       setFolder(`offlinelist-${consoleName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`)
+      setLogo(platformToLogo(consoleName))
     }
   }
 
@@ -168,6 +183,7 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
       setName(`DAT-O-MATIC ${systemName}`)
       setSlug(`datomatic-${systemName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`)
       setFolder(`datomatic-${systemName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`)
+      setLogo(platformToLogo(systemName))
     }
   }
 
@@ -179,6 +195,7 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
       setName(`NPS ${platform.name}`)
       setSlug(`nps-${platformId.toLowerCase()}`)
       setFolder(`nps-${platformId.toLowerCase()}`)
+      setLogo('stadia_controller')
     }
   }
 
@@ -248,7 +265,40 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
     }
   }
 
-  const LOGO_OPTIONS = ['sports_esports', 'videogame_asset', 'stadia_controller', 'album', 'local_fire_department', 'desktop_windows', 'ads_click', 'star', 'smart_toy', 'emoji_events']
+  function platformToLogo(platform) {
+    const map = {
+      'Arcade': 'sports_esports',
+      'Console': 'videogame_asset',
+      'PlayStation': 'stadia_controller',
+      'Nintendo': 'smart_toy',
+      'Sega': 'toys',
+      'Atari': 'album',
+      'NEC': 'radio',
+      'SNK': 'diversity_3',
+      'Bandai': 'pets',
+      'Coleco': 'extension',
+      'Commodore': 'computer',
+      'Microsoft': 'computer',
+      'Mattel': 'toys',
+      'Fairchild': 'album',
+      'Watara': 'phone_android',
+      'Tiger': 'pets',
+      'Magnavox': 'tv',
+      'GCE': 'videogame_asset',
+    }
+    for (const [key, icon] of Object.entries(map)) {
+      if (platform.toLowerCase().includes(key.toLowerCase())) return icon
+    }
+    return 'sports_esports'
+  }
+
+  const PLATFORM_ICONS = {
+    'MAME': 'sports_esports',
+    'Final Burn Neo': 'local_fire_department',
+    'OfflineList (No-Intro)': 'videogame_asset',
+    'DAT-O-MATIC': 'inventory_2',
+    'NoPayStation': 'stadia_controller',
+  }
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -377,7 +427,7 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
           {datasetMode === 'manual' && !isEdit && (
             <div className="form-group">
               <label>Platform</label>
-              <select value={platform} onChange={e => setPlatform(e.target.value)}>
+              <select value={platform} onChange={e => { setPlatform(e.target.value); setLogo(platformToLogo(e.target.value)) }}>
                 <option value="">None</option>
                 {platforms.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
@@ -387,7 +437,7 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
           <div className="form-group">
             <label>Logo / Icon</label>
             <div className="logo-picker">
-              {LOGO_OPTIONS.map(ic => (
+              {['sports_esports', 'videogame_asset', 'stadia_controller', 'smart_toy', 'toys', 'album', 'computer', 'phone_android', 'tv', 'radio', 'diversity_3', 'pets', 'extension', 'local_fire_department', 'inventory_2', 'desktop_windows', 'ads_click', 'star', 'emoji_events', 'rocket', 'auto_awesome'].map(ic => (
                 <button type="button" key={ic}
                   className={`logo-option ${logo === ic ? 'active' : ''}`}
                   onClick={() => setLogo(ic)}><IconDisplay name={ic} className="" /></button>
