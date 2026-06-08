@@ -294,4 +294,4 @@ export async function fetchSonyScreenshots(contentId, titleId) {
   return [];
 }
 
-export { NPS_PLATFORMS, NPS_PLATFORM_MAP };
+export { NPS_PLATFORMS, NPS_PLATFORM_MAP, parseTsvLine, parseTsv, shouldIgnore, normalizeForGroup };
