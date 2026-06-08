@@ -109,7 +109,7 @@ router.get('/:id', async (req, res) => {
     if (game.cloneof) {
       parent = get('SELECT id, name, region FROM game_entries WHERE name = ? AND version_id = ? AND cloneof IS NULL', [game.cloneof, game.version_id]);
     }
-    res.json({ ...game, roms, scanned_games: scanned, rating: state, clones, parent });
+    res.json({ ...game, roms, scanned_games: scanned, rating: state?.rating || 0, favourite: state?.favourite || 0, available: state?.available || 0, play_count: state?.play_count || 0, clones, parent });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -248,3 +248,31 @@ export function cancelJob(jobId) {
 // ==============================
 export function getSettings() { return fetchJson('/settings'); }
 export function saveSettings(data) { return fetchWithBody('/settings', 'PUT', data); }
+
+// ==============================
+// Downloads
+// ==============================
+export function enqueueDownload(gameEntryId) {
+  return fetchWithBody('/downloads/enqueue', 'POST', { game_entry_id: gameEntryId });
+}
+export function getDownloadQueue() {
+  return fetchJson('/downloads');
+}
+export function subscribeDownloadSSE({ onQueue }) {
+  const evtSource = new EventSource(`${BASE}/downloads/status`);
+  evtSource.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'queue') onQueue?.(msg.queue);
+  };
+  evtSource.onerror = () => {};
+  return evtSource;
+}
+export function retryDownload(id) {
+  return fetchWithBody(`/downloads/${id}/retry`, 'POST');
+}
+export function clearDownload(id) {
+  return fetchWithBody(`/downloads/${id}/clear`, 'POST');
+}
+export function clearCompletedDownloads() {
+  return fetchWithBody('/downloads/clear-completed', 'POST');
+}

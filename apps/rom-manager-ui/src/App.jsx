@@ -4,6 +4,7 @@ import {
   getCollectionGames, getGameSetGames, createCollection, deleteCollection,
   updateCollection, addCollectionVersion, removeCollectionVersion,
   createGameSet, deleteGameSet, updateGameSet, addGameSetGames, removeGameSetGame,
+  getDownloadQueue,
 } from './api.js'
 import useRouter from './hooks/useRouter.js'
 import Sidebar from './components/Sidebar.jsx'
@@ -13,6 +14,7 @@ import CollectionDetail from './components/CollectionDetail.jsx'
 import CollectionForm from './components/CollectionForm.jsx'
 import GameSetForm from './components/GameSetForm.jsx'
 import Settings from './components/Settings.jsx'
+import DownloadManager from './components/DownloadManager.jsx'
 
 export default function App() {
   const {
@@ -79,6 +81,7 @@ export default function App() {
   const [knownPlatforms, setKnownPlatforms] = useState([])
   const [theme, setTheme] = useState(() => localStorage.getItem('rom-manager-theme') || 'dark')
   const [showSettings, setShowSettings] = useState(false)
+  const [queueCount, setQueueCount] = useState(0)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -95,9 +98,10 @@ export default function App() {
 
   const loadSidebar = useCallback(async () => {
     try {
-      const [cols, sets, vers, plats] = await Promise.all([
+      const [cols, sets, vers, plats, dq] = await Promise.all([
         getCollections(), getGameSets(), getVersions(),
         getPlatforms().catch(() => []),
+        getDownloadQueue().catch(() => ({ queue: [] })),
       ])
       console.log('[loadSidebar] collections:', cols.length, cols.map(c => c.name))
       setCollections(cols)
@@ -105,6 +109,7 @@ export default function App() {
       setVersions(vers)
       setDatasets({ popular: POPULAR_DATASETS, imported: vers })
       setKnownPlatforms(plats)
+      setQueueCount((dq.queue || []).filter(i => i.status === 'pending' || i.status === 'downloading').length)
     } catch (e) {
       console.error('[loadSidebar] FAILED:', e)
     }
@@ -320,6 +325,7 @@ export default function App() {
         activeView={activeView}
         activeId={activeId}
         sidebarOpen={sidebarOpen}
+        queueCount={queueCount}
         onSelect={(view, id) => { handleSelect(view, id); setSidebarOpen(false) }}
         onNewCollection={() => { setEditTarget(null); setShowCollectionForm(true); setSidebarOpen(false) }}
         onNewGameSet={() => { setEditTarget(null); setShowGameSetForm(true); setSidebarOpen(false) }}
@@ -333,7 +339,9 @@ export default function App() {
       />
 
       <main className="main-pane">
-        {activeView === 'collection' && collectionSubView === 'detail' ? (
+        {activeView === 'downloads' ? (
+          <DownloadManager onBack={() => handleSelect('browse', null)} />
+        ) : activeView === 'collection' && collectionSubView === 'detail' ? (
           <CollectionDetail
             collectionId={activeId}
             collection={collections.find(c => c.id === activeId)}

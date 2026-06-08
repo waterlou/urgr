@@ -6,7 +6,7 @@ export default function Sidebar({
   onEditCollection, onEditGameSet,
   onDeleteCollection, onDeleteGameSet,
   theme, onToggleTheme, onOpenSettings,
-  sidebarOpen,
+  sidebarOpen, queueCount,
 }) {
   return (
     <aside className={`sidebar${sidebarOpen ? ' sidebar-open' : ''}`}>
@@ -27,6 +27,15 @@ export default function Sidebar({
         >
           <span className="icon icon-sm section-icon">folder_open</span>
           <span>All Games</span>
+        </button>
+
+        <button
+          className={`sidebar-section-btn ${activeView === 'downloads' ? 'active' : ''}`}
+          onClick={() => onSelect('downloads', null)}
+        >
+          <span className="icon icon-sm section-icon">download</span>
+          <span>Downloads</span>
+          {queueCount > 0 && <span className="sidebar-item-count">{queueCount}</span>}
         </button>
 
         <div className="sidebar-section">

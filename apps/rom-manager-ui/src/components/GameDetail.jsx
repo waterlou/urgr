@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { getGame, coverUrl, scrapeGameMetadata } from '../api.js'
+import { getGame, coverUrl, scrapeGameMetadata, enqueueDownload } from '../api.js'
 
 export default function GameDetail({ gameId, onBack, onNavigate }) {
   const [game, setGame] = useState(null)
@@ -9,6 +9,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
   const [scrapedTitle, setScrapedTitle] = useState(null)
   const [lightbox, setLightbox] = useState(null)
   const [coverFailed, setCoverFailed] = useState(false)
+  const [downloadMsg, setDownloadMsg] = useState(null)
 
   useEffect(() => {
     getGame(gameId).then(g => {
@@ -56,6 +57,17 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
     } finally {
       setScraping(false)
     }
+  }
+
+  async function handleDownload() {
+    setDownloadMsg('Adding to queue...')
+    try {
+      const res = await enqueueDownload(gameId)
+      setDownloadMsg(`Added ${res.enqueued} file(s) to download queue`)
+    } catch (err) {
+      setDownloadMsg(`Error: ${err.message}`)
+    }
+    setTimeout(() => setDownloadMsg(null), 4000)
   }
 
   if (!game) return (
@@ -130,6 +142,14 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                 <span className="icon">refresh</span> {game.manufacturer ? 'Rescrape' : 'Scrape'}
               </button>
             )}
+            {game.source === 'NPS' && (
+              game.available
+                ? <span className="badge" style={{background:'var(--accent)', color:'#fff'}}>Downloaded</span>
+                : <button className="btn btn-sm" onClick={handleDownload} style={{marginLeft: 8}}>
+                    <span className="icon">download</span> Download
+                  </button>
+            )}
+            {downloadMsg && <p className="scrape-success" style={{marginTop: 4}}>{downloadMsg}</p>}
           </div>
         </div>
 

@@ -155,8 +155,8 @@ export async function importNps(platform, versionId) {
     // Create ROM for parent
     const parentId = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ? AND cloneof IS NULL', [versionId, parentName])?.id;
     if (parentId) {
-      run('INSERT INTO rom_entries (game_entry_id, filename, size, sha1, subtype) VALUES (?, ?, ?, ?, ?)',
-        [parentId, parentVariant.pkgFilename, parentVariant.fileSize || 0, parentVariant.sha256, 'game']);
+      run('INSERT INTO rom_entries (game_entry_id, filename, size, sha1, subtype, pkg_url) VALUES (?, ?, ?, ?, ?, ?)',
+        [parentId, parentVariant.pkgFilename, parentVariant.fileSize || 0, parentVariant.sha256, 'game', parentVariant.pkgUrl]);
       romsImported++;
     }
 
@@ -186,8 +186,8 @@ export async function importNps(platform, versionId) {
       const cloneGame = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ? AND region = ?', [versionId, cloneName, v.region]);
       if (!cloneGame) continue;
 
-      run('INSERT INTO rom_entries (game_entry_id, filename, size, sha1, subtype) VALUES (?, ?, ?, ?, ?)',
-        [cloneGame.id, v.pkgFilename, v.fileSize || 0, v.sha256, 'game']);
+      run('INSERT INTO rom_entries (game_entry_id, filename, size, sha1, subtype, pkg_url) VALUES (?, ?, ?, ?, ?, ?)',
+        [cloneGame.id, v.pkgFilename, v.fileSize || 0, v.sha256, 'game', v.pkgUrl]);
       romsImported++;
     }
   }
@@ -206,18 +206,21 @@ export async function importNps(platform, versionId) {
     const titleId = row['Title ID'] || row.title_id || '';
     const name = row.Name || row.name || '';
     const pkgUrl = row['PKG direct link'] || row.pkg_url || '';
+    if (!pkgUrl || pkgUrl === 'MISSING') continue;
     const fileSize = parseInt(row['File Size'] || row.file_size || '0', 10);
     const sha256 = row.SHA256 || row.sha256 || '';
 
     const gameEntryId = gameMap.get(titleId);
     if (!gameEntryId) continue;
 
+    const pkgFilename = pkgUrl.split('/').pop() || `${titleId}_dlc_${name}.pkg`;
+
     const existing = get('SELECT id FROM rom_entries WHERE game_entry_id = ? AND filename = ?',
-      [gameEntryId, `${titleId}_dlc_${name}.pkg`]);
+      [gameEntryId, pkgFilename]);
     if (existing) continue;
 
-    run('INSERT INTO rom_entries (game_entry_id, filename, size, sha1, subtype) VALUES (?, ?, ?, ?, ?)',
-      [gameEntryId, `${titleId}_dlc_${name}.pkg`, fileSize || 0, sha256, 'dlc']);
+    run('INSERT INTO rom_entries (game_entry_id, filename, size, sha1, subtype, pkg_url) VALUES (?, ?, ?, ?, ?, ?)',
+      [gameEntryId, pkgFilename, fileSize || 0, sha256, 'dlc', pkgUrl]);
     romsImported++;
   }
 
@@ -226,18 +229,21 @@ export async function importNps(platform, versionId) {
     const titleId = row['Title ID'] || row.title_id || '';
     const name = row.Name || row.name || '';
     const pkgUrl = row['PKG direct link'] || row.pkg_url || '';
+    if (!pkgUrl || pkgUrl === 'MISSING') continue;
     const fileSize = parseInt(row['File Size'] || row.file_size || '0', 10);
     const sha256 = row.SHA256 || row.sha256 || '';
 
     const gameEntryId = gameMap.get(titleId);
     if (!gameEntryId) continue;
 
+    const pkgFilename = pkgUrl.split('/').pop() || `${titleId}_update_${name}.pkg`;
+
     const existing = get('SELECT id FROM rom_entries WHERE game_entry_id = ? AND filename = ?',
-      [gameEntryId, `${titleId}_update_${name}.pkg`]);
+      [gameEntryId, pkgFilename]);
     if (existing) continue;
 
-    run('INSERT INTO rom_entries (game_entry_id, filename, size, sha1, subtype) VALUES (?, ?, ?, ?, ?)',
-      [gameEntryId, `${titleId}_update_${name}.pkg`, fileSize || 0, sha256, 'update']);
+    run('INSERT INTO rom_entries (game_entry_id, filename, size, sha1, subtype, pkg_url) VALUES (?, ?, ?, ?, ?, ?)',
+      [gameEntryId, pkgFilename, fileSize || 0, sha256, 'update', pkgUrl]);
     romsImported++;
   }
 

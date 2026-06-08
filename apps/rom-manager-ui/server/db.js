@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS rom_entries (
     status          TEXT NOT NULL DEFAULT 'good',
     merge_target    TEXT,
     subtype         TEXT DEFAULT 'game',
+    pkg_url         TEXT DEFAULT '',
     FOREIGN KEY (game_entry_id) REFERENCES game_entries(id) ON DELETE CASCADE,
     UNIQUE(game_entry_id, filename)
 );
@@ -164,6 +165,24 @@ CREATE TABLE IF NOT EXISTS collection_builds (
     FOREIGN KEY (version_id) REFERENCES set_versions(id),
     UNIQUE(collection_id, version_id)
 );
+
+CREATE TABLE IF NOT EXISTS download_queue (
+    id              INTEGER PRIMARY KEY,
+    game_entry_id   INTEGER NOT NULL,
+    version_id      INTEGER NOT NULL,
+    pkg_url         TEXT NOT NULL,
+    filename        TEXT NOT NULL,
+    file_size       INTEGER DEFAULT 0,
+    expected_sha256 TEXT DEFAULT '',
+    subtype         TEXT NOT NULL DEFAULT 'game',
+    status          TEXT NOT NULL DEFAULT 'pending',
+    progress        INTEGER DEFAULT 0,
+    error           TEXT,
+    retry_count     INTEGER DEFAULT 0,
+    created_at      TEXT DEFAULT (datetime('now')),
+    completed_at    TEXT,
+    FOREIGN KEY (game_entry_id) REFERENCES game_entries(id)
+);
 `;
 
 export function initDb(dbPath) {
@@ -248,6 +267,9 @@ export function initDb(dbPath) {
       db.run('PRAGMA foreign_keys = ON');
     }
   } catch (_) {}
+
+  // Migration: add pkg_url column to rom_entries
+  try { db.run("ALTER TABLE rom_entries ADD COLUMN pkg_url TEXT DEFAULT ''"); } catch (_) {}
 
   return db;
 }
