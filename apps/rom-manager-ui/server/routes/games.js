@@ -4,6 +4,7 @@ import { getDb } from '../db.js';
 import { execCli } from '../cli.js';
 import { createJob, updateProgress, doneJob, failJob } from '../jobs.js';
 import { all, get, run, runNow, dbReady } from '../helpers.js';
+import { fetchSonyScreenshots } from '../nps.js';
 
 const router = Router();
 
@@ -250,6 +251,18 @@ async function scrapeSingleGame(gameId) {
   const updated = get('SELECT g.*, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [game.id]);
   if (typeof updated.covers === 'string') try { updated.covers = JSON.parse(updated.covers); } catch { updated.covers = []; }
   if (typeof updated.screenshots === 'string') try { updated.screenshots = JSON.parse(updated.screenshots); } catch { updated.screenshots = []; }
+
+  // For NPS/PlayStation games, try to get screenshots from Sony Store API if not already scraped
+  if (updated.source === 'NPS' && (!updated.screenshots || updated.screenshots.length === 0)) {
+    try {
+      const sonyScreenshots = await fetchSonyScreenshots(updated.content_id, updated.title_id);
+      if (sonyScreenshots.length > 0) {
+        run('UPDATE game_entries SET screenshots = ? WHERE id = ?', [JSON.stringify(sonyScreenshots), game.id]);
+        updated.screenshots = sonyScreenshots;
+      }
+    } catch {}
+  }
+
   const hadData = synopsis || year || manufacturer || detailResult.covers?.length || detailResult.screenshots?.length;
   return { scraped: true, saved: !!hadData, title: matchedTitle || first.title, game: updated, gameId };
 }

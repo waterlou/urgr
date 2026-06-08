@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getAvailableVersions, getCollectionVersions, addCollectionVersion, importOnlineVersion } from '../api.js'
+import { getAvailableVersions, getCollectionVersions, addCollectionVersion, importOnlineVersion, importNps } from '../api.js'
 
 const MAME_MILESTONES = new Set(['0.37b5', '0.78', '0.106', '0.139', '0.160'])
 
@@ -20,6 +20,7 @@ function getDatSource(folder) {
   if (folder === 'fba' || folder === 'fbalpha') return 'FBAlpha44'
   if (folder?.startsWith('offlinelist') || folder === 'offline-list') return 'OFFLINELIST'
   if (folder?.startsWith('datomatic') || folder === 'dat-o-matic') return 'DATOMATIC'
+  if (folder?.startsWith('nps')) return 'NPS'
   return 'MAME'
 }
 
@@ -67,6 +68,21 @@ export default function VersionManager({ collectionId, collection, onVersionsCha
   const isMameOrFbneo = collection?.folder === 'mame' || collection?.folder === 'fbneo'
   const isOfflineList = collection?.folder?.startsWith('offlinelist') || collection?.folder === 'offline-list'
   const isDatomic = collection?.folder?.startsWith('datomatic') || collection?.folder === 'dat-o-matic'
+  const isNps = collection?.folder?.startsWith('nps') || collection?.dataset_preset === 'NPS'
+
+  async function handleNpsImport(platform) {
+    setImportingVer(platform)
+    try {
+      await importNps(collectionId, platform)
+      const vers = await getCollectionVersions(collectionId).catch(() => [])
+      onVersionsChange(vers)
+      onRefresh()
+    } catch (e) {
+      console.error('NPS import failed:', e.message)
+    } finally {
+      setImportingVer(null)
+    }
+  }
 
   return (
     <>
@@ -287,8 +303,64 @@ export default function VersionManager({ collectionId, collection, onVersionsCha
         </section>
       )}
 
+      {/* NPS (NoPayStation) */}
+      {isNps && (
+        <section className="detail-section">
+          <h2 className="detail-section-title">
+            NoPayStation Import
+          </h2>
+          <p className="detail-section-desc">
+            Import PlayStation game lists from NoPayStation (nopaystation.com).
+            This will fetch TSV files and create game entries with PKG download links.
+          </p>
+
+          <div className="info-box warn">
+            <strong>Select platform to import:</strong>
+            {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing {importingVer}...</div>}
+            <div className="tag-list">
+              {['PSV', 'PS3', 'PSP', 'PSX', 'PSM'].map(platform => {
+                const imported = versions.some(v => v.version === platform)
+                return (
+                  <button
+                    key={platform}
+                    className={`tag ${imported ? 'tag-imported' : 'tag-import'}`}
+                    onClick={() => handleNpsImport(platform)}
+                    disabled={importingVer !== null || imported}
+                    title={imported ? 'Already imported' : `Import ${platform} games`}
+                  >
+                    <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:2}}>
+                      {importingVer === platform ? 'hourglass' : imported ? 'check' : 'add'}
+                    </span>
+                    {platform}
+                    {imported && <span className="tag-date">imported</span>}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {versions.length > 0 && (
+            <div className="info-box" style={{marginTop:12}}>
+              <strong>Imported platforms:</strong>
+              <div className="tag-list" style={{marginTop:8}}>
+                {versions.map(v => {
+                  const age = v.created_at ? getAge(v.created_at) : null
+                  return (
+                    <span key={v.id} className="tag" style={{display:'inline-flex',alignItems:'center',gap:4}}>
+                      <span className="icon icon-sm" style={{fontSize:14}}>check</span>
+                      {v.version}
+                      {age && <span className="tag-date">{age}</span>}
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Preset dataset info for non-MAME/non-FBNeo presets */}
-      {collection?.has_dataset === 1 && !isMameOrFbneo && !isOfflineList && !isDatomic && (
+      {collection?.has_dataset === 1 && !isMameOrFbneo && !isOfflineList && !isDatomic && !isNps && (
         <section className="detail-section">
           <h2 className="detail-section-title">
             Dataset: {collection.folder}

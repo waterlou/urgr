@@ -73,6 +73,7 @@ export default function App() {
     { name: 'Final Burn Neo', slug: 'fbneo', platform: 'Arcade' },
     { name: 'OfflineList (No-Intro)', slug: 'offlinelist', platform: 'Console', isOfflineList: true },
     { name: 'DAT-O-MATIC', slug: 'datomatic', platform: 'Console', isDatomic: true },
+    { name: 'NoPayStation', slug: 'nps', platform: 'PlayStation', isNps: true },
   ]
   const [datasets, setDatasets] = useState({ popular: POPULAR_DATASETS, imported: [] })
   const [knownPlatforms, setKnownPlatforms] = useState([])

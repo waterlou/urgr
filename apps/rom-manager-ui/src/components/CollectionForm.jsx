@@ -11,6 +11,7 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
     { name: 'Final Burn Neo', slug: 'fbneo', platform: 'Arcade' },
     { name: 'OfflineList (No-Intro)', slug: 'offlinelist', platform: 'Console', isOfflineList: true },
     { name: 'DAT-O-MATIC', slug: 'datomatic', platform: 'Console', isDatomic: true },
+    { name: 'NoPayStation', slug: 'nps', platform: 'PlayStation', isNps: true },
   ])
   const [name, setName] = useState(editTarget?.name || '')
   const [slug, setSlug] = useState(editTarget?.slug || '')
@@ -54,6 +55,14 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
     'GCE Vectrex',
     'Commodore 64',
     'Pokemon Mini',
+  ]
+
+  const NPS_PLATFORMS = [
+    { id: 'PSV', name: 'PlayStation Vita' },
+    { id: 'PS3', name: 'PlayStation 3' },
+    { id: 'PSP', name: 'PlayStation Portable' },
+    { id: 'PSX', name: 'PlayStation' },
+    { id: 'PSM', name: 'PlayStation Mobile' },
   ]
 
   const DATOMATIC_SYSTEMS = [
@@ -162,6 +171,17 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
     }
   }
 
+  function handleNpsPlatformChange(e) {
+    const platformId = e.target.value
+    setSelectedConsole(platformId)
+    if (platformId) {
+      const platform = NPS_PLATFORMS.find(p => p.id === platformId)
+      setName(`NPS ${platform.name}`)
+      setSlug(`nps-${platformId.toLowerCase()}`)
+      setFolder(`nps-${platformId.toLowerCase()}`)
+    }
+  }
+
   function handleFileSelect(e) {
     const file = e.target.files[0]
     if (!file) return
@@ -199,6 +219,9 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
           payload.dataset_preset = 'OFFLINELIST'
         } else if (selectedPreset.isDatomic) {
           payload.dataset_preset = 'DATOMATIC'
+        } else if (selectedPreset.isNps) {
+          payload.dataset_preset = 'NPS'
+          payload.nps_platform = selectedConsole
         } else {
           payload.dataset_preset = selectedPreset.name
         }
@@ -321,6 +344,18 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
                 <option value="">— Choose a system —</option>
                 {DATOMATIC_SYSTEMS.map(s => (
                   <option key={s.id} value={s.name}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {datasetMode === 'preset' && selectedPreset?.isNps && !isEdit && (
+            <div className="form-group">
+              <label>Select Platform</label>
+              <select value={selectedConsole} onChange={handleNpsPlatformChange}>
+                <option value="">— Choose a platform —</option>
+                {NPS_PLATFORMS.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
             </div>

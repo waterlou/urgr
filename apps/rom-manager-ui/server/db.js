@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS game_entries (
     manufacturer TEXT,
     cloneof     TEXT,
     platform    TEXT DEFAULT '',
+    title_id    TEXT,
+    content_id  TEXT,
     covers      TEXT DEFAULT '[]',
     screenshots TEXT DEFAULT '[]',
     FOREIGN KEY (version_id) REFERENCES set_versions(id) ON DELETE CASCADE,
@@ -50,6 +52,7 @@ CREATE TABLE IF NOT EXISTS rom_entries (
     sha1            TEXT,
     status          TEXT NOT NULL DEFAULT 'good',
     merge_target    TEXT,
+    subtype         TEXT DEFAULT 'game',
     FOREIGN KEY (game_entry_id) REFERENCES game_entries(id) ON DELETE CASCADE,
     UNIQUE(game_entry_id, filename)
 );
@@ -72,6 +75,7 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 
 CREATE INDEX IF NOT EXISTS idx_game_entries_version ON game_entries(version_id);
+CREATE INDEX IF NOT EXISTS idx_game_entries_title_id ON game_entries(title_id);
 CREATE INDEX IF NOT EXISTS idx_rom_entries_game ON rom_entries(game_entry_id);
 CREATE INDEX IF NOT EXISTS idx_rom_entries_sha1 ON rom_entries(sha1);
 CREATE INDEX IF NOT EXISTS idx_scanned_games_version ON scanned_games(version_id);
@@ -184,6 +188,11 @@ export function initDb(dbPath) {
   try { db.run("ALTER TABLE game_entries ADD COLUMN covers TEXT DEFAULT '[]'"); } catch (_) {}
   // Migration: add screenshots column if missing
   try { db.run("ALTER TABLE game_entries ADD COLUMN screenshots TEXT DEFAULT '[]'"); } catch (_) {}
+  // Migration: add title_id and content_id columns to game_entries (NPS integration)
+  try { db.run("ALTER TABLE game_entries ADD COLUMN title_id TEXT"); } catch (_) {}
+  try { db.run("ALTER TABLE game_entries ADD COLUMN content_id TEXT"); } catch (_) {}
+  // Migration: add subtype column to rom_entries (NPS integration)
+  try { db.run("ALTER TABLE rom_entries ADD COLUMN subtype TEXT DEFAULT 'game'"); } catch (_) {}
   // Migration: game_ratings -> game_state (consolidate app state table)
   try {
     db.run(`CREATE TABLE IF NOT EXISTS game_state (

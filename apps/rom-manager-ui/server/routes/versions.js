@@ -8,6 +8,7 @@ import { getDb, saveDb } from '../db.js';
 import { execCli, execCliStream } from '../cli.js';
 import { createJob, updateProgress, doneJob, failJob } from '../jobs.js';
 import { all, get, run, runNow, unescapeXml, dbReady } from '../helpers.js';
+import { importNps, scanNpsDir, buildNps, NPS_PLATFORMS, NPS_PLATFORM_MAP } from '../nps.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = Router();
@@ -489,103 +490,6 @@ router.get('/api/versions/:id/games', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/api/versions/available', async (req, res) => {
-  await dbReady;
-  try {
-    const source = (req.query.source || 'MAME').toUpperCase();
-
-    if (source === 'FBNEO') {
-      const fbneo = await getFBNeoVersions();
-      return res.json(fbneo);
-    }
-    if (source === 'OFFLINELIST') {
-      const offlinelist = await getOfflineListVersions();
-      return res.json(offlinelist);
-    }
-    if (source === 'DATOMATIC') {
-      const datomatic = getDatomicVersions();
-      return res.json(datomatic);
-    }
-    if (source === 'FBALPHA43' || source === 'FBALPHA44') {
-      const is43 = source === 'FBALPHA43';
-      const src = is43 ? 'FBAlpha43' : 'FBAlpha44';
-      const repo = is43 ? FBALPHA43_REPO : FBALPHA44_REPO;
-      const ver = is43 ? '0.2.97.43' : '0.2.97.44';
-      const imported = all("SELECT id, source, version FROM set_versions WHERE source = ? ORDER BY version", [src]);
-      return res.json({
-        source: src,
-        latest: ver,
-        hasNewer: false,
-        available: [{ version: ver, source: src, repo }],
-        imported,
-        missing: imported.length === 0 ? [{ version: ver, source: src, repo }] : [],
-      });
-    }
-
-    if (mameDatsCache && Date.now() - mameDatsCacheTime < CACHE_TTL) return res.json(mameDatsCache);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-    let html;
-    try {
-      const response = await fetch(MAME_DATS_URL, { signal: controller.signal });
-      html = await response.text();
-    } finally {
-      clearTimeout(timeoutId);
-    }
-    const plainText = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-    const latestMatch = plainText.match(/Latest\s+dat\s+a\s*vailable:\s*([\d.\sb]+)/i);
-    const latestVer = latestMatch ? parseMameVersion(latestMatch[1].replace(/\s+/g, '')) : null;
-
-    const rows = [];
-    const rowRegex = /<TR[^>]*>([\s\S]*?)<\/TR>/gi;
-    let rowMatch;
-    while ((rowMatch = rowRegex.exec(html)) !== null) {
-      const cells = [];
-      const cellRegex = /<TD[^>]*>[\s\S]*?<\/TD>/gi;
-      let cellMatch;
-      while ((cellMatch = cellRegex.exec(rowMatch[1])) !== null) {
-        cells.push(cellMatch[0].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
-      }
-      if (cells.length >= 3) {
-        const cellText = cells[0];
-        const parenMatch = cellText.match(/\(([^)]+)\)/);
-        const nickname = parenMatch ? parenMatch[1].trim() : null;
-        const ver = cellText.replace(/\([^)]+\)/g, '').replace(/[()]/g, '').trim().split(/\s+/)[0];
-        const parsed = parseMameVersion(ver);
-        if (parsed[0] > 0 || parsed[1] > 0) {
-          const allLinks = [...rowMatch[1].matchAll(/<a[^>]+href="([^"]+)"/gi)];
-          const url = allLinks.length > 0 ? allLinks[0][1].replace(/&amp;/g, '&') : null;
-          rows.push({ version: nickname || ver, parsed, numeric: ver, date: cells[1] || '', hasDat: cells[2] !== '-' && cells[2] !== '', year: cells[1].match(/(\d{4})/)?.[1] || '', url });
-        }
-      }
-    }
-
-    const imported = all('SELECT id, source, version, created_at FROM set_versions WHERE source = ? ORDER BY version', ['MAME']);
-    const importedParsed = imported.map(v => ({ id: v.id, source: v.source, version: v.version, parsed: parseMameVersion(v.version) }));
-    const availableDats = rows.filter(r => r.hasDat && !importedParsed.some(iv => cmpVersion(iv.parsed, r.parsed) === 0));
-    const hasNewer = latestVer ? !importedParsed.some(iv => cmpVersion(iv.parsed, latestVer) === 0) : false;
-
-    const _urls = {};
-    for (const r of rows) {
-      if (r.url) _urls[r.numeric] = r.url;
-    }
-    const result = {
-      source: 'MAME',
-      latest: latestVer ? fmtVersion(latestVer) : null, latestParsed: latestVer,
-      available: rows.filter(r => r.hasDat).map(r => ({ version: r.version, numeric: r.numeric, date: r.date, year: r.year, parsed: r.parsed, url: r.url })),
-      imported: importedParsed,
-      missing: availableDats.map(r => ({ version: r.version, numeric: r.numeric, date: r.date, parsed: r.parsed, url: r.url })),
-      hasNewer,
-      _urls,
-    };
-
-    mameDatsCache = result;
-    mameDatsCacheTime = Date.now();
-    res.json(result);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 router.post('/api/versions/import-online', async (req, res) => {
   await dbReady;
   try {
@@ -1040,6 +944,148 @@ router.post('/api/versions/import-dat', async (req, res) => {
     saveDb();
 
     res.json({ ok: true, version_id: versionId, source, version, total_games: gameNames.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// =============================================================================
+// NPS (NoPayStation)
+// =============================================================================
+
+router.get('/api/versions/available', async (req, res) => {
+  await dbReady;
+  try {
+    const source = (req.query.source || 'MAME').toUpperCase();
+
+    if (source === 'FBNEO') {
+      const fbneo = await getFBNeoVersions();
+      return res.json(fbneo);
+    }
+    if (source === 'OFFLINELIST') {
+      const offlinelist = await getOfflineListVersions();
+      return res.json(offlinelist);
+    }
+    if (source === 'DATOMATIC') {
+      const datomatic = getDatomicVersions();
+      return res.json(datomatic);
+    }
+    if (source === 'FBALPHA43' || source === 'FBALPHA44') {
+      const is43 = source === 'FBALPHA43';
+      const src = is43 ? 'FBAlpha43' : 'FBAlpha44';
+      const repo = is43 ? FBALPHA43_REPO : FBALPHA44_REPO;
+      const ver = is43 ? '0.2.97.43' : '0.2.97.44';
+      const imported = all("SELECT id, source, version FROM set_versions WHERE source = ? ORDER BY version", [src]);
+      return res.json({
+        source: src,
+        latest: ver,
+        hasNewer: false,
+        available: [{ version: ver, source: src, repo }],
+        imported,
+        missing: imported.length === 0 ? [{ version: ver, source: src, repo }] : [],
+      });
+    }
+    if (source === 'NPS') {
+      const imported = all("SELECT id, source, version FROM set_versions WHERE source = 'NPS' ORDER BY version");
+      const importedSet = new Set(imported.map(v => v.version));
+      const available = NPS_PLATFORMS.map(p => ({
+        version: p,
+        source: 'NPS',
+        name: NPS_PLATFORM_MAP[p].name,
+        hasDlcs: NPS_PLATFORM_MAP[p].hasDlcs,
+        hasUpdates: NPS_PLATFORM_MAP[p].hasUpdates,
+      }));
+      const missing = available.filter(v => !importedSet.has(v.version));
+      return res.json({
+        source: 'NPS',
+        latest: NPS_PLATFORMS[0],
+        hasNewer: missing.length > 0,
+        available,
+        imported,
+        missing,
+      });
+    }
+
+    if (mameDatsCache && Date.now() - mameDatsCacheTime < CACHE_TTL) return res.json(mameDatsCache);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    let html;
+    try {
+      const response = await fetch(MAME_DATS_URL, { signal: controller.signal });
+      html = await response.text();
+    } finally {
+      clearTimeout(timeoutId);
+    }
+    const plainText = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+    const latestMatch = plainText.match(/Latest\s+dat\s+a\s*vailable:\s*([\d.\sb]+)/i);
+    const latestVer = latestMatch ? parseMameVersion(latestMatch[1].replace(/\s+/g, '')) : null;
+
+    const rows = [];
+    const rowRegex = /<TR[^>]*>([\s\S]*?)<\/TR>/gi;
+    let rowMatch;
+    while ((rowMatch = rowRegex.exec(html)) !== null) {
+      const cells = [];
+      const cellRegex = /<TD[^>]*>[\s\S]*?<\/TD>/gi;
+      let cellMatch;
+      while ((cellMatch = cellRegex.exec(rowMatch[1])) !== null) {
+        cells.push(cellMatch[0].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
+      }
+      if (cells.length >= 3) {
+        const cellText = cells[0];
+        const parenMatch = cellText.match(/\(([^)]+)\)/);
+        const nickname = parenMatch ? parenMatch[1].trim() : null;
+        const ver = cellText.replace(/\([^)]+\)/g, '').replace(/[()]/g, '').trim().split(/\s+/)[0];
+        const parsed = parseMameVersion(ver);
+        if (parsed[0] > 0 || parsed[1] > 0) {
+          const allLinks = [...rowMatch[1].matchAll(/<a[^>]+href="([^"]+)"/gi)];
+          const url = allLinks.length > 0 ? allLinks[0][1].replace(/&amp;/g, '&') : null;
+          rows.push({ version: nickname || ver, parsed, numeric: ver, date: cells[1] || '', hasDat: cells[2] !== '-' && cells[2] !== '', year: cells[1].match(/(\d{4})/)?.[1] || '', url });
+        }
+      }
+    }
+
+    const imported = all('SELECT id, source, version, created_at FROM set_versions WHERE source = ? ORDER BY version', ['MAME']);
+    const importedParsed = imported.map(v => ({ id: v.id, source: v.source, version: v.version, parsed: parseMameVersion(v.version) }));
+    const availableDats = rows.filter(r => r.hasDat && !importedParsed.some(iv => cmpVersion(iv.parsed, r.parsed) === 0));
+    const hasNewer = latestVer ? !importedParsed.some(iv => cmpVersion(iv.parsed, latestVer) === 0) : false;
+
+    const _urls = {};
+    for (const r of rows) {
+      if (r.url) _urls[r.numeric] = r.url;
+    }
+    const result = {
+      source: 'MAME',
+      latest: latestVer ? fmtVersion(latestVer) : null, latestParsed: latestVer,
+      available: rows.filter(r => r.hasDat).map(r => ({ version: r.version, numeric: r.numeric, date: r.date, year: r.year, parsed: r.parsed, url: r.url })),
+      imported: importedParsed,
+      missing: availableDats.map(r => ({ version: r.version, numeric: r.numeric, date: r.date, parsed: r.parsed, url: r.url })),
+      hasNewer,
+      _urls,
+    };
+
+    mameDatsCache = result;
+    mameDatsCacheTime = Date.now();
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/api/versions/import-nps', async (req, res) => {
+  await dbReady;
+  try {
+    const { collection_id, platform } = req.body;
+    if (!collection_id || !platform) return res.status(400).json({ error: 'collection_id and platform required' });
+    if (!NPS_PLATFORM_MAP[platform]) return res.status(400).json({ error: `Invalid platform: ${platform}. Valid: ${NPS_PLATFORMS.join(', ')}` });
+
+    const db = getDb();
+    db.run('INSERT INTO set_versions (source, version) VALUES (?, ?)', ['NPS', platform]);
+    const idResult = db.exec('SELECT last_insert_rowid() as id');
+    const versionId = idResult[0]?.values[0]?.[0];
+    if (!versionId) return res.status(500).json({ error: 'Failed to create version' });
+
+    const result = await importNps(platform, versionId);
+
+    run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, versionId]);
+
+    res.json({ ok: true, version_id: versionId, ...result });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

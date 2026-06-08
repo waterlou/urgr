@@ -8,6 +8,7 @@ import { getDb } from '../db.js';
 import { execCli, execCliStream } from '../cli.js';
 import { createJob, getJob, updateProgress, doneJob, failJob, cancelJob } from '../jobs.js';
 import { all, get, run, runNow, unescapeXml, KNOWN_PLATFORMS, dbReady } from '../helpers.js';
+import { scanNpsDir, buildNps } from '../nps.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = Router();
@@ -636,6 +637,64 @@ router.post('/api/collections/:id/download-ia', async (req, res) => {
     }, 0);
 
     res.status(202).json({ jobId, file: target.name, size: totalSize });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// =============================================================================
+// NPS (NoPayStation) scan and build
+// =============================================================================
+
+router.post('/api/collections/:id/scan-nps', async (req, res) => {
+  await dbReady;
+  try {
+    const { version_id, dir } = req.body;
+    if (!version_id || !dir) return res.status(400).json({ error: 'version_id and dir required' });
+
+    const col = get('SELECT * FROM collections WHERE id = ?', [req.params.id]);
+    if (!col) return res.status(404).json({ error: 'Collection not found' });
+
+    const sv = get('SELECT * FROM set_versions WHERE id = ?', [version_id]);
+    if (!sv) return res.status(404).json({ error: 'Version not found' });
+    if (sv.source !== 'NPS') return res.status(400).json({ error: 'Version is not an NPS version' });
+
+    const result = scanNpsDir(dir, version_id);
+    res.json({ ok: true, ...result });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/api/collections/:id/build-nps', async (req, res) => {
+  await dbReady;
+  try {
+    const { version_id, input_dir } = req.body;
+    if (!version_id) return res.status(400).json({ error: 'version_id required' });
+
+    const col = get('SELECT * FROM collections WHERE id = ?', [req.params.id]);
+    if (!col) return res.status(404).json({ error: 'Collection not found' });
+
+    const sv = get('SELECT * FROM set_versions WHERE id = ?', [version_id]);
+    if (!sv) return res.status(404).json({ error: 'Version not found' });
+    if (sv.source !== 'NPS') return res.status(400).json({ error: 'Version is not an NPS version' });
+
+    const collectionDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', col.folder || col.slug);
+    fs.mkdirSync(collectionDir, { recursive: true });
+
+    const jobId = crypto.randomUUID();
+    const job = createJob(jobId);
+    job._abort = new AbortController();
+
+    setTimeout(async () => {
+      try {
+        const result = await buildNps(collectionDir, version_id, input_dir, (progress) => {
+          updateProgress(jobId, Math.round((progress.built + progress.skipped) / progress.total * 100), progress.msg);
+        });
+        doneJob(jobId, result);
+      } catch (e) {
+        if (job._abort.signal.aborted) return cancelJob(jobId);
+        failJob(jobId, e.message);
+      }
+    }, 0);
+
+    res.status(202).json({ jobId });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

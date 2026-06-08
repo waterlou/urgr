@@ -172,6 +172,15 @@ export function importOnlineVersion(collectionId, version, source, refresh) {
 export function importDat(content) {
   return fetchWithBody('/versions/import-dat', 'POST', { content });
 }
+export function importNps(collectionId, platform) {
+  return fetchWithBody('/versions/import-nps', 'POST', { collection_id: collectionId, platform });
+}
+export function scanNpsCollection(id, version_id, dir) {
+  return fetchWithBody(`/collections/${id}/scan-nps`, 'POST', { version_id, dir });
+}
+export function buildNpsCollection(id, version_id, input_dir) {
+  return fetchWithBody(`/collections/${id}/build-nps`, 'POST', { version_id, input_dir });
+}
 
 // ==============================
 // Scraper
