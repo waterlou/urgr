@@ -58,6 +58,11 @@ function shouldIgnore(name) {
   return lower.includes('theme') || lower.includes('demo');
 }
 
+// Strip firmware/version suffixes for grouping: "(3.61+!) [3.63]" -> ""
+function normalizeForGroup(name) {
+  return name.replace(/\s*\([\d.]+\+?!\)\s*/g, '').replace(/\s*\[[\d.]+\]\s*/g, '').trim();
+}
+
 async function fetchTsv(url) {
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`Failed to fetch ${url}: ${resp.status}`);
@@ -94,7 +99,7 @@ export async function importNps(platform, versionId) {
   let gamesImported = 0;
   let romsImported = 0;
 
-  // Group by name — one game entry per unique name, multiple ROMs (one per region)
+  // Group by normalized name — strip firmware suffixes like "(3.61+!) [3.63]"
   const grouped = new Map();
   for (const row of allGames) {
     if (shouldIgnore(row.Name || '')) continue;
@@ -102,28 +107,29 @@ export async function importNps(platform, versionId) {
     if (!pkgUrl) continue;
 
     const name = row.Name || row.name || '';
-    if (!grouped.has(name)) {
-      grouped.set(name, {
+    const groupKey = normalizeForGroup(name);
+    if (!grouped.has(groupKey)) {
+      grouped.set(groupKey, {
         name,
         titleIds: [],
         originalName: row['Original Name'] || row.original_name || '',
         regions: [],
       });
     }
-    const g = grouped.get(name);
+    const g = grouped.get(groupKey);
     g.titleIds.push(row['Title ID'] || '');
     g.regions.push(row.Region || row.region || '');
     if (!g.originalName) g.originalName = row['Original Name'] || row.original_name || '';
   }
 
   // Create game entries
-  for (const [name, g] of grouped) {
-    const existing = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ?', [versionId, name]);
+  for (const [groupKey, g] of grouped) {
+    const existing = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ?', [versionId, g.name]);
     if (existing) continue;
 
     const regions = [...new Set(g.regions)].join(', ');
     run('INSERT INTO game_entries (version_id, name, description, year, platform, title_id, content_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [versionId, name, g.originalName, regions, info.folder, g.titleIds[0], '']);
+      [versionId, g.name, g.originalName, regions, info.folder, g.titleIds[0], '']);
     gamesImported++;
   }
 
