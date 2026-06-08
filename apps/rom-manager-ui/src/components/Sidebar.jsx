@@ -29,15 +29,6 @@ export default function Sidebar({
           <span>All Games</span>
         </button>
 
-        <button
-          className={`sidebar-section-btn ${activeView === 'downloads' ? 'active' : ''}`}
-          onClick={() => onSelect('downloads', null)}
-        >
-          <span className="icon icon-sm section-icon">download</span>
-          <span>Downloads</span>
-          {queueCount > 0 && <span className="sidebar-item-count">{queueCount}</span>}
-        </button>
-
         <div className="sidebar-section">
           <div className="sidebar-section-header">
             <span>Collections</span>
@@ -85,6 +76,15 @@ export default function Sidebar({
             </div>
           ))}
         </div>
+
+        <button
+          className={`sidebar-section-btn ${activeView === 'downloads' ? 'active' : ''}`}
+          onClick={() => onSelect('downloads', null)}
+        >
+          <span className="icon icon-sm section-icon">download</span>
+          <span>Downloads</span>
+          {queueCount > 0 && <span className="sidebar-item-count">{queueCount}</span>}
+        </button>
       </nav>
 
       <div className="sidebar-footer">
