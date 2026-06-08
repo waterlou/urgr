@@ -348,17 +348,19 @@ router.post('/api/collections/:id/build', async (req, res) => {
             ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id]);
           const matched = get('SELECT COUNT(*) as c FROM scanned_games WHERE version_id = ? AND filename != ?', [version_id, '']).c;
           const total = get('SELECT COUNT(*) as c FROM scanned_games WHERE version_id = ?', [version_id]).c;
-          // Calculate reuse from previous version builds
+          // Calculate reuse: check if matched files exist in prior version dirs
           let reused = 0;
-          const priorVersions = all('SELECT DISTINCT sv.version FROM set_versions sv JOIN collection_builds cb ON cb.version_id = sv.id WHERE cb.collection_id = ? AND cb.version_id != ? AND cb.status = ?', [col.id, version_id, 'complete']);
+          const priorVersions = all('SELECT DISTINCT sv.version, sv.id FROM set_versions sv JOIN collection_versions cv ON cv.version_id = sv.id WHERE cv.collection_id = ? AND sv.id < ? ORDER BY sv.id', [col.id, version_id]);
           if (priorVersions.length > 0 && fs.existsSync(collectionDir)) {
             const matchedGames = all('SELECT name FROM scanned_games WHERE version_id = ? AND filename != ?', [version_id, '']);
             for (const game of matchedGames) {
               for (const pv of priorVersions) {
                 const pvRoms = path.join(collectionDir, pv.version, 'roms');
                 if (!fs.existsSync(pvRoms)) continue;
-                const found = fs.readdirSync(pvRoms, { recursive: true }).some(f => path.basename(f) === `${game.name}.zip`);
-                if (found) { reused++; break; }
+                try {
+                  const found = fs.readdirSync(pvRoms, { recursive: true }).some(f => path.basename(f) === `${game.name}.zip`);
+                  if (found) { reused++; break; }
+                } catch {}
               }
             }
           }
