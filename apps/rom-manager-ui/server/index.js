@@ -61,13 +61,20 @@ app.use((req, res) => {
 // =============================================================================
 // Start
 // =============================================================================
-// Startup cleanup: reset orphaned builds (server crashed/restarted)
+// Startup cleanup: reset orphaned builds and stale scrape jobs (server crashed/restarted)
 dbReady.then(() => {
   const orphans = all("SELECT id FROM collection_builds WHERE status = 'building'");
   if (orphans.length > 0) {
     console.log(`Resetting ${orphans.length} orphaned build(s) to 'failed'`);
     for (const o of orphans) {
       run("UPDATE collection_builds SET status = 'failed' WHERE id = ?", [o.id]);
+    }
+  }
+  const staleJobs = all("SELECT id FROM scrape_jobs WHERE status = 'running'");
+  if (staleJobs.length > 0) {
+    console.log(`Resetting ${staleJobs.length} stale scrape job(s) to 'failed'`);
+    for (const j of staleJobs) {
+      run("UPDATE scrape_jobs SET status = 'failed', progress_msg = 'Server restarted' WHERE id = ?", [j.id]);
     }
   }
 });
