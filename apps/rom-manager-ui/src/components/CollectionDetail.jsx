@@ -45,7 +45,6 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
             }
           } catch (e) {
             console.error('Auto-import failed:', e.message)
-            setError(`Auto-import failed: ${e.message}`)
           }
           setImporting(false)
           // Reload versions after import
