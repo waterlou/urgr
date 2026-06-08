@@ -48,6 +48,37 @@ cargo build -p db-cli --release
 - `parse-cli import` handles Logiqx, ClrMamePro, MAME XML, and OfflineList XML DAT formats
 - DAT sources: MAME (progettosnaps.net), FBNeo (GitHub), OfflineList (nointro.free.fr), DAT-O-MATIC (datomatic.no-intro.org, auto-download)
 
+## CLI Specifications
+
+### `build-cli` (DAT-based collections: FBNeo, MAME)
+
+Commands:
+- `scan <version-id> <dir>` — Walk dir for `.zip` files, match by stem (filename without extension) against game names. Updates `scanned_games` table: matched = `filename` set + `status='ok'`, unmatched = `filename=''` + `status='missing'`. Output: `{ total_files, matched_games, missing_games }`. No `game_state` writes.
+- `build <source> <import-dir> [--version-id <id>] [--base-dir <dir>] [--collection-dir <dir>] [--dry-run] [--progress]` — Build ROM set from `import-dir` into collection dir. `--dry-run` reports what would happen without copying. Handles reuse from previous version builds. Output: `{ added, exists, reused, missing, missing_games, cleaned }`.
+
+**Versioned** (FBNeo, MAME): `reused` is calculated from `collection_builds` — ROMs from previous version builds that still match expected checksums can be reused instead of re-copied.
+
+### `nps-cli` (NoPayStation)
+
+Commands:
+- `scan <version-id> <dir>` — Walk dir for `.pkg` files, extract `title_id` from filename (pattern: `{prefix}-{title_id}_{num}-...`). Updates `scanned_games` table: matched = `filename` set + `status='ok'`, unmatched = `filename=''` + `status='missing'`. Output: `{ total_files, matched_games, missing_games }`. No `game_state` writes.
+- `build <version-id> <collection-dir> [--input-dir <dir>]` — Copy/download PKG files into `{collection-dir}/{platform}/{Games|DLCs|Updates}/`. Output: `{ built, skipped, total }`.
+
+**Unversioned** (NPS, No-Intro): no reuse concept — `reused` is always 0.
+
+### `POST /api/collections/:id/build`
+
+Unified endpoint for both scan and build. Behavior:
+- **scan=true**: Calls the appropriate `* scan` CLI (nps-cli or build-cli), then server reads `scanned_games` and updates `game_state.available`. **No `import_dir` needed**. Uses `data/roms/{collection_folder}` as scan dir. Returns `{ exists, reused, missing }`.
+- **scan=false & NPS**: Calls `nps-cli build`. No `import_dir` needed.
+- **scan=false & DAT**: Calls `build-cli build` with progress streaming. Requires `import_dir`.
+
+### Frontend (BuildManager scan result)
+
+Displays: `✓ {exists} exist · ♻ {reused} reused · ✗ {missing} missing`
+- For unversioned collections: `reused` is always 0 (not shown by frontend)
+- For versioned collections: `reused` comes from build-cli's cross-version analysis
+
 ## Git Workflow
 
 1. Never commit to `main` or `master`

@@ -320,23 +320,26 @@ router.post('/api/collections/:id/build', async (req, res) => {
     const sv = get('SELECT source, version FROM set_versions WHERE id = ?', [version_id]);
     if (!sv) return res.status(404).json({ error: 'Version not found' });
 
+    const isNps = sv.source === 'NPS';
+    const needsImportDir = !isNps && !scan;
+    if (needsImportDir && !import_dir) return res.status(400).json({ error: 'import_dir required for DAT builds' });
+
     const collectionDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', col.folder || col.slug);
+
     const jobId = crypto.randomUUID();
     const job = createJob(jobId);
     job._abort = new AbortController();
 
     setTimeout(async () => {
       try {
-        const isNps = sv.source === 'NPS';
         if (scan) {
-          // Unified scan: always use collection's ROM dir, never import_dir
+          // Scan: always uses collectionDir, never needs import_dir
           if (isNps) {
             execCli(['scan', String(version_id), collectionDir], { binary: 'nps' });
           } else {
             execCli(['scan', String(version_id), collectionDir], { binary: 'build' });
           }
           reloadDb();
-          // Update game_state from scanned_games — matched games get available=1
           runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
             SELECT ge.id, 1, datetime('now')
             FROM game_entries ge
@@ -345,8 +348,9 @@ router.post('/api/collections/:id/build', async (req, res) => {
             ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id]);
           const matched = get('SELECT COUNT(*) as c FROM scanned_games WHERE version_id = ? AND filename != ?', [version_id, '']).c;
           const total = get('SELECT COUNT(*) as c FROM scanned_games WHERE version_id = ?', [version_id]).c;
-          doneJob(jobId, { added: matched, exists: 0, reused: 0, missing: total - matched });
+          doneJob(jobId, { exists: matched, reused: 0, missing: total - matched });
         } else if (isNps) {
+          // NPS build
           fs.mkdirSync(collectionDir, { recursive: true });
           const result = execCli(['build', String(version_id), collectionDir, '--input-dir', collectionDir], { binary: 'nps' });
           reloadDb();
