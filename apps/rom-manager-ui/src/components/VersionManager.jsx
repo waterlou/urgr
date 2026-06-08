@@ -92,6 +92,10 @@ export default function VersionManager({ collectionId, collection, versions = []
     }
   }
 
+  // Collection-specific missing versions (exclude already-imported ones)
+  const importedVersions = new Set(versions.map(v => v.version))
+  const missingForThis = (availableDats?.available || []).filter(v => !importedVersions.has(v.version))
+
   return (
     <>
       {/* MAME / FBNeo DAT Versions */}
@@ -104,8 +108,7 @@ export default function VersionManager({ collectionId, collection, versions = []
           <p className="detail-section-desc">
             {preset === 'MAME' ? 'Latest MAME: ' : 'Latest: '}
             <strong>{availableDats?.latest}</strong>
-            {availableDats?.imported?.length > 0 && ` · ${availableDats.imported.length} version(s) imported`}
-            {availableDats?.missing?.length > 0 && ` · ${availableDats.missing.length} version(s) not yet imported`}
+            {versions.length > 0 && ` · ${versions.length} version(s) imported`}
           </p>
 
           {availableDats?.source === 'FBNeo' && (
@@ -115,13 +118,13 @@ export default function VersionManager({ collectionId, collection, versions = []
             </div>
           )}
 
-          {availableDats?.missing?.length > 0 && (
+          {missingForThis.length > 0 && (
             <div className="info-box warn">
               <strong>Versions available to import:</strong>
               {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing {importingVer}...</div>}
               <div className="tag-list">
                 {(() => {
-                  let items = availableDats.missing;
+                  let items = missingForThis;
                   if (availableDats.source === 'MAME' && !showAllMame) {
                     const latest = availableDats.latest;
                     const milestones = items.filter(d => MAME_MILESTONES.has(d.version));
@@ -151,7 +154,7 @@ export default function VersionManager({ collectionId, collection, versions = []
               </div>
               {availableDats.source === 'MAME' && (
                 <button className="btn btn-sm btn-secondary" style={{marginTop:8}} onClick={() => setShowAllMame(v => !v)}>
-                  {showAllMame ? 'Show highlights only' : `Show all (${availableDats.missing.length} versions)`}
+                  {showAllMame ? 'Show highlights only' : `Show all (${missingForThis.length} versions)`}
                 </button>
               )}
             </div>
@@ -225,13 +228,9 @@ export default function VersionManager({ collectionId, collection, versions = []
             <div className="info-box warn" style={{marginTop:12}}>
               <strong>DAT not imported yet.</strong>
               {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing...</div>}
-              <p className="detail-section-desc" style={{marginTop:8}}>
-                The dataset will be imported automatically. If this doesn't happen, check the browser console for errors.
-                {availableDats?.missing?.length > 0 && ' You can also import manually from the list below.'}
-              </p>
-              {availableDats?.missing?.length > 0 && (
+              {missingForThis.length > 0 && (
                 <div className="tag-list" style={{marginTop:8}}>
-                  {availableDats.missing.map(d => (
+                  {missingForThis.map(d => (
                     <button
                       key={d.version}
                       className="tag tag-import"
@@ -285,13 +284,9 @@ export default function VersionManager({ collectionId, collection, versions = []
             <div className="info-box warn" style={{marginTop:12}}>
               <strong>System not imported yet.</strong>
               {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing...</div>}
-              <p className="detail-section-desc" style={{marginTop:8}}>
-                The dataset will be imported automatically. If this doesn't happen, check the browser console for errors.
-                {availableDats?.missing?.length > 0 && ' You can also import manually from the list below.'}
-              </p>
-              {availableDats?.missing?.length > 0 && (
+              {missingForThis.length > 0 && (
                 <div className="tag-list" style={{marginTop:8}}>
-                  {availableDats.missing.map(d => (
+                  {missingForThis.map(d => (
                     <button
                       key={d.version}
                       className="tag tag-import"
@@ -340,12 +335,12 @@ export default function VersionManager({ collectionId, collection, versions = []
                 })}
               </div>
             </div>
-          ) : availableDats?.missing?.length > 0 && (
+          ) : missingForThis.length > 0 && (
             <div className="info-box warn" style={{marginTop:12}}>
               <strong>Platform not imported yet.</strong>
               {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing {importingVer}...</div>}
               <div className="tag-list" style={{marginTop:8}}>
-                {availableDats.missing.map(p => (
+                {missingForThis.map(p => (
                   <button
                     key={p.version}
                     className="tag tag-import"
