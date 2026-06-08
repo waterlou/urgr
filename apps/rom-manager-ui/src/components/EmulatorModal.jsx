@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { getEmulatorCore } from '../platformEmulator.js'
+import { playUrl } from '../api.js'
 
 const EJS_CDN = 'https://cdn.emulatorjs.org/stable/data/'
 
@@ -18,7 +19,7 @@ function loadScript() {
   })
 }
 
-export default function EmulatorModal({ game, rom, onClose }) {
+export default function EmulatorModal({ game, onClose }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -37,8 +38,8 @@ export default function EmulatorModal({ game, rom, onClose }) {
         // Set globals BEFORE loading script
         window.EJS_player = '#emulator-game'
         window.EJS_core = core
-        window.EJS_gameName = rom.filename
-        window.EJS_gameUrl = `/api/games/${game.id}/rom/${rom.id}`
+        window.EJS_gameName = game.name
+        window.EJS_gameUrl = playUrl(game.id)
         window.EJS_color = '#1a1a2e'
         window.EJS_fullscreenOnExit = false
         window.EJS_startOnLoaded = true
@@ -58,7 +59,6 @@ export default function EmulatorModal({ game, rom, onClose }) {
 
     return () => {
       destroyed = true
-      // Cleanup: remove emulator DOM and reset globals
       const el = document.getElementById('emulator-game')
       if (el) el.innerHTML = ''
       try { delete window.EJS_player } catch {}
@@ -68,7 +68,7 @@ export default function EmulatorModal({ game, rom, onClose }) {
       try { delete window.EJS_color } catch {}
       try { delete window.EJS_pathtodata } catch {}
     }
-  }, [game, rom])
+  }, [game])
 
   useEffect(() => {
     function handleKey(e) {

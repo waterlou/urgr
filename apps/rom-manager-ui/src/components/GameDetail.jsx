@@ -272,8 +272,8 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
         )}
       </div>
 
-      {showEmulator && game.roms && game.roms.length > 0 && (
-        <EmulatorModal game={game} rom={game.roms[0]} onClose={() => setShowEmulator(false)} />
+      {showEmulator && (
+        <EmulatorModal game={game} onClose={() => setShowEmulator(false)} />
       )}
     </div>
   )

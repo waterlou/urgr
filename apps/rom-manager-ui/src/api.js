@@ -149,7 +149,7 @@ export function updateGameRating(id, data) {
   return fetchWithBody(`/games/${id}/rating`, 'PUT', data);
 }
 export function coverUrl(id) { return `${BASE}/games/${id}/cover?_=${Date.now()}`; }
-export function romFileUrl(gameId, romId) { return `${BASE}/games/${gameId}/rom/${romId}`; }
+export function playUrl(gameId) { return `${BASE}/games/${gameId}/play`; }
 
 // ==============================
 // Versions

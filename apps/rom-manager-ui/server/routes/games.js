@@ -125,54 +125,57 @@ router.get('/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Serve a ROM file for emulation
-router.get('/:id/rom/:romId', async (req, res) => {
+// Serve a ROM file for emulation (auto-finds the correct file)
+router.get('/:id/play', async (req, res) => {
   await dbReady;
   try {
     const game = get('SELECT g.*, sv.source FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [req.params.id]);
     if (!game) return res.status(404).json({ error: 'Game not found' });
 
-    const rom = get('SELECT * FROM rom_entries WHERE id = ? AND game_entry_id = ?', [req.params.romId, req.params.id]);
-    if (!rom) return res.status(404).json({ error: 'ROM not found' });
-
     let filePath = null
 
-    // For arcade/MAME/FBNeo: the zip file path is in scanned_games
+    // 1. Arcade/MAME/FBNeo: zip from scanned_games
     const scanned = get('SELECT filename FROM scanned_games WHERE name = ? AND version_id = ?', [game.name, game.version_id]);
     if (scanned && scanned.filename && fs.existsSync(scanned.filename)) {
       filePath = scanned.filename
     }
 
-    // For NPS: find the pkg/game file on disk
+    // 2. NPS: find the downloaded file
     if (!filePath && game.source === 'NPS') {
-      const col = get(`SELECT c.folder, c.slug FROM collections c
-        JOIN collection_versions cv ON cv.collection_id = c.id
-        WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
-      const colFolder = col?.folder || col?.slug || String(game.version_id);
-      const dataDir = path.resolve(__dirname, '..', '..', '..', 'data');
-      const subDir = rom.subtype === 'dlc' ? 'DLCs' : rom.subtype === 'update' ? 'Updates' : 'Games'
-      const candidate = path.join(dataDir, 'roms', colFolder, game.platform, subDir, rom.filename)
-      if (fs.existsSync(candidate)) filePath = candidate
+      const rom = get('SELECT * FROM rom_entries WHERE game_entry_id = ? AND subtype = ? LIMIT 1', [game.id, 'game']);
+      if (rom) {
+        const col = get(`SELECT c.folder, c.slug FROM collections c
+          JOIN collection_versions cv ON cv.collection_id = c.id
+          WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
+        const colFolder = col?.folder || col?.slug || String(game.version_id);
+        const dataDir = path.resolve(__dirname, '..', '..', '..', 'data')
+        const subDir = rom.subtype === 'dlc' ? 'DLCs' : rom.subtype === 'update' ? 'Updates' : 'Games'
+        const candidate = path.join(dataDir, 'roms', colFolder, game.platform, subDir, rom.filename)
+        if (fs.existsSync(candidate)) filePath = candidate
+      }
     }
 
-    // For No-Intro/DAT: try common locations
+    // 3. No-Intro/DAT: try first ROM entry in common locations
     if (!filePath) {
-      const col = get(`SELECT c.folder, c.slug FROM collections c
-        JOIN collection_versions cv ON cv.collection_id = c.id
-        WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
-      const colFolder = col?.folder || col?.slug || String(game.version_id);
-      const dataDir = path.resolve(__dirname, '..', '..', '..', 'data');
-      const baseRomsDir = path.join(dataDir, 'roms', colFolder);
-      const candidates = [
-        path.join(baseRomsDir, 'Games', rom.filename),
-        path.join(baseRomsDir, rom.filename),
-      ]
-      if (!rom.filename.endsWith('.zip')) {
-        candidates.push(path.join(baseRomsDir, 'Games', rom.filename + '.zip'))
-        candidates.push(path.join(baseRomsDir, rom.filename + '.zip'))
-      }
-      for (const c of candidates) {
-        if (fs.existsSync(c)) { filePath = c; break }
+      const rom = get('SELECT * FROM rom_entries WHERE game_entry_id = ? LIMIT 1', [game.id]);
+      if (rom) {
+        const col = get(`SELECT c.folder, c.slug FROM collections c
+          JOIN collection_versions cv ON cv.collection_id = c.id
+          WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
+        const colFolder = col?.folder || col?.slug || String(game.version_id);
+        const dataDir = path.resolve(__dirname, '..', '..', '..', 'data')
+        const baseRomsDir = path.join(dataDir, 'roms', colFolder);
+        const candidates = [
+          path.join(baseRomsDir, 'Games', rom.filename),
+          path.join(baseRomsDir, rom.filename),
+        ]
+        if (!rom.filename.endsWith('.zip')) {
+          candidates.push(path.join(baseRomsDir, 'Games', rom.filename + '.zip'))
+          candidates.push(path.join(baseRomsDir, rom.filename + '.zip'))
+        }
+        for (const c of candidates) {
+          if (fs.existsSync(c)) { filePath = c; break }
+        }
       }
     }
 
