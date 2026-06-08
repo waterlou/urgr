@@ -150,26 +150,26 @@ export default function VersionManager({ collectionId, collection, versions = []
           )}
 
           {/* Already-imported versions with refresh for nightly */}
-          {versions.length > 0 && (
+          {availableDats.imported?.length > 0 && (
             <div className="info-box" style={{marginTop:12}}>
               <strong>Imported versions:</strong>
               <div className="tag-list" style={{marginTop:8}}>
-                {versions.map(v => {
-                  const isNightly = v.version === 'nightly';
-                  const age = v.created_at ? getAge(v.created_at) : null;
+                {availableDats.imported.map(iv => {
+                  const isNightly = iv.version === 'nightly';
+                  const age = iv.created_at ? getAge(iv.created_at) : null;
                   return (
-                    <span key={v.id} className="tag" style={{display:'inline-flex',alignItems:'center',gap:4}}>
+                    <span key={iv.id} className="tag" style={{display:'inline-flex',alignItems:'center',gap:4}}>
                       <span className="icon icon-sm" style={{fontSize:14}}>check</span>
-                      {v.source ? `${v.source} — ${v.version}` : v.version}
+                      {iv.source ? `${iv.source} — ${iv.version}` : iv.version}
                       {age && <span className="tag-date">{age}</span>}
                       {isNightly && (
                         <button
                           className="btn btn-sm btn-secondary"
                           style={{padding:'1px 6px',fontSize:11,marginLeft:4}}
-                          onClick={() => handleImportOnline(v.version, 'FBNeo', true)}
+                          onClick={() => handleImportOnline(iv.version, 'FBNeo', true)}
                           disabled={importingVer !== null}
                         >
-                          {importingVer === v.version ? '...' : 'Refresh'}
+                          {importingVer === iv.version ? '...' : 'Refresh'}
                         </button>
                       )}
                     </span>
@@ -182,11 +182,11 @@ export default function VersionManager({ collectionId, collection, versions = []
       )}
 
       {/* OfflineList DAT */}
-      {availableDats && isOfflineList && (
+      {isOfflineList && (
         <section className="detail-section">
           <h2 className="detail-section-title">
             OfflineList DAT
-            {availableDats.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>Update available</span>}
+            {availableDats?.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>Update available</span>}
           </h2>
           {versions.length > 0 ? (
             <div className="info-box" style={{marginTop:12}}>
@@ -213,34 +213,40 @@ export default function VersionManager({ collectionId, collection, versions = []
                 })}
               </div>
             </div>
-          ) : availableDats.missing?.length > 0 && (
+          ) : (
             <div className="info-box warn" style={{marginTop:12}}>
               <strong>DAT not imported yet.</strong>
-              {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing {importingVer}...</div>}
-              <div className="tag-list" style={{marginTop:8}}>
-                {availableDats.missing.map(d => (
-                  <button
-                    key={d.version}
-                    className="tag tag-import"
-                    onClick={() => handleImportOnline(d.version, 'OFFLINELIST')}
-                    disabled={importingVer !== null}
-                  >
-                    <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:2}}>{importingVer === d.version ? 'hourglass' : 'add'}</span>
-                    {d.version}
-                  </button>
-                ))}
-              </div>
+              {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing...</div>}
+              <p className="detail-section-desc" style={{marginTop:8}}>
+                The dataset will be imported automatically. If this doesn't happen, check the browser console for errors.
+                {availableDats?.missing?.length > 0 && ' You can also import manually from the list below.'}
+              </p>
+              {availableDats?.missing?.length > 0 && (
+                <div className="tag-list" style={{marginTop:8}}>
+                  {availableDats.missing.map(d => (
+                    <button
+                      key={d.version}
+                      className="tag tag-import"
+                      onClick={() => handleImportOnline(d.version, 'OFFLINELIST')}
+                      disabled={importingVer !== null}
+                    >
+                      <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:2}}>{importingVer === d.version ? 'hourglass' : 'add'}</span>
+                      {d.version}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </section>
       )}
 
       {/* DAT-O-MATIC DAT */}
-      {availableDats && isDatomic && (
+      {isDatomic && (
         <section className="detail-section">
           <h2 className="detail-section-title">
             DAT-O-MATIC DAT
-            {availableDats.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>Update available</span>}
+            {availableDats?.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>Update available</span>}
           </h2>
           {versions.length > 0 ? (
             <div className="info-box" style={{marginTop:12}}>
@@ -267,23 +273,29 @@ export default function VersionManager({ collectionId, collection, versions = []
                 })}
               </div>
             </div>
-          ) : availableDats.missing?.length > 0 && (
+          ) : (
             <div className="info-box warn" style={{marginTop:12}}>
               <strong>System not imported yet.</strong>
-              {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing {importingVer}...</div>}
-              <div className="tag-list" style={{marginTop:8}}>
-                {availableDats.missing.map(d => (
-                  <button
-                    key={d.version}
-                    className="tag tag-import"
-                    onClick={() => handleImportOnline(d.version, 'DATOMATIC')}
-                    disabled={importingVer !== null}
-                  >
-                    <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:2}}>{importingVer === d.version ? 'hourglass' : 'add'}</span>
-                    {d.version}
-                  </button>
-                ))}
-              </div>
+              {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing...</div>}
+              <p className="detail-section-desc" style={{marginTop:8}}>
+                The dataset will be imported automatically. If this doesn't happen, check the browser console for errors.
+                {availableDats?.missing?.length > 0 && ' You can also import manually from the list below.'}
+              </p>
+              {availableDats?.missing?.length > 0 && (
+                <div className="tag-list" style={{marginTop:8}}>
+                  {availableDats.missing.map(d => (
+                    <button
+                      key={d.version}
+                      className="tag tag-import"
+                      onClick={() => handleImportOnline(d.version, 'DATOMATIC')}
+                      disabled={importingVer !== null}
+                    >
+                      <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:2}}>{importingVer === d.version ? 'hourglass' : 'add'}</span>
+                      {d.version}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </section>
