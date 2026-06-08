@@ -7,7 +7,7 @@ A ROM collection manager with DAT parsing, metadata scraping, ROM building, and 
 - **Frontend**: React 19 + Vite 6 (`apps/rom-manager-ui/src/`)
 - **Server**: Node.js + Express 5 (`apps/rom-manager-ui/server/`)
 - **Database**: SQLite via sql.js (`data/roms.db`)
-- **CLI tools**: Rust workspace (`apps/parse-cli`, `apps/build-cli`, `apps/scraper-cli`, `apps/db-cli`)
+- **CLI tools**: Rust workspace (`apps/parse-cli`, `apps/build-cli`, `apps/nps-cli`, `apps/scraper-cli`, `apps/db-cli`)
 - **Shared libs**: Rust (`libs/rom-manager`, `libs/rom-scraper`)
 
 ## Commands
@@ -16,16 +16,18 @@ A ROM collection manager with DAT parsing, metadata scraping, ROM building, and 
 # Start server (production mode, serves built frontend)
 cd apps/rom-manager-ui && node server/index.js
 
-# Build frontend (required after JSX/CSS changes)
+# Build frontend (required after JSX/CSS edits)
 cd apps/rom-manager-ui && npx vite build
 
 # Run tests
-cd apps/rom-manager-ui && bash server/test-api.sh      # API tests
+cd apps/rom-manager-ui && bash server/test-api.sh      # API tests (14)
+cd apps/rom-manager-ui && npm run test:nps              # NPS unit tests (21)
 cd apps/rom-manager-ui && npx playwright test           # UI tests
 
 # Build Rust CLI tools
 cargo build -p parse-cli --release
 cargo build -p build-cli --release
+cargo build -p nps-cli --release
 cargo build -p scraper-cli --release
 cargo build -p db-cli --release
 ```
@@ -34,19 +36,37 @@ cargo build -p db-cli --release
 
 - Express server at `apps/rom-manager-ui/server/index.js` serves API + built frontend from `dist/`
 - All API routes under `/api/`; SSE job progress at `/api/jobs/:jobId`
-- DB schema in `apps/rom-manager-ui/server/db.js` (11 tables: `set_versions`, `game_entries`, `rom_entries`, `collections`, `collection_versions`, `game_sets`, `game_set_games`, etc.)
+- DB schema in `apps/rom-manager-ui/server/db.js` (tables: `set_versions`, `game_entries`, `rom_entries`, `scanned_games`, `game_state`, `collections`, `collection_versions`, `collection_builds`, `download_queue`, `scrape_jobs`, `game_sets`, `game_set_games`, `meta`, etc.)
 - Frontend API client in `apps/rom-manager-ui/src/api.js`
 - Rust CLIs communicate via JSON stdout; `execCli`/`execCliStream` helpers in `server/cli.js`
+- Game state (available/rating/favourite) stored in sparse `game_state` table (no row = defaults)
+- Router: custom `useRouter` hook with query params (`?view=`, `?id=`, `?game=`)
 
 ## Non-obvious Constraints
 
 - **WAL files** (`roms.db-wal`, `roms.db-shm`) must be deleted when doing direct `sqlite3` updates — they shadow the main DB
 - **Frontend changes require rebuild**: server serves `dist/` statically; run `npx vite build` after JSX/CSS edits
 - **Rust changes require recompilation**: run `cargo build -p <name> --release` after modifying Rust source
+- **sql.js in-memory DB**: server loads DB into memory at startup; autosave happens 200ms after each write via debounce. Direct file edits while server runs get overwritten.
 - DB path injection: `execCli` automatically appends `--json --db <path>` for Rust binaries
 - `findBinary` checks: env var → PATH → `target/release/` → `target/debug/` → `/usr/local/bin/`
-- `parse-cli import` handles Logiqx, ClrMamePro, MAME XML, and OfflineList XML DAT formats
-- DAT sources: MAME (progettosnaps.net), FBNeo (GitHub), OfflineList (nointro.free.fr), DAT-O-MATIC (datomatic.no-intro.org, auto-download)
+
+## Chrome CDP Debug
+
+`browser-harness-js` is at `/opt/homebrew/bin/browser-harness-js` (skill at `~/.agents/skills/cdp/`).
+
+```bash
+# Chrome Canary starts with --remote-debugging-port=9222
+# Use explicit wsUrl since auto-detect doesn't work for Canary:
+WS_URL=$(curl -s http://localhost:9222/json/version | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(d.webSocketDebuggerUrl)")
+browser-harness-js "await session.connect({ wsUrl: '$WS_URL' })"
+browser-harness-js 'const tabs = await listPageTargets(); return tabs.map(t => t.title)'
+browser-harness-js 'await session.use(tabs[0].targetId)'
+browser-harness-js 'await session.Page.navigate({url:"http://localhost:3001"})'
+browser-harness-js '(await session.Runtime.evaluate({expression:"document.title",returnByValue:true})).result.value'
+```
+
+Key commands: `browser-harness-js --start`, `--stop`, `--restart`, `--status`, `--logs`.
 
 ## CLI Specifications
 
