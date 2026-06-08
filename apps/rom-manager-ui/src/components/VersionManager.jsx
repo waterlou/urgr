@@ -99,23 +99,23 @@ export default function VersionManager({ collectionId, collection, versions = []
         <section className="detail-section">
           <h2 className="detail-section-title">
             {preset === 'MAME' ? 'MAME' : 'Final Burn Neo / FB Alpha'} DAT Versions
-            {availableDats.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>Update available! {availableDats.latest}</span>}
+            {availableDats?.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>Update available! {availableDats?.latest}</span>}
           </h2>
           <p className="detail-section-desc">
             {preset === 'MAME' ? 'Latest MAME: ' : 'Latest: '}
-            <strong>{availableDats.latest}</strong>
-            {availableDats.imported?.length > 0 && ` · ${availableDats.imported.length} version(s) imported`}
-            {availableDats.missing?.length > 0 && ` · ${availableDats.missing.length} version(s) not yet imported`}
+            <strong>{availableDats?.latest}</strong>
+            {availableDats?.imported?.length > 0 && ` · ${availableDats.imported.length} version(s) imported`}
+            {availableDats?.missing?.length > 0 && ` · ${availableDats.missing.length} version(s) not yet imported`}
           </p>
 
-          {availableDats.source === 'FBNeo' && (
+          {availableDats?.source === 'FBNeo' && (
             <div className="info-box">
               <strong>Nightly</strong> is the latest FBNeo HEAD &mdash; refreshed when FBNeo is updated.
               Tagged versions are stable releases. <strong>FB Alpha 0.2.97.x</strong> versions are hardcoded for older retro consoles.
             </div>
           )}
 
-          {availableDats.missing?.length > 0 && (
+          {availableDats?.missing?.length > 0 && (
             <div className="info-box warn">
               <strong>Versions available to import:</strong>
               {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing {importingVer}...</div>}
