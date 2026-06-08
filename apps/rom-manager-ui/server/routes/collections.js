@@ -313,7 +313,7 @@ router.post('/api/collections/:id/build', async (req, res) => {
   await dbReady;
   try {
     const { version_id, import_dir, scan } = req.body;
-    if (!version_id || !import_dir) return res.status(400).json({ error: 'version_id and import_dir required' });
+    if (!version_id) return res.status(400).json({ error: 'version_id required' });
 
     const col = get('SELECT id, slug, folder FROM collections WHERE id = ?', [req.params.id]);
     if (!col) return res.status(404).json({ error: 'Collection not found' });
@@ -321,6 +321,7 @@ router.post('/api/collections/:id/build', async (req, res) => {
     if (!sv) return res.status(404).json({ error: 'Version not found' });
 
     const collectionDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', col.folder || col.slug);
+    const scanDir = import_dir || collectionDir;
     const jobId = crypto.randomUUID();
     const job = createJob(jobId);
     job._abort = new AbortController();
@@ -329,12 +330,12 @@ router.post('/api/collections/:id/build', async (req, res) => {
       try {
         if (sv.source === 'NPS') {
           if (scan) {
-            const result = execCli(['scan', String(version_id), import_dir], { binary: 'nps' });
+            const result = execCli(['scan', String(version_id), scanDir], { binary: 'nps' });
             reloadDb();
             doneJob(jobId, { added: 0, exists: result.found, reused: 0, missing: result.total - result.found });
           } else {
             fs.mkdirSync(collectionDir, { recursive: true });
-            const result = execCli(['build', String(version_id), collectionDir, '--input-dir', import_dir], { binary: 'nps' });
+            const result = execCli(['build', String(version_id), collectionDir, '--input-dir', scanDir], { binary: 'nps' });
             reloadDb();
             try {
               const foundGames = new Set();
