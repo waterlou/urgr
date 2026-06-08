@@ -192,7 +192,7 @@ export default function App() {
     setActiveId(id)
     setSearchQuery('')
     setSelectedVersionId(null)
-    if (view === 'collection') setCollectionSubView('detail')
+    if (view === 'collection') setCollectionSubView('games')
     else setSelectedGame(null)
   }
 
@@ -344,7 +344,10 @@ export default function App() {
           <Dashboard onSelectCollection={(id) => handleSelect('collection', id)} />
         ) : activeView === 'downloads' ? (
           <DownloadManager onBack={() => handleSelect('home', null)} />
-        ) : activeView === 'collection' && collectionSubView === 'detail' ? (
+        ) : activeView === 'collection' && (() => {
+          const col = collections.find(c => c.id === activeId);
+          return collectionSubView === 'detail' || (collectionSubView === 'games' && col && col.total_games === 0);
+        })() ? (
           <CollectionDetail
             collectionId={activeId}
             collection={collections.find(c => c.id === activeId)}
@@ -392,6 +395,7 @@ export default function App() {
                   selectedVersionId={selectedVersionId}
                   onSelectedVersionChange={setSelectedVersionId}
                   collectionVersions={collectionVersions}
+                  onOpenSettings={handleBackToDetail}
                 />
               </div>
               <div className="view-stack-page">

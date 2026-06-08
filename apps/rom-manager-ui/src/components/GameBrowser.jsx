@@ -15,6 +15,7 @@ export default function GameBrowser({
   listImageMode, onListImageModeChange,
   onToggleSidebar,
   selectedVersionId, onSelectedVersionChange, collectionVersions,
+  onOpenSettings,
 }) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchResults, setSearchResults] = useState([])
@@ -168,6 +169,9 @@ export default function GameBrowser({
           <button className="hamburger-btn" onClick={onToggleSidebar} title="Menu"><span className="icon">menu</span></button>
           {showBackToDetail && (
             <button className="back-btn" onClick={onBackToDetail} title="Back to Collection"><span className="icon">arrow_back</span></button>
+          )}
+          {showBackToDetail && onOpenSettings && (
+            <button className="back-btn" onClick={onOpenSettings} title="Collection settings" style={{marginLeft:4}}><span className="icon">settings</span></button>
           )}
           <h1 className="browser-title">{title}</h1>
           <span className="browser-count">{totalGames} games</span>
