@@ -103,7 +103,7 @@ export async function importNps(platform, versionId) {
     const region = row.Region || row.region || '';
     const pkgUrl = row['PKG direct link'] || row.pkg_url || '';
     const contentId = row['Content ID'] || row.content_id || '';
-    const fileSize = parseInt(row['File size'] || row.file_size || '0', 10);
+    const fileSize = parseInt(row['File Size'] || row.file_size || '0', 10);
     const sha256 = row.SHA256 || row.sha256 || '';
 
     const existing = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ?', [versionId, name]);
@@ -130,7 +130,7 @@ export async function importNps(platform, versionId) {
     const titleId = row['Title ID'] || row.title_id || '';
     const name = row.Name || row.name || '';
     const pkgUrl = row['PKG direct link'] || row.pkg_url || '';
-    const fileSize = parseInt(row['File size'] || row.file_size || '0', 10);
+    const fileSize = parseInt(row['File Size'] || row.file_size || '0', 10);
     const sha256 = row.SHA256 || row.sha256 || '';
 
     const gameEntryId = gameMap.get(titleId);
@@ -150,7 +150,7 @@ export async function importNps(platform, versionId) {
     const titleId = row['Title ID'] || row.title_id || '';
     const name = row.Name || row.name || '';
     const pkgUrl = row['PKG direct link'] || row.pkg_url || '';
-    const fileSize = parseInt(row['File size'] || row.file_size || '0', 10);
+    const fileSize = parseInt(row['File Size'] || row.file_size || '0', 10);
     const sha256 = row.SHA256 || row.sha256 || '';
 
     const gameEntryId = gameMap.get(titleId);
