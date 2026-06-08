@@ -70,7 +70,7 @@ export function execCli(args, { binary = 'build' } = {}) {
   const bin = findBinary(binary);
   const dbPath = getDbPath();
 
-  const needsDb = binary === 'parse' || binary === 'build';
+  const needsDb = binary === 'parse' || binary === 'build' || binary === 'nps';
   if (needsDb) saveDb();
 
   const cmdArgs = [bin, ...args, '--json', '--db', dbPath];
