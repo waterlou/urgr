@@ -158,26 +158,26 @@ export default function VersionManager({ collectionId, collection, versions = []
           )}
 
           {/* Already-imported versions with refresh for nightly */}
-          {availableDats.imported?.length > 0 && (
+          {versions.length > 0 && (
             <div className="info-box" style={{marginTop:12}}>
               <strong>Imported versions:</strong>
               <div className="tag-list" style={{marginTop:8}}>
-                {availableDats.imported.map(iv => {
-                  const isNightly = iv.version === 'nightly';
-                  const age = iv.created_at ? getAge(iv.created_at) : null;
+                {versions.map(v => {
+                  const isNightly = v.version === 'nightly';
+                  const age = v.created_at ? getAge(v.created_at) : null;
                   return (
-                    <span key={iv.id} className="tag" style={{display:'inline-flex',alignItems:'center',gap:4}}>
+                    <span key={v.id} className="tag" style={{display:'inline-flex',alignItems:'center',gap:4}}>
                       <span className="icon icon-sm" style={{fontSize:14}}>check</span>
-                      {iv.source ? `${iv.source} — ${iv.version}` : iv.version}
+                      {v.source ? `${v.source} — ${v.version}` : v.version}
                       {age && <span className="tag-date">{age}</span>}
                       {isNightly && (
                         <button
                           className="btn btn-sm btn-secondary"
                           style={{padding:'1px 6px',fontSize:11,marginLeft:4}}
-                          onClick={() => handleImportOnline(iv.version, 'FBNeo', true)}
+                          onClick={() => handleImportOnline(v.version, 'FBNeo', true)}
                           disabled={importingVer !== null}
                         >
-                          {importingVer === iv.version ? '...' : 'Refresh'}
+                          {importingVer === v.version ? '...' : 'Refresh'}
                         </button>
                       )}
                     </span>
