@@ -15,13 +15,21 @@ function getAge(dateStr) {
   return `${Math.floor(days / 365)}y ago`
 }
 
-function getDatSource(folder) {
-  if (folder === 'fbneo') return 'FBNeo'
-  if (folder === 'fba' || folder === 'fbalpha') return 'FBAlpha44'
-  if (folder?.startsWith('offlinelist') || folder === 'offline-list') return 'OFFLINELIST'
-  if (folder?.startsWith('datomatic') || folder === 'dat-o-matic') return 'DATOMATIC'
-  if (folder?.startsWith('nps')) return 'NPS'
+function getDatSource(preset, folder) {
+  if (preset === 'OFFLINELIST' || folder?.startsWith('offlinelist') || folder === 'offline-list') return 'OFFLINELIST'
+  if (preset === 'DATOMATIC' || folder?.startsWith('datomatic') || folder === 'dat-o-matic') return 'DATOMATIC'
+  if (preset === 'NPS' || folder?.startsWith('nps')) return 'NPS'
+  if (preset === 'Final Burn Neo' || folder === 'fbneo') return 'FBNeo'
+  if (preset === 'FBAlpha44' || folder === 'fba' || folder === 'fbalpha') return 'FBAlpha44'
   return 'MAME'
+}
+
+const PRESET_LABELS = {
+  'MAME': 'MAME',
+  'Final Burn Neo': 'Final Burn Neo / FB Alpha',
+  'OFFLINELIST': 'OfflineList DAT',
+  'DATOMATIC': 'DAT-O-MATIC DAT',
+  'NPS': 'NoPayStation',
 }
 
 export default function VersionManager({ collectionId, collection, versions = [], onVersionsChange, onRefresh }) {
@@ -29,17 +37,23 @@ export default function VersionManager({ collectionId, collection, versions = []
   const [importingVer, setImportingVer] = useState(null)
   const [showAllMame, setShowAllMame] = useState(false)
 
+  const preset = collection?.dataset_preset
+  const isMameOrFbneo = preset === 'MAME' || preset === 'Final Burn Neo'
+  const isOfflineList = preset === 'OFFLINELIST'
+  const isDatomic = preset === 'DATOMATIC'
+  const isNps = preset === 'NPS'
+
   useEffect(() => {
-    const source = getDatSource(collection?.folder)
+    const source = getDatSource(preset, collection?.folder)
     const datsPromise = getAvailableVersions(source).catch(() => null)
     const datsTimeout = new Promise(resolve => setTimeout(() => resolve(null), 12000))
     Promise.race([datsPromise, datsTimeout]).then(setAvailableDats)
-  }, [collectionId, collection?.folder])
+  }, [collectionId, preset, collection?.folder])
 
   async function handleImportOnline(version, source, refresh) {
     setImportingVer(version)
     try {
-      const datSource = getDatSource(collection?.folder)
+      const datSource = getDatSource(preset, collection?.folder)
       await importOnlineVersion(collectionId, version, source || datSource, refresh)
       const [dats, vers] = await Promise.all([
         getAvailableVersions(datSource).catch(() => null),
@@ -49,7 +63,6 @@ export default function VersionManager({ collectionId, collection, versions = []
       onVersionsChange(vers)
       onRefresh()
     } catch (e) {
-      // parent can handle via a shared error mechanism if needed
       console.error('Import failed:', e.message)
     } finally {
       setImportingVer(null)
@@ -64,11 +77,6 @@ export default function VersionManager({ collectionId, collection, versions = []
       console.error('Link failed:', e.message)
     }
   }
-
-  const isMameOrFbneo = collection?.folder === 'mame' || collection?.folder === 'fbneo'
-  const isOfflineList = collection?.folder?.startsWith('offlinelist') || collection?.folder === 'offline-list'
-  const isDatomic = collection?.folder?.startsWith('datomatic') || collection?.folder === 'dat-o-matic'
-  const isNps = collection?.folder?.startsWith('nps') || collection?.dataset_preset === 'NPS'
 
   async function handleNpsImport(platform) {
     setImportingVer(platform)
@@ -87,14 +95,14 @@ export default function VersionManager({ collectionId, collection, versions = []
   return (
     <>
       {/* MAME / FBNeo DAT Versions */}
-      {availableDats && isMameOrFbneo && (
+      {isMameOrFbneo && (
         <section className="detail-section">
           <h2 className="detail-section-title">
-            {collection?.folder === 'mame' ? 'MAME' : 'Final Burn Neo / FB Alpha'} DAT Versions
+            {preset === 'MAME' ? 'MAME' : 'Final Burn Neo / FB Alpha'} DAT Versions
             {availableDats.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>Update available! {availableDats.latest}</span>}
           </h2>
           <p className="detail-section-desc">
-            {collection?.folder === 'mame' ? 'Latest MAME: ' : 'Latest: '}
+            {preset === 'MAME' ? 'Latest MAME: ' : 'Latest: '}
             <strong>{availableDats.latest}</strong>
             {availableDats.imported?.length > 0 && ` · ${availableDats.imported.length} version(s) imported`}
             {availableDats.missing?.length > 0 && ` · ${availableDats.missing.length} version(s) not yet imported`}
