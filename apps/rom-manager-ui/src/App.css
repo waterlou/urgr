@@ -1484,6 +1484,54 @@ html, body, #root {
 .badge-clone { background: var(--accent-dim); color: var(--accent); }
 .badge-scraped { background: var(--accent-dim); color: var(--accent); }
 
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.dashboard-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  transition: border-color 0.15s;
+}
+
+.dashboard-card:hover { border-color: var(--accent); }
+
+.dashboard-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.dashboard-card-name { font-weight: 600; font-size: 14px; }
+
+.dashboard-card-platform {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.dashboard-card-stats { font-size: 13px; margin-bottom: 8px; }
+.dashboard-stat { opacity: 0.7; }
+
+.dashboard-bar-track {
+  height: 4px;
+  background: var(--bg);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.dashboard-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+
 .modal-body { padding: 24px 40px 40px; }
 
 .modal-description {

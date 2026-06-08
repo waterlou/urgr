@@ -38,11 +38,13 @@ router.get('/api/collections', async (req, res) => {
       const versions = all('SELECT version_id FROM collection_versions WHERE collection_id = ?', [c.id]);
       const vids = versions.map(v => v.version_id);
       let total = 0;
+      let available = 0;
       if (vids.length) {
         const ph = vids.map(() => '?').join(',');
         total = get(`SELECT COUNT(*) as c FROM game_entries WHERE version_id IN (${ph})`, vids).c;
+        available = get(`SELECT COUNT(*) as c FROM game_entries ge JOIN game_state gs ON gs.game_entry_id = ge.id WHERE ge.version_id IN (${ph}) AND gs.available = 1`, vids).c;
       }
-      return { ...c, total_games: total };
+      return { ...c, total_games: total, available_games: available };
     });
     res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }

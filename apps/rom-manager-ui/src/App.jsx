@@ -15,6 +15,7 @@ import CollectionForm from './components/CollectionForm.jsx'
 import GameSetForm from './components/GameSetForm.jsx'
 import Settings from './components/Settings.jsx'
 import DownloadManager from './components/DownloadManager.jsx'
+import Dashboard from './components/Dashboard.jsx'
 
 export default function App() {
   const {
@@ -339,8 +340,10 @@ export default function App() {
       />
 
       <main className="main-pane">
-        {activeView === 'downloads' ? (
-          <DownloadManager onBack={() => handleSelect('browse', null)} />
+        {activeView === 'home' ? (
+          <Dashboard onSelectCollection={(id) => handleSelect('collection', id)} />
+        ) : activeView === 'downloads' ? (
+          <DownloadManager onBack={() => handleSelect('home', null)} />
         ) : activeView === 'collection' && collectionSubView === 'detail' ? (
           <CollectionDetail
             collectionId={activeId}

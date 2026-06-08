@@ -10,7 +10,7 @@ export default function Sidebar({
 }) {
   return (
     <aside className={`sidebar${sidebarOpen ? ' sidebar-open' : ''}`}>
-      <div className="sidebar-header" onClick={() => onSelect('browse', null)}>
+      <div className="sidebar-header" onClick={() => onSelect('home', null)}>
         <div className="neon-logo">
           <span className="icon neon-icon icon-xl">sports_esports</span>
         </div>
@@ -22,11 +22,11 @@ export default function Sidebar({
 
       <nav className="sidebar-nav">
         <button
-          className={`sidebar-section-btn ${activeView === 'browse' ? 'active' : ''}`}
-          onClick={() => onSelect('browse', null)}
+          className={`sidebar-section-btn ${activeView === 'home' ? 'active' : ''}`}
+          onClick={() => onSelect('home', null)}
         >
-          <span className="icon icon-sm section-icon">folder_open</span>
-          <span>All Games</span>
+          <span className="icon icon-sm section-icon">home</span>
+          <span>Home</span>
         </button>
 
         <div className="sidebar-section">

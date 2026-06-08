@@ -4,7 +4,7 @@ export default function useRouter() {
   const initialParams = new URLSearchParams(window.location.search)
   const initialGame = initialParams.has('game') && initialParams.get('game') ? { id: Number(initialParams.get('game')) } : null
 
-  const [activeView, setActiveView] = useState(initialParams.get('view') || 'browse')
+  const [activeView, setActiveView] = useState(initialParams.get('view') || 'home')
   const [activeId, setActiveId] = useState(initialParams.has('id') ? Number(initialParams.get('id')) : null)
   const [collectionSubView, setCollectionSubView] = useState(initialParams.get('sub') || 'detail')
   const [selectedGame, setSelectedGame] = useState(initialGame)
@@ -25,7 +25,7 @@ export default function useRouter() {
   // Popstate listener for browser back/forward
   useEffect(() => {
     const p = new URLSearchParams(window.location.search)
-    const view = p.get('view') || 'browse'
+    const view = p.get('view') || 'home'
     const id = p.has('id') ? Number(p.get('id')) : null
     const sub = p.get('sub') || 'detail'
     const game = p.has('game') && p.get('game') ? Number(p.get('game')) : null
@@ -33,7 +33,7 @@ export default function useRouter() {
 
     const onPop = (e) => {
       const s = e.state
-      setActiveView(s?.view || 'browse')
+      setActiveView(s?.view || 'home')
       setActiveId(s?.id || null)
       setCollectionSubView(s?.sub || 'detail')
       setSelectedGame(s?.game ? { id: s.game } : null)
