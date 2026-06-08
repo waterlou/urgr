@@ -40,13 +40,14 @@ export default function GameListItem({ game, onSelect, onRating, onFavourite, on
     <div className="list-item" onClick={() => onSelect(game)}>
       <span className="list-col-name">
         {imgUrl && <img src={imgUrl} alt="" className={`list-thumb${useScreenshot ? ' list-thumb-screenshot' : ''}`} loading="lazy" onError={e => { e.target.style.display = 'none' }} />}
-        <span className="list-name-text">{game.description || game.name}</span>
-        {game.description && <span className="list-desc">{game.name}</span>}
+        <span className="list-name-text">{game.name}</span>
+        {game.description && <span className="list-desc">{game.description}</span>}
       </span>
       <span className="list-col-platform">
         {game.versions && game.versions.length > 0
           ? game.versions.map(v => <span key={v} className="version-tag">{v}</span>)
           : <span className="version-tag">{game.source || '-'}</span>}
+        {game.year && <span className="version-tag">{game.year}</span>}
       </span>
       <span className="list-col-year">{game.year || '-'}</span>
       <span className="list-col-rating" onClick={e => e.stopPropagation()}>

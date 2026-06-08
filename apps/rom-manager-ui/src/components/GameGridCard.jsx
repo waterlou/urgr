@@ -64,9 +64,10 @@ export default function GameGridCard({ game, onSelect, onRating, onFavourite, on
         </div>
       </div>
       <div className="grid-card-info">
-        <div className="grid-card-name">{game.description || game.name}</div>
+        <div className="grid-card-name">{game.name}</div>
+        {game.description && <div className="grid-card-sub">{game.description}</div>}
         <div className="grid-card-sub">
-          {game.year && <span>{game.year}</span>}
+          {game.year && <span className="version-tag">{game.year}</span>}
           {(game.versions && game.versions.length > 0
             ? game.versions
             : game.source ? [game.source] : []

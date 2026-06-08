@@ -102,24 +102,25 @@ export async function importNps(platform, versionId) {
     const name = row.Name || row.name || '';
     const region = row.Region || row.region || '';
     const pkgUrl = row['PKG direct link'] || row.pkg_url || '';
+    const originalName = row['Original Name'] || row.original_name || '';
     const contentId = row['Content ID'] || row.content_id || '';
     const fileSize = parseInt(row['File Size'] || row.file_size || '0', 10);
     const sha256 = row.SHA256 || row.sha256 || '';
 
+    if (!pkgUrl) continue;
+
     const existing = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ?', [versionId, name]);
     if (existing) continue;
 
-    run('INSERT INTO game_entries (version_id, name, description, platform, title_id, content_id) VALUES (?, ?, ?, ?, ?, ?)',
-      [versionId, name, '', info.folder, titleId, contentId]);
+    run('INSERT INTO game_entries (version_id, name, description, year, platform, title_id, content_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [versionId, name, originalName, region, info.folder, titleId, contentId]);
 
     const gameEntry = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ?', [versionId, name]);
     if (!gameEntry) continue;
 
-    if (pkgUrl) {
-      run('INSERT INTO rom_entries (game_entry_id, filename, size, sha1, subtype) VALUES (?, ?, ?, ?, ?)',
-        [gameEntry.id, `${titleId}.pkg`, fileSize || 0, sha256, 'game']);
-      romsImported++;
-    }
+    run('INSERT INTO rom_entries (game_entry_id, filename, size, sha1, subtype) VALUES (?, ?, ?, ?, ?)',
+      [gameEntry.id, `${titleId}.pkg`, fileSize || 0, sha256, 'game']);
+    romsImported++;
 
     gameMap.set(titleId, gameEntry.id);
     gamesImported++;

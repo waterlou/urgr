@@ -1464,6 +1464,12 @@ html, body, #root {
   line-height: 1.2;
 }
 
+.detail-subtitle {
+  font-size: 14px;
+  color: var(--text-dim);
+  margin: 4px 0 0;
+}
+
 .modal-meta { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .badge {

@@ -90,7 +90,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
         <button className="back-btn" onClick={onBack}>
           <span className="icon">arrow_back</span>
         </button>
-        <span className="detail-nav-title">{game.description || game.name}</span>
+        <span className="detail-nav-title">{game.name}</span>
       </div>
 
       <div className="detail-page-body">
@@ -107,10 +107,12 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
             </div>
           )}
           <div className="detail-info">
-            <h1 className="detail-title">{game.description || game.name}</h1>
+            <h1 className="detail-title">{game.name}</h1>
+            {game.description && <p className="detail-subtitle">{game.description}</p>}
             <div className="modal-meta">
               <span className="badge">{game.source} {game.version}</span>
               {game.year && <span className="badge">{game.year}</span>}
+              {game.platform && <span className="badge">{game.platform}</span>}
               {game.manufacturer && <span className="badge">{game.manufacturer}</span>}
               {game.cloneof && <span className="badge badge-clone">clone of {game.cloneof}</span>}
               {game.synopsis && <span className="badge badge-scraped">Scraped</span>}
@@ -132,7 +134,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
           <p className="modal-description">{game.synopsis}</p>
         ) : (
           <p className="modal-description">
-            {game.description && game.description !== game.name ? game.description : 'No description available.'}
+            {'No description available.'}
             {scrapeError && <span className="scrape-error"> ({scrapeError})</span>}
           </p>
         )}
