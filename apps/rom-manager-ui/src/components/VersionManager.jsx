@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getAvailableVersions, getCollectionVersions, addCollectionVersion, importOnlineVersion, importNps, scanNpsCollection } from '../api.js'
+import { getAvailableVersions, getCollectionVersions, addCollectionVersion, importOnlineVersion, importNps } from '../api.js'
 
 const MAME_MILESTONES = new Set(['0.37b5', '0.78', '0.106', '0.139', '0.160'])
 
@@ -28,9 +28,6 @@ export default function VersionManager({ collectionId, collection, versions = []
   const [availableDats, setAvailableDats] = useState(null)
   const [importingVer, setImportingVer] = useState(null)
   const [showAllMame, setShowAllMame] = useState(false)
-  const [scanDir, setScanDir] = useState('')
-  const [scanning, setScanning] = useState(false)
-  const [scanResult, setScanResult] = useState(null)
 
   useEffect(() => {
     const source = getDatSource(collection?.folder)
@@ -84,21 +81,6 @@ export default function VersionManager({ collectionId, collection, versions = []
       console.error('NPS import failed:', e.message)
     } finally {
       setImportingVer(null)
-    }
-  }
-
-  async function handleNpsScan() {
-    if (!scanDir || versions.length === 0) return
-    setScanning(true)
-    setScanResult(null)
-    try {
-      const res = await scanNpsCollection(collectionId, versions[0].id, scanDir)
-      setScanResult(res)
-      onRefresh()
-    } catch (e) {
-      setScanResult({ error: e.message })
-    } finally {
-      setScanning(false)
     }
   }
 
@@ -372,36 +354,6 @@ export default function VersionManager({ collectionId, collection, versions = []
                   )
                 })}
               </div>
-            </div>
-          )}
-
-          {versions.length > 0 && (
-            <div className="info-box" style={{marginTop:12}}>
-              <strong>Scan downloaded files</strong>
-              <p style={{fontSize:13,margin:'4px 0 8px',opacity:0.7}}>
-                Scan a directory for .pkg files to mark games as available.
-              </p>
-              <div style={{display:'flex',gap:8,alignItems:'center'}}>
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="/path/to/pkg/files"
-                  value={scanDir}
-                  onChange={e => setScanDir(e.target.value)}
-                  style={{flex:1}}
-                />
-                <button className="btn btn-sm" onClick={handleNpsScan} disabled={scanning || !scanDir}>
-                  {scanning ? 'Scanning...' : 'Scan'}
-                </button>
-              </div>
-              {scanResult && (
-                <div style={{marginTop:8,fontSize:13}}>
-                  {scanResult.error
-                    ? <span style={{color:'#f44336'}}>Error: {scanResult.error}</span>
-                    : <span>Found: <strong>{scanResult.found}</strong> / {scanResult.total} games</span>
-                  }
-                </div>
-              )}
             </div>
           )}
         </section>
