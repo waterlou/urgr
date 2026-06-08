@@ -344,18 +344,31 @@ router.post('/api/collections/:id/build', async (req, res) => {
           }
           reloadDb();
           // Reset all to unavailable, then set matched ones to available
-          runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
-            SELECT ge.id, 1, datetime('now')
-            FROM game_entries ge
-            JOIN scanned_games sg ON sg.version_id = ge.version_id AND sg.name = ge.name
-            WHERE ge.version_id = ? AND sg.filename != ''
-            ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id]);
-          runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
-            SELECT ge.id, 0, datetime('now')
-            FROM game_entries ge
-            LEFT JOIN scanned_games sg ON sg.version_id = ge.version_id AND sg.name = ge.name
-            WHERE ge.version_id = ? AND (sg.filename IS NULL OR sg.filename = '')
-            ON CONFLICT(game_entry_id) DO UPDATE SET available = 0, updated_at = datetime('now')`, [version_id]);
+          if (isNps) {
+            // NPS: match by exact PKG basename against rom_entries
+            const scanned = all('SELECT filename FROM scanned_games WHERE version_id = ? AND filename != ?', [version_id, '']);
+            runNow(`UPDATE game_state SET available = 0, updated_at = datetime('now') WHERE game_entry_id IN (SELECT id FROM game_entries WHERE version_id = ?)`, [version_id]);
+            for (const sg of scanned) {
+              const base = path.basename(sg.filename);
+              runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
+                SELECT r.game_entry_id, 1, datetime('now') FROM rom_entries r WHERE r.filename = ?
+                ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [base]);
+            }
+          } else {
+            // DAT: match by game name
+            runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
+              SELECT ge.id, 1, datetime('now')
+              FROM game_entries ge
+              JOIN scanned_games sg ON sg.version_id = ge.version_id AND sg.name = ge.name
+              WHERE ge.version_id = ? AND sg.filename != ''
+              ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id]);
+            runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
+              SELECT ge.id, 0, datetime('now')
+              FROM game_entries ge
+              LEFT JOIN scanned_games sg ON sg.version_id = ge.version_id AND sg.name = ge.name
+              WHERE ge.version_id = ? AND (sg.filename IS NULL OR sg.filename = '')
+              ON CONFLICT(game_entry_id) DO UPDATE SET available = 0, updated_at = datetime('now')`, [version_id]);
+          }
           const matched = get('SELECT COUNT(*) as c FROM scanned_games WHERE version_id = ? AND filename != ?', [version_id, '']).c;
           const total = get('SELECT COUNT(*) as c FROM scanned_games WHERE version_id = ?', [version_id]).c;
           // Calculate reuse: check if matched files exist in prior version dirs
@@ -380,15 +393,18 @@ router.post('/api/collections/:id/build', async (req, res) => {
           fs.mkdirSync(collectionDir, { recursive: true });
           const result = execCli(['build', String(version_id), collectionDir, '--input-dir', collectionDir], { binary: 'nps' });
           reloadDb();
-          runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
-            SELECT ge.id, 0, datetime('now') FROM game_entries ge WHERE ge.version_id = ?
-            ON CONFLICT(game_entry_id) DO UPDATE SET available = 0, updated_at = datetime('now')`, [version_id]);
-          runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
-            SELECT ge.id, 1, datetime('now')
-            FROM game_entries ge
-            JOIN scanned_games sg ON sg.version_id = ge.version_id AND sg.name = ge.name
-            WHERE ge.version_id = ? AND sg.filename != ''
-            ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id]);
+          runNow(`UPDATE game_state SET available = 0, updated_at = datetime('now') WHERE game_entry_id IN (SELECT id FROM game_entries WHERE version_id = ?)`, [version_id]);
+          if (fs.existsSync(collectionDir)) {
+            const found = fs.readdirSync(collectionDir, { recursive: true });
+            for (const f of found) {
+              if (f.endsWith('.pkg')) {
+                const fname = path.basename(f);
+                runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
+                  SELECT r.game_entry_id, 1, datetime('now') FROM rom_entries r WHERE r.filename = ?
+                  ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [fname]);
+              }
+            }
+          }
           doneJob(jobId, { built: result.built, skipped: result.skipped });
         } else {
           // DAT build — uses progress streaming
