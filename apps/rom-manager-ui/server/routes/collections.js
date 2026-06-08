@@ -35,7 +35,7 @@ router.get('/api/collections', async (req, res) => {
   try {
     const rows = all('SELECT c.* FROM collections c ORDER BY c.name');
     const result = rows.map(c => {
-      const versions = all('SELECT version_id FROM collection_versions WHERE collection_id = ?', [c.id]);
+      const versions = all('SELECT version_id FROM collection_versions WHERE collection_id = ? ORDER BY version_id DESC LIMIT 1', [c.id]);
       const vids = versions.map(v => v.version_id);
       let total = 0;
       let available = 0;
