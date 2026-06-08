@@ -192,8 +192,8 @@ router.get('/api/collections/:id/games', async (req, res) => {
       delete g.screenshots_json;
       const cloneRegions = g.clone_regions ? g.clone_regions.split('||').filter(Boolean) : [];
       delete g.clone_regions;
-      const allRegions = [g.region, ...cloneRegions].filter(Boolean);
-      const regions = [...new Set(allRegions)];
+      const allRegions = g.cloneof ? [g.region] : [g.region, ...cloneRegions];
+      const regions = [...new Set(allRegions.filter(Boolean))];
       return { ...g, versions, covers, screenshots, regions };
     });
 
