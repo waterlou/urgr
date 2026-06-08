@@ -75,7 +75,6 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 
 CREATE INDEX IF NOT EXISTS idx_game_entries_version ON game_entries(version_id);
-CREATE INDEX IF NOT EXISTS idx_game_entries_title_id ON game_entries(title_id);
 CREATE INDEX IF NOT EXISTS idx_rom_entries_game ON rom_entries(game_entry_id);
 CREATE INDEX IF NOT EXISTS idx_rom_entries_sha1 ON rom_entries(sha1);
 CREATE INDEX IF NOT EXISTS idx_scanned_games_version ON scanned_games(version_id);
@@ -193,6 +192,8 @@ export function initDb(dbPath) {
   try { db.run("ALTER TABLE game_entries ADD COLUMN content_id TEXT"); } catch (_) {}
   // Migration: add subtype column to rom_entries (NPS integration)
   try { db.run("ALTER TABLE rom_entries ADD COLUMN subtype TEXT DEFAULT 'game'"); } catch (_) {}
+  // Index on title_id (created after migrations add the column)
+  try { db.run("CREATE INDEX IF NOT EXISTS idx_game_entries_title_id ON game_entries(title_id)"); } catch (_) {}
   // Migration: game_ratings -> game_state (consolidate app state table)
   try {
     db.run(`CREATE TABLE IF NOT EXISTS game_state (
