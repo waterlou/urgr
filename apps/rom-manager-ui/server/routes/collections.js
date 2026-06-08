@@ -331,7 +331,7 @@ router.post('/api/collections/:id/build', async (req, res) => {
           if (scan) {
             const result = execCli(['scan', String(version_id), import_dir], { binary: 'nps' });
             reloadDb();
-            doneJob(jobId, { added: result.found, exists: result.total - result.found, reused: 0, missing: result.total - result.found });
+            doneJob(jobId, { added: 0, exists: result.found, reused: 0, missing: result.total - result.found });
           } else {
             fs.mkdirSync(collectionDir, { recursive: true });
             const result = execCli(['build', String(version_id), collectionDir, '--input-dir', import_dir], { binary: 'nps' });
