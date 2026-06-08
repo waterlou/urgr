@@ -9,6 +9,7 @@ import { execCli, execCliStream } from '../cli.js';
 import { createJob, getJob, updateProgress, doneJob, failJob, cancelJob } from '../jobs.js';
 import { all, get, run, runNow, unescapeXml, KNOWN_PLATFORMS, dbReady } from '../helpers.js';
 import { scanNpsDir, buildNps } from '../nps.js';
+import { scrapeSingleGame } from './games.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = Router();
@@ -731,6 +732,76 @@ router.post('/api/collections/:id/build-nps', async (req, res) => {
 
     const result = buildNps(collectionDir, version_id, input_dir);
     res.json({ ok: true, ...result });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/api/collections/:id/scrape-all', async (req, res) => {
+  await dbReady;
+  try {
+    const versions = all('SELECT version_id FROM collection_versions WHERE collection_id = ?', [req.params.id]);
+    if (!versions.length) return res.status(400).json({ error: 'No versions linked to this collection' });
+
+    const vids = versions.map(v => v.version_id);
+    const ph = vids.map(() => '?').join(',');
+
+    // Get all unscraped games (no manufacturer or year set)
+    const unscraped = all(`SELECT id, name FROM game_entries WHERE version_id IN (${ph}) AND (manufacturer IS NULL OR manufacturer = '') AND (year IS NULL OR year = '')`, vids);
+
+    if (unscraped.length === 0) return res.json({ jobId: null, total: 0, message: 'All games already have metadata' });
+
+    const game_ids = unscraped.map(g => g.id);
+    const total = game_ids.length;
+    const jobId = crypto.randomUUID();
+    const job = createJob(jobId);
+    job._abort = new AbortController();
+
+    runNow('INSERT INTO scrape_jobs (id, status, total_games) VALUES (?, ?, ?)', [jobId, 'running', total]);
+
+    Promise.resolve().then(async () => {
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
+      let scraped = 0, skipped = 0, failed = 0, cancelled = false, rateLimited = false;
+      const errors = [];
+
+      for (let i = 0; i < total; i++) {
+        if (job._abort.signal.aborted) { cancelled = true; break; }
+        if (rateLimited) { skipped++; continue; }
+        const gid = game_ids[i];
+        try {
+          const result = await scrapeSingleGame(gid);
+          if (result.scraped) {
+            scraped++;
+            updateProgress(jobId, Math.round((i + 1) / total * 100), `[${i+1}/${total}] ✓ ${result.title || '#'+gid}`);
+          } else {
+            failed++;
+            errors.push({ game_id: gid, error: result.error });
+            updateProgress(jobId, Math.round((i + 1) / total * 100), `[${i+1}/${total}] ✗ #${gid} — ${result.error}`);
+          }
+        } catch (e) {
+          const msg = e.message || '';
+          if (/429|rate.?limit|too many requests|quota/i.test(msg)) {
+            rateLimited = true;
+            errors.push({ game_id: gid, error: `Rate limited — ${msg}` });
+            updateProgress(jobId, Math.round((i + 1) / total * 100), `Rate limited — stopping`);
+          } else {
+            failed++;
+            errors.push({ game_id: gid, error: msg });
+            updateProgress(jobId, Math.round((i + 1) / total * 100), `[${i+1}/${total}] ✗ #${gid} — ${msg}`);
+          }
+        }
+        await sleep(3000);
+      }
+
+      if (job._abort.signal.aborted) {
+        runNow("UPDATE scrape_jobs SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?", [jobId]);
+        return;
+      }
+      const resultPayload = { total, scraped, skipped, failed, errors, cancelled, rateLimited };
+      runNow("UPDATE scrape_jobs SET status = 'done', scraped = ?, skipped = ?, failed = ?, rate_limited = ?, result = ?, updated_at = datetime('now') WHERE id = ?",
+        [scraped, skipped, failed, rateLimited ? 1 : 0, JSON.stringify(resultPayload), jobId]);
+      doneJob(jobId, resultPayload);
+    });
+
+    res.status(202).json({ jobId, total });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

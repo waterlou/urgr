@@ -200,6 +200,9 @@ export function scrapeGameMetadata(gameId) {
 export function batchScrapeGameMetadata(gameIds, overwrite) {
   return fetchWithBody('/games/batch-scrape', 'POST', { game_ids: gameIds, overwrite });
 }
+export function scrapeAllCollectionGames(id) {
+  return fetchWithBody(`/collections/${id}/scrape-all`, 'POST');
+}
 export function getScrapeJobs() {
   return fetchJson('/games/scrape-jobs');
 }

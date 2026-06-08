@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import IconDisplay from './IconDisplay.jsx'
-import { getCollectionVersions, getCollectionGames } from '../api.js'
+import { getCollectionVersions, getCollectionGames, scrapeAllCollectionGames } from '../api.js'
+import { subscribeJobSSE, cancelJob } from '../api.js'
 import VersionManager from './VersionManager.jsx'
 import IaDownload from './IaDownload.jsx'
 import BuildManager from './BuildManager.jsx'
@@ -13,6 +14,10 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
   const [gameCount, setGameCount] = useState(0)
   const [error, setError] = useState(null)
   const [info, setInfo] = useState(null)
+  const [scrapeAllRunning, setScrapeAllRunning] = useState(false)
+  const [scrapeAllProgress, setScrapeAllProgress] = useState('')
+  const [scrapeAllResult, setScrapeAllResult] = useState(null)
+  const [scrapeAllJobId, setScrapeAllJobId] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -40,6 +45,36 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
     const t = setTimeout(() => { setError(null); setInfo(null) }, 5000)
     return () => clearTimeout(t)
   }, [error, info])
+
+  async function handleScrapeAll() {
+    setScrapeAllRunning(true)
+    setScrapeAllProgress('Starting...')
+    setScrapeAllResult(null)
+    try {
+      const { jobId, total } = await scrapeAllCollectionGames(collectionId)
+      if (!jobId) {
+        setScrapeAllResult({ total: 0, scraped: 0 })
+        setScrapeAllRunning(false)
+        return
+      }
+      setScrapeAllJobId(jobId)
+      subscribeJobSSE(jobId, {
+        onProgress: (msg) => setScrapeAllProgress(msg.msg || `Progress: ${msg.pct}%`),
+        onResult: (data) => {
+          setScrapeAllResult(data)
+          setScrapeAllRunning(false)
+          setInfo(`Scrape complete: ✓ ${data.scraped} · ⏭ ${data.skipped} · ✗ ${data.failed}`)
+        },
+        onError: (err) => {
+          setScrapeAllRunning(false)
+          setError(err)
+        },
+      })
+    } catch (e) {
+      setScrapeAllRunning(false)
+      setError(e.message)
+    }
+  }
 
   if (loading) {
     return <div className="loading-screen"><div className="loading-spinner" /></div>
@@ -100,6 +135,36 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
         />
 
         <ExportPanel collectionId={collectionId} />
+
+        <section className="detail-section">
+          <h2 className="detail-section-title">Metadata Scraping</h2>
+          <p className="detail-section-desc">
+            Scrape game metadata (year, manufacturer, synopsis, covers, screenshots) from online providers.
+            Only unscraped games will be processed.
+          </p>
+
+          <div className="info-box" style={{marginTop:12}}>
+            {!scrapeAllRunning && !scrapeAllResult && (
+              <button className="btn btn-sm" onClick={handleScrapeAll}>
+                <span className="icon">auto_awesome</span> Scrape All Unscraped
+              </button>
+            )}
+            {scrapeAllRunning && (
+              <div className="loading-inline">
+                <div className="loading-spinner-sm" /> {scrapeAllProgress}
+              </div>
+            )}
+            {scrapeAllResult && (
+              <div>
+                {scrapeAllResult.total === 0
+                  ? <span className="text-muted">All games already have metadata</span>
+                  : <span>✓ {scrapeAllResult.scraped} scraped · ⏭ {scrapeAllResult.skipped} skipped · ✗ {scrapeAllResult.failed} failed</span>
+                }
+                <button className="btn btn-sm btn-secondary" style={{marginLeft:12}} onClick={() => setScrapeAllResult(null)}>OK</button>
+              </div>
+            )}
+          </div>
+        </section>
       </div>
     </div>
   )

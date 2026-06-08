@@ -120,7 +120,7 @@ router.get('/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-async function scrapeSingleGame(gameId) {
+export async function scrapeSingleGame(gameId) {
   const game = get('SELECT * FROM game_entries WHERE id = ?', [gameId]);
   if (!game) return { scraped: false, error: 'Game not found', gameId };
 
