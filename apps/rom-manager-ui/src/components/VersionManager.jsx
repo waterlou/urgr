@@ -188,25 +188,25 @@ export default function VersionManager({ collectionId, collection, versions = []
             OfflineList DAT
             {availableDats.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>Update available</span>}
           </h2>
-          {availableDats.imported?.length > 0 ? (
+          {versions.length > 0 ? (
             <div className="info-box" style={{marginTop:12}}>
               <strong>Imported DAT:</strong>
               {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Re-importing...</div>}
               <div className="tag-list" style={{marginTop:8}}>
-                {availableDats.imported.map(iv => {
-                  const age = iv.created_at ? getAge(iv.created_at) : null
+                {versions.map(v => {
+                  const age = v.created_at ? getAge(v.created_at) : null
                   return (
-                    <span key={iv.id} className="tag" style={{display:'inline-flex',alignItems:'center',gap:4}}>
+                    <span key={v.id} className="tag" style={{display:'inline-flex',alignItems:'center',gap:4}}>
                       <span className="icon icon-sm" style={{fontSize:14}}>check</span>
-                      {iv.version}
+                      {v.version}
                       {age && <span className="tag-date">{age}</span>}
                       <button
                         className="btn btn-sm btn-secondary"
                         style={{padding:'1px 6px',fontSize:11,marginLeft:4}}
-                        onClick={() => handleImportOnline(iv.version, 'OFFLINELIST', true)}
+                        onClick={() => handleImportOnline(v.version, 'OFFLINELIST', true)}
                         disabled={importingVer !== null}
                       >
-                        {importingVer === iv.version ? '...' : 'Re-import'}
+                        {importingVer === v.version ? '...' : 'Re-import'}
                       </button>
                     </span>
                   )
@@ -242,25 +242,25 @@ export default function VersionManager({ collectionId, collection, versions = []
             DAT-O-MATIC DAT
             {availableDats.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>Update available</span>}
           </h2>
-          {availableDats.imported?.length > 0 ? (
+          {versions.length > 0 ? (
             <div className="info-box" style={{marginTop:12}}>
               <strong>Imported system:</strong>
               {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Re-importing...</div>}
               <div className="tag-list" style={{marginTop:8}}>
-                {availableDats.imported.map(iv => {
-                  const age = iv.created_at ? getAge(iv.created_at) : null
+                {versions.map(v => {
+                  const age = v.created_at ? getAge(v.created_at) : null
                   return (
-                    <span key={iv.id} className="tag" style={{display:'inline-flex',alignItems:'center',gap:4}}>
+                    <span key={v.id} className="tag" style={{display:'inline-flex',alignItems:'center',gap:4}}>
                       <span className="icon icon-sm" style={{fontSize:14}}>check</span>
-                      {iv.version}
+                      {v.version}
                       {age && <span className="tag-date">{age}</span>}
                       <button
                         className="btn btn-sm btn-secondary"
                         style={{padding:'1px 6px',fontSize:11,marginLeft:4}}
-                        onClick={() => handleImportOnline(iv.version, 'DATOMATIC', true)}
+                        onClick={() => handleImportOnline(v.version, 'DATOMATIC', true)}
                         disabled={importingVer !== null}
                       >
-                        {importingVer === iv.version ? '...' : 'Re-import'}
+                        {importingVer === v.version ? '...' : 'Re-import'}
                       </button>
                     </span>
                   )
