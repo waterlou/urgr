@@ -369,8 +369,9 @@ router.post('/api/collections/:id/build', async (req, res) => {
               WHERE ge.version_id = ? AND (sg.filename IS NULL OR sg.filename = '')
               ON CONFLICT(game_entry_id) DO UPDATE SET available = 0, updated_at = datetime('now')`, [version_id]);
           }
-          const matched = get('SELECT COUNT(*) as c FROM scanned_games WHERE version_id = ? AND filename != ?', [version_id, '']).c;
-          const total = get('SELECT COUNT(*) as c FROM scanned_games WHERE version_id = ?', [version_id]).c;
+          const total = get('SELECT COUNT(*) as c FROM game_entries WHERE version_id = ?', [version_id]).c;
+          // Count game entries with available=1
+          const matched = get('SELECT COUNT(*) as c FROM game_entries ge JOIN game_state gs ON gs.game_entry_id = ge.id WHERE ge.version_id = ? AND gs.available = 1', [version_id]).c;
           // Calculate reuse: check if matched files exist in prior version dirs
           let reused = 0;
           const priorVersions = all('SELECT DISTINCT sv.version, sv.id FROM set_versions sv JOIN collection_versions cv ON cv.version_id = sv.id WHERE cv.collection_id = ? AND sv.id < ? ORDER BY sv.id', [col.id, version_id]);
