@@ -61,7 +61,7 @@ app.use((req, res) => {
 // =============================================================================
 // Start
 // =============================================================================
-// Startup cleanup: reset orphaned builds (server crashed/restarted)
+// Startup cleanup: reset orphaned builds and scrape jobs (server crashed/restarted)
 dbReady.then(() => {
   const orphans = all("SELECT id FROM collection_builds WHERE status = 'building'");
   if (orphans.length > 0) {
@@ -70,6 +70,7 @@ dbReady.then(() => {
       run("UPDATE collection_builds SET status = 'failed' WHERE id = ?", [o.id]);
     }
   }
+  runNow("UPDATE scrape_jobs SET status = 'failed', progress_msg = 'Server restarted' WHERE status = 'running'");
 });
 
 app.listen(PORT, () => {
