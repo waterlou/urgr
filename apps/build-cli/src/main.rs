@@ -261,25 +261,80 @@ fn cmd_dat_info(args: &[String], json: bool) -> ExitCode {
 }
 
 fn cmd_scan(args: &[String], json: bool) -> ExitCode {
-    if args.len() < 3 {
-        eprintln!("Usage: build-cli scan <version-id> <dir>");
+    let mut game_id: Option<i64> = None;
+    let mut clean_args: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--game-id" && i + 1 < args.len() {
+            game_id = args[i + 1].parse::<i64>().ok();
+            i += 2;
+            continue;
+        }
+        clean_args.push(args[i].clone());
+        i += 1;
+    }
+
+    if clean_args.len() < 3 {
+        eprintln!("Usage: build-cli scan <version-id> <dir> [--game-id <id>]");
         return ExitCode::FAILURE;
     }
-    let version_id: i64 = match args[1].parse() {
-        Ok(id) => id, Err(_) => { eprintln!("Invalid version ID: {}", args[1]); return ExitCode::FAILURE; }
+    let version_id: i64 = match clean_args[1].parse() {
+        Ok(id) => id, Err(_) => { eprintln!("Invalid version ID: {}", clean_args[1]); return ExitCode::FAILURE; }
     };
-    let dir = std::path::Path::new(&args[2]);
-    if !dir.exists() { eprintln!("Directory not found: {}", args[2]); return ExitCode::FAILURE; }
+    let dir = std::path::Path::new(&clean_args[2]);
+    if !dir.exists() { eprintln!("Directory not found: {}", clean_args[2]); return ExitCode::FAILURE; }
 
     let db = match open_db() { Ok(d) => d, Err(e) => { eprintln!("{}", e); return ExitCode::FAILURE; } };
-    let result = match scan_directory(&db, version_id, dir) {
-        Ok(r) => r, Err(e) => { eprintln!("Scan error: {}", e); return ExitCode::FAILURE; }
-    };
 
-    if json {
-        print_json(&ScanOutput { total_files: result.total_files, matched_games: result.matched_games, missing_games: result.missing_games });
+    if let Some(gid) = game_id {
+        // Single game scan
+        let games = match db.list_games(version_id) {
+            Ok(g) => g, Err(e) => { eprintln!("Database error: {}", e); return ExitCode::FAILURE; }
+        };
+        let game = match games.iter().find(|g| g.id == gid) {
+            Some(g) => g.clone(),
+            None => { eprintln!("Game not found: {}", gid); return ExitCode::FAILURE; }
+        };
+        let mut matched = 0;
+        let mut total_files = 0;
+        fn walk_dir_zip(dir: &std::path::Path, game_name: &str, full_path: &mut String, count: &mut usize) {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() { walk_dir_zip(&path, game_name, full_path, count); }
+                    else if let Some(ext) = path.extension() {
+                        if ext == "zip" {
+                            *count += 1;
+                            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+                            if stem == game_name {
+                                *full_path = path.to_string_lossy().to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let mut found_path = String::new();
+        walk_dir_zip(dir, &game.name, &mut found_path, &mut total_files);
+        if !found_path.is_empty() {
+            let _ = db.upsert_scanned_game(version_id, &game.name, &found_path, None, None, "ok");
+            matched = 1;
+        } else {
+            let _ = db.upsert_scanned_game(version_id, &game.name, "", None, None, "missing");
+        }
+        let result = ScanOutput { total_files, matched_games: matched, missing_games: 1 - matched };
+        if json { print_json(&result); }
+        else { println!("Scan complete: {} files, {} matched, {} missing", total_files, matched, 1 - matched); }
     } else {
-        println!("Scan complete: {} files, {} matched, {} missing", result.total_files, result.matched_games, result.missing_games);
+        // Full scan
+        let result = match scan_directory(&db, version_id, dir) {
+            Ok(r) => r, Err(e) => { eprintln!("Scan error: {}", e); return ExitCode::FAILURE; }
+        };
+        if json {
+            print_json(&ScanOutput { total_files: result.total_files, matched_games: result.matched_games, missing_games: result.missing_games });
+        } else {
+            println!("Scan complete: {} files, {} matched, {} missing", result.total_files, result.matched_games, result.missing_games);
+        }
     }
     ExitCode::SUCCESS
 }

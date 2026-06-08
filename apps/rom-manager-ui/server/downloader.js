@@ -4,6 +4,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { getDb } from './db.js'
 import { all, get, run } from './helpers.js'
+import { execCli } from './cli.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -173,30 +174,19 @@ async function checkGameComplete(gameEntryId) {
     [gameEntryId, 'completed', 'failed'])
   if (pending.cnt > 0) return
 
-  // All downloads for this game entry are done — scan collection dir to detect ALL files
+  // Run a single-game scan to update scanned_games and game_state
   try {
-    const game = get('SELECT g.*, c.folder FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id LEFT JOIN collection_versions cv ON cv.version_id = sv.id LEFT JOIN collections c ON c.id = cv.collection_id WHERE g.id = ?', [gameEntryId])
-    if (game && game.folder) {
+    const game = get('SELECT g.id, g.version_id, sv.source, c.folder FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id LEFT JOIN collection_versions cv ON cv.version_id = sv.id LEFT JOIN collections c ON c.id = cv.collection_id WHERE g.id = ?', [gameEntryId])
+    if (game && game.folder && game.source === 'NPS') {
       const collectionDir = path.resolve(__dirname, '..', '..', '..', 'data', 'roms', game.folder)
-      if (fs.existsSync(collectionDir)) {
-        const foundFiles = []
-        function walkDir(dir) {
-          for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-            if (entry.isDirectory()) walkDir(path.join(dir, entry.name))
-            else if (entry.name.endsWith('.pkg')) foundFiles.push(entry.name)
-          }
-        }
-        walkDir(collectionDir)
-        // Match PKG filenames against rom_entries and update game_state
-        for (const fname of foundFiles) {
-          run(`INSERT INTO game_state (game_entry_id, available, updated_at)
-            SELECT r.game_entry_id, 1, datetime('now') FROM rom_entries r
-            WHERE r.filename = ? AND r.game_entry_id IN (SELECT id FROM game_entries WHERE version_id = ?)
-            ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [fname, game.version_id])
-        }
-      }
+      execCli(['scan', String(game.version_id), collectionDir, '--game-id', String(game.id)], { binary: 'nps' })
     }
   } catch (_) {}
+  // Update game_state from scanned_games
+  run(`INSERT INTO game_state (game_entry_id, available, updated_at)
+    SELECT ge.id, 1, datetime('now') FROM game_entries ge
+    WHERE ge.id = ? AND EXISTS (SELECT 1 FROM scanned_games sg WHERE sg.version_id = ge.version_id AND sg.name = ge.name AND sg.filename != '')
+    ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [gameEntryId])
   broadcastQueue()
 }
 

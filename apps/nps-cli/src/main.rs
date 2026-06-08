@@ -162,17 +162,31 @@ fn main() -> ExitCode {
 }
 
 fn cmd_scan(args: &[String], json: bool) -> ExitCode {
-    if args.len() < 3 {
-        eprintln!("Usage: nps-cli scan <version-id> <dir>");
+    let mut game_id: Option<i64> = None;
+    let mut clean_args: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--game-id" && i + 1 < args.len() {
+            game_id = args[i + 1].parse::<i64>().ok();
+            i += 2;
+            continue;
+        }
+        clean_args.push(args[i].clone());
+        i += 1;
+    }
+
+    // Skip command name (clean_args[0] is "scan")
+    if clean_args.len() < 3 {
+        eprintln!("Usage: nps-cli scan <version-id> <dir> [--game-id <id>]");
         return ExitCode::FAILURE;
     }
-    let version_id: i64 = match args[1].parse() {
+    let version_id: i64 = match clean_args[1].parse() {
         Ok(id) => id,
-        Err(_) => { eprintln!("Invalid version ID: {}", args[1]); return ExitCode::FAILURE; }
+        Err(_) => { eprintln!("Invalid version ID: {}", clean_args[1]); return ExitCode::FAILURE; }
     };
-    let dir = Path::new(&args[2]);
+    let dir = Path::new(&clean_args[2]);
     if !dir.exists() {
-        eprintln!("Directory not found: {}", args[2]);
+        eprintln!("Directory not found: {}", clean_args[1]);
         return ExitCode::FAILURE;
     }
 
@@ -181,23 +195,41 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
         Err(e) => { eprintln!("Database error: {}", e); return ExitCode::FAILURE; }
     };
 
-    // Build title_id -> game_entry_id and name maps
     let games = match db.list_nps_games(version_id) {
         Ok(g) => g,
         Err(e) => { eprintln!("Failed to list games: {}", e); return ExitCode::FAILURE; }
     };
 
+    // Filter to specific game if --game-id provided
+    let target_games: Vec<&NpsGame> = if let Some(gid) = game_id {
+        games.iter().filter(|g| g.id == gid).collect()
+    } else {
+        games.iter().collect()
+    };
+
+    if target_games.is_empty() {
+        eprintln!("No games found for version {} (game_id={:?})", version_id, game_id);
+        return ExitCode::FAILURE;
+    }
+
     let mut title_to_game: HashMap<String, &NpsGame> = HashMap::new();
-    for game in &games {
+    for game in &target_games {
         if let Some(ref tid) = game.title_id {
             title_to_game.insert(tid.clone(), game);
         }
         title_to_game.insert(game.name.clone(), game);
     }
 
-    // Clear existing scanned_games and walk directory
-    let _ = db.clear_scanned_games(version_id);
-    let mut matched_names: HashSet<String> = HashSet::new();
+    // Full scan: clear all scanned_games. Single game: just clear that game's entry.
+    let matched_names: HashSet<String> = if game_id.is_some() {
+        // Single game — don't clear all, just upsert result
+        HashSet::new()
+    } else {
+        let _ = db.clear_scanned_games(version_id);
+        HashSet::new()
+    };
+
+    let mut matched_names = matched_names;
     let mut total_files = 0;
 
     for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
@@ -224,15 +256,15 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
         }
     }
 
-    // Mark missing games
-    for game in &games {
+    // Mark missing
+    for game in &target_games {
         if !matched_names.contains(&game.name) {
             let _ = db.upsert_scanned_game(version_id, &game.name, "", None, None, "missing");
         }
     }
 
     let matched = matched_names.len();
-    let missing = games.len() - matched;
+    let missing = target_games.len() - matched;
     let result = ScanOutput { total_files, matched_games: matched, missing_games: missing };
     if json {
         print_json(&result);
