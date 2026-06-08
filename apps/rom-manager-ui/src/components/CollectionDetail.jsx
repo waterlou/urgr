@@ -144,7 +144,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
     <div className="browser">
       <div className="browser-header">
         <div className="browser-title-row">
-          <button className="back-btn" onClick={onBack} title="Back"><span className="icon">arrow_back</span></button>
+          {gameCount > 0 && <button className="back-btn" onClick={onBack} title="Back"><span className="icon">arrow_back</span></button>}
           <span className="browser-title-icon"><IconDisplay name={collection?.logo} fallback="folder" /></span>
           <h1 className="browser-title">{collection?.name || 'Collection'}</h1>
           <span className="browser-count">{gameCount} games</span>
