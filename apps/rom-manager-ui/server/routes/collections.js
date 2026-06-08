@@ -321,7 +321,6 @@ router.post('/api/collections/:id/build', async (req, res) => {
     if (!sv) return res.status(404).json({ error: 'Version not found' });
 
     const collectionDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', col.folder || col.slug);
-    const scanDir = import_dir || collectionDir;
     const jobId = crypto.randomUUID();
     const job = createJob(jobId);
     job._abort = new AbortController();
@@ -330,12 +329,12 @@ router.post('/api/collections/:id/build', async (req, res) => {
       try {
         if (sv.source === 'NPS') {
           if (scan) {
-            const result = execCli(['scan', String(version_id), scanDir], { binary: 'nps' });
+            const result = execCli(['scan', String(version_id), collectionDir], { binary: 'nps' });
             reloadDb();
-            doneJob(jobId, { added: 0, exists: result.found, reused: 0, missing: result.total - result.found });
+            doneJob(jobId, { added: result.found, exists: 0, reused: 0, missing: result.total - result.found });
           } else {
             fs.mkdirSync(collectionDir, { recursive: true });
-            const result = execCli(['build', String(version_id), collectionDir, '--input-dir', scanDir], { binary: 'nps' });
+            const result = execCli(['build', String(version_id), collectionDir, '--input-dir', collectionDir], { binary: 'nps' });
             reloadDb();
             try {
               const foundGames = new Set();
