@@ -338,7 +338,6 @@ const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
  * 3. POST the Download... button on the result page → get ZIP file
  */
 async function downloadDatomicDat(systemId) {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
   const cookieJar = {};
 
   function parseCookies(headers) {
@@ -380,8 +379,6 @@ async function downloadDatomicDat(systemId) {
   }
   const buttonName = buttonMatch[1];
 
-  await sleep(2000);
-
   // Step 2: POST with system_selection + Prepare to trigger DAT generation
   let resp2;
   try {
@@ -399,8 +396,6 @@ async function downloadDatomicDat(systemId) {
     throw new Error(`[DAT-O-MATIC step2] POST Prepare failed for system ${systemId}: ${e.message}`);
   }
   parseCookies(Object.fromEntries(resp2.headers.entries()));
-
-  await sleep(2000);
 
   const location = resp2.headers.get('location');
   if (!location) {
@@ -420,8 +415,6 @@ async function downloadDatomicDat(systemId) {
   }
   parseCookies(Object.fromEntries(resp3.headers.entries()));
   const html3 = await resp3.text();
-
-  await sleep(2000);
 
   // Find the Download... button hash
   const dlMatch = html3.match(/name="([a-f0-9]+)"\s+value="Download\.\.\."/) ||
