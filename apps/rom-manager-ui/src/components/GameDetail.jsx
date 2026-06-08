@@ -111,7 +111,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
             {game.description && <p className="detail-subtitle">{game.description}</p>}
             <div className="modal-meta">
               <span className="badge">{game.source} {game.version}</span>
-              {game.year && <span className="badge">{game.year}</span>}
+              {game.year && game.year.split(/,\s*/).map(r => <span key={r} className="badge">{r}</span>)}
               {game.platform && <span className="badge">{game.platform}</span>}
               {game.manufacturer && <span className="badge">{game.manufacturer}</span>}
               {game.cloneof && <span className="badge badge-clone">clone of {game.cloneof}</span>}

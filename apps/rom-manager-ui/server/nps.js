@@ -94,36 +94,72 @@ export async function importNps(platform, versionId) {
   let gamesImported = 0;
   let romsImported = 0;
 
-  const gameMap = new Map();
+  // Group by name — one game entry per unique name, multiple ROMs (one per region)
+  const grouped = new Map();
+  for (const row of allGames) {
+    if (shouldIgnore(row.Name || '')) continue;
+    const pkgUrl = row['PKG direct link'] || row.pkg_url || '';
+    if (!pkgUrl) continue;
 
+    const name = row.Name || row.name || '';
+    if (!grouped.has(name)) {
+      grouped.set(name, {
+        name,
+        titleIds: [],
+        originalName: row['Original Name'] || row.original_name || '',
+        regions: [],
+      });
+    }
+    const g = grouped.get(name);
+    g.titleIds.push(row['Title ID'] || '');
+    g.regions.push(row.Region || row.region || '');
+    if (!g.originalName) g.originalName = row['Original Name'] || row.original_name || '';
+  }
+
+  // Create game entries
+  for (const [name, g] of grouped) {
+    const existing = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ?', [versionId, name]);
+    if (existing) continue;
+
+    const regions = [...new Set(g.regions)].join(', ');
+    run('INSERT INTO game_entries (version_id, name, description, year, platform, title_id, content_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [versionId, name, g.originalName, regions, info.folder, g.titleIds[0], '']);
+    gamesImported++;
+  }
+
+  // Create ROM entries — one per region per game
+  const romSeen = new Set();
   for (const row of allGames) {
     if (shouldIgnore(row.Name || '')) continue;
     const titleId = row['Title ID'] || row.title_id || '';
     const name = row.Name || row.name || '';
     const region = row.Region || row.region || '';
     const pkgUrl = row['PKG direct link'] || row.pkg_url || '';
-    const originalName = row['Original Name'] || row.original_name || '';
-    const contentId = row['Content ID'] || row.content_id || '';
     const fileSize = parseInt(row['File Size'] || row.file_size || '0', 10);
     const sha256 = row.SHA256 || row.sha256 || '';
 
     if (!pkgUrl) continue;
 
-    const existing = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ?', [versionId, name]);
-    if (existing) continue;
-
-    run('INSERT INTO game_entries (version_id, name, description, year, platform, title_id, content_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [versionId, name, originalName, region, info.folder, titleId, contentId]);
-
     const gameEntry = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ?', [versionId, name]);
     if (!gameEntry) continue;
 
-    run('INSERT INTO rom_entries (game_entry_id, filename, size, sha1, subtype) VALUES (?, ?, ?, ?, ?)',
-      [gameEntry.id, `${titleId}.pkg`, fileSize || 0, sha256, 'game']);
-    romsImported++;
+    // Deduplicate by name+region+titleId
+    const romKey = `${name}|${region}|${titleId}`;
+    if (romSeen.has(romKey)) continue;
+    romSeen.add(romKey);
 
-    gameMap.set(titleId, gameEntry.id);
-    gamesImported++;
+    run('INSERT INTO rom_entries (game_entry_id, filename, size, sha1, subtype) VALUES (?, ?, ?, ?, ?)',
+      [gameEntry.id, `${region}_${titleId}.pkg`, fileSize || 0, sha256, 'game']);
+    romsImported++;
+  }
+
+  // Map titleIds to gameEntryIds for DLC/update linking
+  const gameMap = new Map();
+  for (const row of allGames) {
+    const titleId = row['Title ID'] || row.title_id || '';
+    const name = row.Name || row.name || '';
+    const gameEntry = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ?', [versionId, name]);
+    if (gameEntry) gameMap.set(titleId, gameEntry.id);
   }
 
   for (const row of allDlcs) {
