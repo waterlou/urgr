@@ -60,8 +60,12 @@ router.post('/api/collections', async (req, res) => {
     while (get('SELECT id FROM collections WHERE slug = ?', [finalSlug])) {
       finalSlug = `${slug}-${counter++}`;
     }
+    let finalFolder = folder || finalSlug;
+    while (get('SELECT id FROM collections WHERE folder = ?', [finalFolder])) {
+      finalFolder = `${finalFolder}-${counter++}`;
+    }
     run('INSERT INTO collections (name, slug, platform, logo, folder, has_dataset, dataset_preset) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [name, finalSlug, platform || null, logo || '', folder || slug, has_dataset ? 1 : 0, dataset_preset || null]);
+      [name, finalSlug, platform || null, logo || '', finalFolder, has_dataset ? 1 : 0, dataset_preset || null]);
     const col = get('SELECT * FROM collections WHERE slug = ?', [finalSlug]);
     if (uploaded_version_id) {
       run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [col.id, uploaded_version_id]);
