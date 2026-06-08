@@ -22,6 +22,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
   const importRan = useRef(false)
 
   useEffect(() => {
+    importRan.current = false
     let cancelled = false
     async function load() {
       try {

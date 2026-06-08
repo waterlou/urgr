@@ -181,14 +181,14 @@ export default function VersionManager({ collectionId, collection, versions = []
         </section>
       )}
 
-      {/* OfflineList DAT Versions */}
+      {/* OfflineList DAT */}
       {availableDats && isOfflineList && (
         <section className="detail-section">
           <h2 className="detail-section-title">
             OfflineList DAT
             {availableDats.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>Update available</span>}
           </h2>
-          {availableDats.imported?.length > 0 && (
+          {availableDats.imported?.length > 0 ? (
             <div className="info-box" style={{marginTop:12}}>
               <strong>Imported DAT:</strong>
               {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Re-importing...</div>}
@@ -213,18 +213,36 @@ export default function VersionManager({ collectionId, collection, versions = []
                 })}
               </div>
             </div>
+          ) : availableDats.missing?.length > 0 && (
+            <div className="info-box warn" style={{marginTop:12}}>
+              <strong>DAT not imported yet.</strong>
+              {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing {importingVer}...</div>}
+              <div className="tag-list" style={{marginTop:8}}>
+                {availableDats.missing.map(d => (
+                  <button
+                    key={d.version}
+                    className="tag tag-import"
+                    onClick={() => handleImportOnline(d.version, 'OFFLINELIST')}
+                    disabled={importingVer !== null}
+                  >
+                    <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:2}}>{importingVer === d.version ? 'hourglass' : 'add'}</span>
+                    {d.version}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </section>
       )}
 
-      {/* DAT-O-MATIC DAT Versions */}
+      {/* DAT-O-MATIC DAT */}
       {availableDats && isDatomic && (
         <section className="detail-section">
           <h2 className="detail-section-title">
             DAT-O-MATIC DAT
             {availableDats.hasNewer && <span className="badge badge-warn" style={{marginLeft:8,fontSize:11}}>Update available</span>}
           </h2>
-          {availableDats.imported?.length > 0 && (
+          {availableDats.imported?.length > 0 ? (
             <div className="info-box" style={{marginTop:12}}>
               <strong>Imported system:</strong>
               {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Re-importing...</div>}
@@ -249,6 +267,24 @@ export default function VersionManager({ collectionId, collection, versions = []
                 })}
               </div>
             </div>
+          ) : availableDats.missing?.length > 0 && (
+            <div className="info-box warn" style={{marginTop:12}}>
+              <strong>System not imported yet.</strong>
+              {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing {importingVer}...</div>}
+              <div className="tag-list" style={{marginTop:8}}>
+                {availableDats.missing.map(d => (
+                  <button
+                    key={d.version}
+                    className="tag tag-import"
+                    onClick={() => handleImportOnline(d.version, 'DATOMATIC')}
+                    disabled={importingVer !== null}
+                  >
+                    <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:2}}>{importingVer === d.version ? 'hourglass' : 'add'}</span>
+                    {d.version}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </section>
       )}
@@ -259,7 +295,7 @@ export default function VersionManager({ collectionId, collection, versions = []
           <h2 className="detail-section-title">
             NoPayStation
           </h2>
-          {versions.length > 0 && (
+          {versions.length > 0 ? (
             <div className="info-box" style={{marginTop:12}}>
               <strong>Imported platform:</strong>
               {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Re-importing...</div>}
@@ -282,6 +318,24 @@ export default function VersionManager({ collectionId, collection, versions = []
                     </span>
                   )
                 })}
+              </div>
+            </div>
+          ) : availableDats?.missing?.length > 0 && (
+            <div className="info-box warn" style={{marginTop:12}}>
+              <strong>Platform not imported yet.</strong>
+              {importingVer && <div className="loading-inline" style={{marginLeft:8}}><div className="loading-spinner-sm" /> Importing {importingVer}...</div>}
+              <div className="tag-list" style={{marginTop:8}}>
+                {availableDats.missing.map(p => (
+                  <button
+                    key={p.version}
+                    className="tag tag-import"
+                    onClick={() => handleNpsImport(p.version)}
+                    disabled={importingVer !== null}
+                  >
+                    <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:2}}>{importingVer === p.version ? 'hourglass' : 'add'}</span>
+                    {p.name || p.version}
+                  </button>
+                ))}
               </div>
             </div>
           )}
