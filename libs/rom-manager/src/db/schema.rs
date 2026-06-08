@@ -17,8 +17,9 @@ CREATE TABLE IF NOT EXISTS game_entries (
     manufacturer TEXT,
     cloneof     TEXT,
     platform    TEXT DEFAULT '',
+    region      TEXT,
     FOREIGN KEY (version_id) REFERENCES set_versions(id) ON DELETE CASCADE,
-    UNIQUE(version_id, name)
+    UNIQUE(version_id, name, region)
 );
 
 CREATE TABLE IF NOT EXISTS rom_entries (

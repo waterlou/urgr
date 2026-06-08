@@ -159,10 +159,11 @@ router.get('/api/collections/:id/games', async (req, res) => {
     // Always LEFT JOIN game_state for available/favourite/rating data
     const joinClause = 'LEFT JOIN game_state r ON r.game_entry_id = g.id';
 
-    const total = get(`SELECT COUNT(DISTINCT g.name) as c FROM game_entries g ${joinClause} WHERE g.version_id IN (${ph}) ${whereExtra}`, [...vids, ...extraParams]).c;
+    const total = get(`SELECT COUNT(DISTINCT g.name || '|' || g.region) as c FROM game_entries g ${joinClause} WHERE g.version_id IN (${ph}) ${whereExtra}`, [...vids, ...extraParams]).c;
 
     let games = all(`
-      SELECT g.name, g.description, g.year, g.manufacturer, g.cloneof, g.platform,
+      SELECT g.name, g.description, g.year, g.manufacturer, g.cloneof, g.platform, g.region,
+        (SELECT GROUP_CONCAT(region, '||') FROM (SELECT DISTINCT region FROM game_entries c WHERE c.cloneof = g.name AND c.version_id = g.version_id)) as clone_regions,
         MIN(g.id) as id, MIN(g.version_id) as version_id, MIN(sv.source) as source, MIN(sv.version) as version,
         GROUP_CONCAT(sv.source || '||' || sv.version, '||') as versions_tags,
         MAX(COALESCE(r.rating, 0)) as rating,
@@ -174,7 +175,7 @@ router.get('/api/collections/:id/games', async (req, res) => {
       JOIN set_versions sv ON sv.id = g.version_id
       ${joinClause}
       WHERE g.version_id IN (${ph}) ${whereExtra}
-      GROUP BY g.name
+      GROUP BY g.name, g.region
       ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?
     `, [...vids, ...extraParams, Number(limit), Number(offset)]);
 
@@ -189,7 +190,11 @@ router.get('/api/collections/:id/games', async (req, res) => {
       try { screenshots = JSON.parse(g.screenshots_json) || []; } catch {}
       delete g.covers_json;
       delete g.screenshots_json;
-      return { ...g, versions, covers, screenshots };
+      const cloneRegions = g.clone_regions ? g.clone_regions.split('||').filter(Boolean) : [];
+      delete g.clone_regions;
+      const allRegions = [g.region, ...cloneRegions].filter(Boolean);
+      const regions = [...new Set(allRegions)];
+      return { ...g, versions, covers, screenshots, regions };
     });
 
     const platforms = all(`SELECT DISTINCT sv.source as platform FROM set_versions sv WHERE sv.id IN (${ph})`, vids).map(p => p.platform);

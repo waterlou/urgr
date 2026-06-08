@@ -67,7 +67,7 @@ export default function GameGridCard({ game, onSelect, onRating, onFavourite, on
         <div className="grid-card-name">{game.name}</div>
         {game.description && <div className="grid-card-sub">{game.description}</div>}
         <div className="grid-card-sub">
-          {game.year && game.year.split(/,\s*/).map(r => <span key={r} className="version-tag">{r}</span>)}
+          {game.regions ? game.regions.map(r => <span key={r} className="version-tag">{r}</span>) : game.region && <span className="version-tag">{game.region}</span>}
           {(game.versions && game.versions.length > 0
             ? game.versions
             : game.source ? [game.source] : []

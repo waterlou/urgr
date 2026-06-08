@@ -13,7 +13,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
   useEffect(() => {
     getGame(gameId).then(g => {
       setGame(g)
-      if (!g.manufacturer && !g.year) {
+      if (!g.manufacturer && !g.year && !g.region && !g.description) {
         setScraping(true)
         setScrapeError(null)
         scrapeGameMetadata(gameId)
@@ -111,10 +111,15 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
             {game.description && <p className="detail-subtitle">{game.description}</p>}
             <div className="modal-meta">
               <span className="badge">{game.source} {game.version}</span>
-              {game.year && game.year.split(/,\s*/).map(r => <span key={r} className="badge">{r}</span>)}
+              {game.region && <span className="badge">{game.region}</span>}
+              {game.year && <span className="badge">{game.year}</span>}
               {game.platform && <span className="badge">{game.platform}</span>}
               {game.manufacturer && <span className="badge">{game.manufacturer}</span>}
-              {game.cloneof && <span className="badge badge-clone">clone of {game.cloneof}</span>}
+              {game.parent && (
+                <span className="badge badge-parent" style={{cursor:'pointer'}} onClick={() => onNavigate?.(game.parent.id)}>
+                  Parent: {game.parent.name} ({game.parent.region})
+                </span>
+              )}
               {game.synopsis && <span className="badge badge-scraped">Scraped</span>}
             </div>
 
@@ -159,6 +164,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
               {game.clones.map(c => (
                 <div key={c.name} className="variant-item" onClick={() => onNavigate?.(c.id)} style={{cursor:'pointer'}}>
                   <span className="variant-name">{c.description || c.name}</span>
+                  {c.region && <span className="badge">{c.region}</span>}
                   <span className="variant-romname">{c.name}</span>
                 </div>
               ))}

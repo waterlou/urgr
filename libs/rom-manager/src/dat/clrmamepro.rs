@@ -49,6 +49,7 @@ pub fn parse_clrmamepro_str(text: &str) -> (Vec<GameEntry>, Vec<RomEntry>, Parse
             manufacturer: kv.get("manufacturer").cloned(),
             cloneof: kv.get("cloneof").cloned(),
             platform: String::new(),
+            region: None,
         });
 
         if let Some(rom_blocks) = kv.get("_roms") {

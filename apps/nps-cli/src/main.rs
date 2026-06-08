@@ -94,6 +94,16 @@ fn send_progress(pct: u32, msg: &str) {
 
 fn extract_title_id(filename: &str) -> Option<String> {
     let base = filename.strip_suffix(".pkg")?;
+    // NPS PKG format: {prefix}-{title_id}_{num}-{name}_bg_{n}_{hash}
+    // e.g., UP4395-PCSE00890_00-10SECNINJAVITAUS_bg_1_97017d2fc8def61a2dbca9151ae7091b31242bf1
+    // title_id is after first '-' and before next '_'
+    if let Some(dash_pos) = base.find('-') {
+        let after_dash = &base[dash_pos + 1..];
+        if let Some(us_pos) = after_dash.find('_') {
+            return Some(after_dash[..us_pos].to_string());
+        }
+    }
+    // Fallback: extract everything before first '_'
     if let Some(pos) = base.find('_') {
         Some(base[..pos].to_string())
     } else {

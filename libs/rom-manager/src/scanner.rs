@@ -122,6 +122,7 @@ mod tests {
                     manufacturer: None,
                     cloneof: None,
                     platform: String::new(),
+                    region: None,
                 },
             )
             .unwrap();

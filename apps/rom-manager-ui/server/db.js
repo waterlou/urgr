@@ -36,10 +36,11 @@ CREATE TABLE IF NOT EXISTS game_entries (
     platform    TEXT DEFAULT '',
     title_id    TEXT,
     content_id  TEXT,
+    region      TEXT DEFAULT '',
     covers      TEXT DEFAULT '[]',
     screenshots TEXT DEFAULT '[]',
     FOREIGN KEY (version_id) REFERENCES set_versions(id) ON DELETE CASCADE,
-    UNIQUE(version_id, name)
+    UNIQUE(version_id, name, region)
 );
 
 CREATE TABLE IF NOT EXISTS rom_entries (
@@ -212,6 +213,39 @@ export function initDb(dbPath) {
               SELECT game_entry_id, COALESCE(rating, 0), COALESCE(favourite, 0), COALESCE(play_count, 0), updated_at
               FROM game_ratings`);
       db.run('DROP TABLE game_ratings');
+    }
+  } catch (_) {}
+
+  // Migration: add region column and recreate game_entries with UNIQUE(version_id, name, region)
+  try {
+    const needsRebuild = db.exec("SELECT sql FROM sqlite_master WHERE type='table' AND name='game_entries'");
+    const createSql = needsRebuild[0]?.values[0]?.[0] || '';
+    if (!createSql.includes('region') || createSql.includes('UNIQUE(version_id, name)') || createSql.includes('UNIQUE(version_id, name, year)')) {
+      try { db.run('DROP TABLE IF EXISTS game_entries_new'); } catch (_) {}
+      db.run('PRAGMA foreign_keys = OFF');
+      db.run(`CREATE TABLE game_entries_new (
+        id          INTEGER PRIMARY KEY,
+        version_id  INTEGER NOT NULL,
+        name        TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        synopsis    TEXT DEFAULT '',
+        year        TEXT,
+        manufacturer TEXT,
+        cloneof     TEXT,
+        platform    TEXT DEFAULT '',
+        title_id    TEXT,
+        content_id  TEXT,
+        region      TEXT DEFAULT '',
+        covers      TEXT DEFAULT '[]',
+        screenshots TEXT DEFAULT '[]',
+        FOREIGN KEY (version_id) REFERENCES set_versions(id) ON DELETE CASCADE,
+        UNIQUE(version_id, name, region)
+      )`);
+      db.run('INSERT INTO game_entries_new (id, version_id, name, description, synopsis, year, manufacturer, cloneof, platform, title_id, content_id, covers, screenshots) SELECT id, version_id, name, description, synopsis, year, manufacturer, cloneof, platform, title_id, content_id, covers, screenshots FROM game_entries');
+      db.run('DROP TABLE game_entries');
+      db.run('ALTER TABLE game_entries_new RENAME TO game_entries');
+      db.run('CREATE INDEX IF NOT EXISTS idx_game_entries_title_id ON game_entries(title_id)');
+      db.run('PRAGMA foreign_keys = ON');
     }
   } catch (_) {}
 

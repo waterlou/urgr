@@ -145,9 +145,9 @@ impl Database {
 
     pub fn insert_game(&self, version_id: i64, game: &GameEntry) -> Result<i64> {
         self.conn.execute(
-            "INSERT INTO game_entries (version_id, name, description, year, manufacturer, cloneof, platform)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT(version_id, name) DO UPDATE SET
+            "INSERT INTO game_entries (version_id, name, description, year, manufacturer, cloneof, platform, region)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(version_id, name, region) DO UPDATE SET
                description = excluded.description,
                year = excluded.year,
                manufacturer = excluded.manufacturer,
@@ -161,6 +161,7 @@ impl Database {
                 game.manufacturer,
                 game.cloneof,
                 game.platform,
+                game.region,
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -178,14 +179,14 @@ impl Database {
         let tx = self.conn.unchecked_transaction()?;
         for game in games {
             tx.execute(
-                "INSERT INTO game_entries (version_id, name, description, year, manufacturer, cloneof, platform)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                 ON CONFLICT(version_id, name) DO UPDATE SET
+                "INSERT INTO game_entries (version_id, name, description, year, manufacturer, cloneof, platform, region)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(version_id, name, region) DO UPDATE SET
                    description = excluded.description,
                    year = excluded.year,
                    manufacturer = excluded.manufacturer,
                    cloneof = excluded.cloneof,
-                   platform = excluded.platform",
+                    platform = excluded.platform",
                 params![
                     version_id,
                     game.name,
@@ -194,6 +195,7 @@ impl Database {
                     game.manufacturer,
                     game.cloneof,
                     game.platform,
+                    game.region,
                 ],
             )?;
         }
@@ -203,7 +205,7 @@ impl Database {
 
     pub fn list_games(&self, version_id: i64) -> Result<Vec<GameEntry>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, version_id, name, description, year, manufacturer, cloneof, platform
+            "SELECT id, version_id, name, description, year, manufacturer, cloneof, platform, region
              FROM game_entries WHERE version_id = ?1 ORDER BY name",
         )?;
         let rows = stmt.query_map(params![version_id], |r| {
@@ -216,6 +218,7 @@ impl Database {
                 manufacturer: r.get(5)?,
                 cloneof: r.get(6)?,
                 platform: r.get(7)?,
+                region: r.get(8)?,
             })
         })?;
         let mut games = Vec::new();
@@ -629,6 +632,7 @@ mod tests {
             manufacturer: Some("Capcom".to_string()),
             cloneof: None,
             platform: String::new(),
+            region: None,
         }
     }
 
@@ -829,6 +833,7 @@ mod tests {
             manufacturer: Some("TestCorp".into()),
             cloneof: None,
             platform: String::new(),
+            region: None,
         }).collect()
     }
 

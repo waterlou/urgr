@@ -104,8 +104,12 @@ router.get('/:id', async (req, res) => {
     const roms = all('SELECT * FROM rom_entries WHERE game_entry_id = ?', [game.id]);
     const scanned = all('SELECT * FROM scanned_games WHERE name = ? AND version_id = ?', [game.name, game.version_id]);
     const state = get('SELECT * FROM game_state WHERE game_entry_id = ?', [game.id]);
-    const clones = all('SELECT id, name, description, cloneof FROM game_entries WHERE cloneof = ? AND version_id = ? ORDER BY name', [game.name, game.version_id]);
-    res.json({ ...game, roms, scanned_games: scanned, rating: state, clones });
+    const clones = all(`SELECT id, name, description, cloneof, region FROM game_entries WHERE name = ? AND version_id = ? AND id != ?${game.cloneof ? ' AND cloneof IS NOT NULL' : ''} ORDER BY name`, [game.cloneof || game.name, game.version_id, game.id]);
+    let parent = null;
+    if (game.cloneof) {
+      parent = get('SELECT id, name, region FROM game_entries WHERE name = ? AND version_id = ? AND cloneof IS NULL', [game.cloneof, game.version_id]);
+    }
+    res.json({ ...game, roms, scanned_games: scanned, rating: state, clones, parent });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -251,6 +255,8 @@ async function scrapeSingleGame(gameId) {
   const updated = get('SELECT g.*, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [game.id]);
   if (typeof updated.covers === 'string') try { updated.covers = JSON.parse(updated.covers); } catch { updated.covers = []; }
   if (typeof updated.screenshots === 'string') try { updated.screenshots = JSON.parse(updated.screenshots); } catch { updated.screenshots = []; }
+  updated.roms = all('SELECT * FROM rom_entries WHERE game_entry_id = ?', [game.id]);
+  updated.scanned_games = all('SELECT * FROM scanned_games WHERE name = ? AND version_id = ?', [game.name, game.version_id]);
 
   // For NPS/PlayStation games, try to get screenshots from Sony Store API if not already scraped
   if (updated.source === 'NPS' && (!updated.screenshots || updated.screenshots.length === 0)) {

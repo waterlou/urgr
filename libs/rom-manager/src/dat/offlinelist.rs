@@ -132,6 +132,7 @@ pub fn parse_offlinelist_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>
                             manufacturer: if publisher.is_empty() { None } else { Some(publisher.clone()) },
                             cloneof: None,
                             platform: system.clone(),
+                            region: None,
                         };
                         games.push(game_entry);
 

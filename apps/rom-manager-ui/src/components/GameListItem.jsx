@@ -47,7 +47,7 @@ export default function GameListItem({ game, onSelect, onRating, onFavourite, on
         {game.versions && game.versions.length > 0
           ? game.versions.map(v => <span key={v} className="version-tag">{v}</span>)
           : <span className="version-tag">{game.source || '-'}</span>}
-        {game.year && game.year.split(/,\s*/).map(r => <span key={r} className="version-tag">{r}</span>)}
+        {game.regions ? game.regions.map(r => <span key={r} className="version-tag">{r}</span>) : game.region && <span className="version-tag">{game.region}</span>}
       </span>
       <span className="list-col-year">{game.year || '-'}</span>
       <span className="list-col-rating" onClick={e => e.stopPropagation()}>
