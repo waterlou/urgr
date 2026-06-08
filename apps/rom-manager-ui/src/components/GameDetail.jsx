@@ -153,7 +153,6 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                 <span className="icon">refresh</span> {game.manufacturer ? 'Rescrape' : 'Scrape'}
               </button>
             )}
-            {downloadMsg && <p className="scrape-success">{downloadMsg}</p>}
           </div>
         </div>
 
@@ -206,7 +205,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                     <th>Filename</th>
                     <th>Type</th>
                     <th>Size</th>
-                    <th>Status</th>
+                    <th>Downloaded</th>
                     <th>SHA1</th>
                   </tr>
                 </thead>
@@ -216,7 +215,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                       <td className="rom-filename">{rom.filename}</td>
                       <td><span className="badge">{rom.subtype || 'game'}</span></td>
                       <td>{rom.size != null ? formatSize(rom.size) : '-'}</td>
-                      <td><span className={`rom-status rom-status-${rom.status}`}>{rom.status}</span></td>
+                      <td>{rom.downloaded ? <span className="badge" style={{background:'var(--accent)',fontSize:11}}>downloaded</span> : <span className="badge" style={{background:'#555',fontSize:11}}>missing</span>}</td>
                       <td className="rom-hash">{rom.sha1 ? rom.sha1.slice(0, 16) + '...' : '-'}</td>
                     </tr>
                   ))}
