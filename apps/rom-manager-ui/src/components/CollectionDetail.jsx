@@ -7,7 +7,7 @@ import IaDownload from './IaDownload.jsx'
 import BuildManager from './BuildManager.jsx'
 import ExportPanel from './ExportPanel.jsx'
 
-export default function CollectionDetail({ collectionId, collection, onBrowseGames, onRefresh }) {
+export default function CollectionDetail({ collectionId, collection, onBrowseGames, onBack, onRefresh }) {
   const [versions, setVersions] = useState([])
   const [builds, setBuilds] = useState([])
   const [loading, setLoading] = useState(true)
@@ -144,15 +144,12 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
     <div className="browser">
       <div className="browser-header">
         <div className="browser-title-row">
+          <button className="back-btn" onClick={onBack} title="Back"><span className="icon">arrow_back</span></button>
           <span className="browser-title-icon"><IconDisplay name={collection?.logo} fallback="folder" /></span>
           <h1 className="browser-title">{collection?.name || 'Collection'}</h1>
           <span className="browser-count">{gameCount} games</span>
           {collection?.platform && <span className="platform-badge">{collection.platform}</span>}
           {latestImported && <span className="platform-badge" style={{background:'var(--accent-dim)',color:'var(--accent)'}}>Latest: {latestImported.version}</span>}
-        </div>
-
-        <div className="collection-actions">
-          <button className="btn btn-primary" onClick={onBrowseGames}>Browse Games</button>
         </div>
 
         {error && <div className="notification error">{error}</div>}

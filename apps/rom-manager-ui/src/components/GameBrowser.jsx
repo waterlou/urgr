@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import GameGridCard from './GameGridCard.jsx'
 import GameListItem from './GameListItem.jsx'
+import IconDisplay from './IconDisplay.jsx'
 import { getGames, coverUrl, updateGameRating, batchScrapeGameMetadata, subscribeJobSSE, cancelJob, getScrapeJobs } from '../api.js'
 
 export default function GameBrowser({
@@ -167,18 +168,18 @@ export default function GameBrowser({
       <div className="browser-header">
         <div className="browser-title-row">
           <button className="hamburger-btn" onClick={onToggleSidebar} title="Menu"><span className="icon">menu</span></button>
-          {showBackToDetail && (
-            <button className="back-btn" onClick={onBackToDetail} title="Back to Collection"><span className="icon">arrow_back</span></button>
-          )}
-          {showBackToDetail && onOpenSettings && (
-            <button className="back-btn" onClick={onOpenSettings} title="Collection settings" style={{marginLeft:4}}><span className="icon">settings</span></button>
-          )}
+          {showBackToDetail && activeMeta && <IconDisplay name={activeMeta.logo} fallback="folder" size={24} />}
           <h1 className="browser-title">{title}</h1>
           <span className="browser-count">{totalGames} games</span>
           {platforms.length > 0 && (
             <div className="browser-platforms">
               {platforms.map(p => <span key={p} className="platform-badge">{p}</span>)}
             </div>
+          )}
+          {showBackToDetail && onOpenSettings && (
+            <button className="btn btn-sm" onClick={onOpenSettings} title="Collection settings" style={{marginLeft:'auto'}}>
+              <span className="icon">settings</span>
+            </button>
           )}
         </div>
 

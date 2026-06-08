@@ -352,6 +352,7 @@ export default function App() {
             collectionId={activeId}
             collection={collections.find(c => c.id === activeId)}
             onBrowseGames={handleBrowseGames}
+            onBack={handleBrowseGames}
             onRefresh={loadSidebar}
           />
         ) : (
