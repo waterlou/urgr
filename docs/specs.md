@@ -12,24 +12,19 @@ A retro game ROM collection manager. Import DAT files, scrape metadata from onli
 │  Web UI for collections, game browsing, settings, jobs    │
 ├──────────────────────────────────────────────────────────┤
 │  CLI Layer (Rust binaries)                                │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
-│  │parse-cli │  │build-cli │  │scraper-  │  │db-cli    │ │
-│  │          │  │          │  │  cli     │  │          │ │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘ │
-├───────┼─────────────┼─────────────┼─────────────┼───────┤
-│       │       ┌─────┴─────┐       │             │       │
-│       └───────┤ rom-manager│       │             │       │
-│               │  (lib)    │       │             │       │
-│               └─────┬─────┘       │             │       │
-├─────────────────────┼─────────────┼─────────────┼───────┤
-│                     │    SQLite   │             │       │
-│                  roms.db          │             │       │
-├───────────────────────────────────┼─────────────┼───────┤
-│                                   │             │       │
-│               ┌───────────────────┴─────────────┴─────┐ │
-│               │           rom-scraper (lib)           │ │
-│               │  TGDB / IGDB / ScreenScraper APIs     │ │
-│               └───────────────────────────────────────┘ │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐│
+│  │parse-cli │  │build-cli │  │ nps-cli  │  │scraper-cli ││
+│  │          │  │          │  │          │  │            ││
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └─────┬──────┘│
+│  ┌────┴─────────────┴─────────────┴───────────────┴──────┐│
+│  │               rom-manager (lib)                       ││
+│  │  DB, DAT parsing, scanner, verifier, builder          ││
+│  └────────────────────────┬──────────────────────────────┘│
+├───────────────────────────┼──────────────────────────────┤
+│                    SQLite roms.db                         │
+├──────────────────────────────────────────────────────────┤
+│               rom-scraper (lib)                           │
+│  TGDB / IGDB / ScreenScraper APIs                        │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -41,7 +36,8 @@ A retro game ROM collection manager. Import DAT files, scrape metadata from onli
 | `rom-manager` | Library | SQLite DB, DAT parsing, scanner, verifier, ROM set builder |
 | `scraper-cli` | Binary | Game metadata scraping CLI |
 | `parse-cli` | Binary | DAT file import CLI |
-| `build-cli` | Binary | ROM collection build/scan/verify/diff CLI |
+| `build-cli` | Binary | ROM collection build/scan/verify/diff CLI (DAT-based) |
+| `nps-cli` | Binary | NoPayStation scan/build CLI (NPS-based) |
 | `db-cli` | Binary | Database inspection CLI |
 | `rom-manager-ui` | Web app | React frontend + Express API server |
 
@@ -54,48 +50,134 @@ A retro game ROM collection manager. Import DAT files, scrape metadata from onli
 ```
 set_versions
   id          INTEGER PRIMARY KEY
-  source      TEXT NOT NULL           -- e.g. "mame", "fbneo", "offlinelist", "datomatic"
-  version     TEXT NOT NULL           -- e.g. "0.261", "2024-01-01"
+  source      TEXT NOT NULL           -- e.g. "mame", "fbneo", "nps", "offlinelist", "datomatic"
+  version     TEXT NOT NULL           -- e.g. "0.261", "PSV", "nightly"
   dir         TEXT                    -- ROM directory path
   created_at  TEXT
   UNIQUE(source, version)
 
 game_entries
   id          INTEGER PRIMARY KEY
-  version_id  INTEGER → set_versions  -- which DAT version
+  version_id  INTEGER → set_versions
   name        TEXT NOT NULL           -- game short name (e.g. "sf2")
   description TEXT
   year        TEXT
-  manufacturer TEXT                   -- e.g. "Capcom"
-  cloneof     TEXT                    -- parent game name
-  UNIQUE(version_id, name)
+  manufacturer TEXT
+  cloneof     TEXT                    -- parent game name (MAME/FBNeo/NPS hierarchy)
+  platform    TEXT                    -- platform folder (e.g. "PSV" for NPS)
+  title_id    TEXT                    -- PSN title ID (NPS)
+  content_id  TEXT                    -- PSN content ID (NPS)
+  region      TEXT                    -- region code (NPS: "US", "EU", "JP", etc.)
+  covers      TEXT DEFAULT '[]'       -- JSON array of cover URLs
+  screenshots TEXT DEFAULT '[]'       -- JSON array of screenshot URLs
+  synopsis    TEXT
+  UNIQUE(version_id, name, region)
 
 rom_entries
   id           INTEGER PRIMARY KEY
   game_entry_id INTEGER → game_entries
-  filename     TEXT NOT NULL          -- ROM filename inside zip
+  filename     TEXT NOT NULL          -- PKG filename (NPS) or ROM file inside zip (DAT)
   size         INTEGER
   crc32        TEXT
   md5          TEXT
   sha1         TEXT
   status       TEXT                   -- "good", "nodump", etc.
   merge_target TEXT
+  subtype      TEXT DEFAULT 'game'    -- "game", "dlc", "update" (NPS)
+  pkg_url      TEXT                   -- full PKG download URL (NPS)
   UNIQUE(game_entry_id, filename)
 
 scanned_games
   id          INTEGER PRIMARY KEY
   version_id  INTEGER → set_versions
   name        TEXT NOT NULL           -- game name
-  filename    TEXT                    -- zip path on disk
+  filename    TEXT                    -- file path on disk
   sha1        TEXT
   size        INTEGER
   status      TEXT                    -- "ok", "missing", "mismatch"
   UNIQUE(version_id, name)
-```
 
-### Foreign Key Cascades
-```
-DELETE FROM set_versions → cascades to game_entries → cascades to rom_entries
+game_state
+  game_entry_id INTEGER PRIMARY KEY → game_entries
+  available     INTEGER DEFAULT 0    -- file found on disk
+  rating        INTEGER DEFAULT 0
+  favourite     INTEGER DEFAULT 0
+  play_count    INTEGER DEFAULT 0
+  updated_at    TEXT
+
+download_queue
+  id              INTEGER PRIMARY KEY
+  game_entry_id   INTEGER → game_entries
+  version_id      INTEGER → set_versions
+  pkg_url         TEXT                -- download URL
+  filename        TEXT                -- output filename
+  file_size       INTEGER
+  expected_sha256 TEXT
+  subtype         TEXT                -- "game", "dlc", "update"
+  status          TEXT                -- "pending", "downloading", "completed", "failed"
+  progress        INTEGER
+  error           TEXT
+  retry_count     INTEGER
+  created_at      TEXT
+  completed_at    TEXT
+
+collections
+  id          INTEGER PRIMARY KEY
+  name        TEXT NOT NULL
+  slug        TEXT NOT NULL
+  platform    TEXT
+  logo        TEXT DEFAULT ''
+  folder      TEXT                    -- folder in data/roms/
+  has_dataset INTEGER DEFAULT 0
+  dataset_preset TEXT                 -- "MAME", "FBNEO", "NPS", "OFFLINELIST", "DATOMATIC"
+  created_at  TEXT
+  updated_at  TEXT
+
+collection_versions
+  id            INTEGER PRIMARY KEY
+  collection_id INTEGER → collections
+  version_id    INTEGER → set_versions
+  UNIQUE(collection_id, version_id)
+
+collection_builds
+  id            INTEGER PRIMARY KEY
+  collection_id INTEGER → collections
+  version_id    INTEGER → set_versions
+  status        TEXT                  -- "not_started", "building", "complete", "failed"
+  format        TEXT
+  games_total   INTEGER
+  games_built   INTEGER
+  games_missing INTEGER
+  started_at    TEXT
+  completed_at  TEXT
+  created_at    TEXT
+  UNIQUE(collection_id, version_id)
+
+game_sets
+  id          INTEGER PRIMARY KEY
+  name        TEXT NOT NULL
+  icon        TEXT
+  description TEXT
+  platforms   TEXT
+  created_at  TEXT
+
+game_set_games
+  id            INTEGER PRIMARY KEY
+  game_set_id   INTEGER → game_sets
+  game_entry_id INTEGER → game_entries
+
+scrape_jobs
+  id              TEXT PRIMARY KEY
+  status          TEXT
+  total_games     INTEGER
+  scraped         INTEGER
+  skipped         INTEGER
+  failed          INTEGER
+  rate_limited    INTEGER
+  progress_msg    TEXT
+  result          TEXT
+  created_at      TEXT
+  updated_at      TEXT
 ```
 
 ---
@@ -145,7 +227,7 @@ Builds, scans, verifies, and diffs ROM collections against DAT versions.
 |---------|-------------|
 | `dat list` | List imported versions |
 | `dat info <id>` | Version details |
-| `scan <id> <dir>` | Scan ROM directory → `scanned_games` |
+| `scan <id> <dir> [--game-id <id>]` | Scan ROM directory → `scanned_games` (single game with --game-id) |
 | `verify <id> <dir> [--fallback]` | Hash verify against DAT |
 | `diff <a> <b>` | Compare two versions |
 | `build <source> <import-dir>` | Build ROM collection (see below) |
@@ -186,6 +268,27 @@ Auto-detects the latest version for `<source>` from the database. No version IDs
 
 ---
 
+### `nps-cli` — NoPayStation
+
+Manages PlayStation game downloads from NoPayStation.
+
+| Command | Description |
+|---------|-------------|
+| `scan <id> <dir> [--game-id <id>]` | Scan directory for `.pkg` files → `scanned_games` |
+| `build <id> <collection-dir> [--input-dir <dir>]` | Copy/download PKG files into collection folder |
+| `scrape <id> [--game-id <id>]` | Fetch Sony Store screenshots |
+
+**PKG filename format:** `{content-id}_bg_{n}_{hash}.pkg` where `content-id` contains the title_id after the first `-`.
+
+**File layout after build:**
+```
+<collection-dir>/<platform>/Games/<filename>.pkg
+<collection-dir>/<platform>/DLCs/<filename>.pkg
+<collection-dir>/<platform>/Updates/<filename>.pkg
+```
+
+---
+
 ### `db-cli` — Database Inspector
 
 Read-only CLI for querying the SQLite database.
@@ -205,19 +308,21 @@ Base: `http://localhost:3001/api`
 
 ### Resources
 - **Status & Platforms** — `GET /status`, `GET /platforms`
-- **Collections** — CRUD + scan/verify/build/export
+- **Collections** — CRUD + scan/verify/build/export (unified endpoint routes to correct CLI by source type)
 - **Game Sets** — CRUD + games/export
-- **Games** — list, detail, rating, cover
-- **Versions** — list, games, available, import (DAT/online)
+- **Games** — list, detail (includes per-ROM `downloaded` flag), rating, cover, scrape
+- **Versions** — list, games, available, import (DAT/online/NPS)
 - **Scraper** — search, scrape, hash, test-connection
 - **Jobs** — SSE progress, cancel
+- **Downloads** — enqueue, list, SSE status, retry, clear
 - **Settings** — read/write `.env`
 
 ### Long-running operations (SSE)
 ```
+POST /api/collections/:id/build          → { "jobId": "uuid" }  (unified, scan=true for scan)
 POST /api/collections/:id/scan|verify|build/:bid/run  → { "jobId": "uuid" }
-GET  /api/jobs/:jobId                                   → SSE progress stream
-POST /api/jobs/:jobId/cancel                            → kill child process
+GET  /api/jobs/:jobId                   → SSE progress stream
+POST /api/jobs/:jobId/cancel            → kill child process
 ```
 
 **SSE events:**
@@ -227,7 +332,41 @@ data: {"type":"result","data":{"matched":1203,"missing":0,...}}
 data: {"type":"error","error":"Build failed: ..."}
 ```
 
-**Surviving builds:** CLI keeps running when browser tab closes. On page reload, finds builds with `status: "building"` and auto-reconnects SSE. Orphaned builds (server restart) reset to `failed`.
+**Unified scan result format:**
+```
+{ exists: number, reused: number, missing: number }
+```
+- `reused` only for versioned collections (FBNeo/MAME), checked against prior version dirs
+- NPS scans always return `reused: 0`
+
+**Download endpoints:**
+```
+POST /api/downloads/enqueue             → { game_entry_id } queues all ROMs (game+dlc+update)
+GET  /api/downloads                     → list queue
+GET  /api/downloads/status              → SSE stream for queue changes
+POST /api/downloads/:id/retry           → reset failed to pending
+POST /api/downloads/:id/clear           → remove item
+POST /api/downloads/clear-completed     → clear all completed/failed
+```
+
+## Download Manager
+
+### Queue Processing
+
+The download manager (`server/downloader.js`) is a singleton that processes one file at a time:
+1. Fetch PKG URL with streaming, compute SHA-256 on the fly
+2. Verify SHA-256 against expected hash
+3. Move file to `data/roms/{collection_folder}/{platform}/{Games|DLCs|Updates}/{filename}`
+4. Run `nps-cli scan --game-id <id>` to update `scanned_games`
+5. Set `game_state.available = 1` for the game entry
+6. Start next item in queue
+
+**Retry logic:** Up to 3 retries before marking as failed.
+**Timeout:** 120s per download via `AbortSignal.timeout(120000)`.
+
+### Per-ROM Availability
+
+Game detail API (`GET /api/games/:id`) includes `downloaded: bool` per ROM entry, checked against `download_queue` entries with `status='completed'`.
 
 ---
 
@@ -261,7 +400,8 @@ gamemanager/
 ├── apps/
 │   ├── scraper-cli/         Rust binary — game metadata scraping
 │   ├── parse-cli/           Rust binary — DAT import
-│   ├── build-cli/           Rust binary — ROM set build/verify
+│   ├── build-cli/           Rust binary — ROM set build/verify (DAT-based)
+│   ├── nps-cli/             Rust binary — NoPayStation scan/build
 │   ├── db-cli/              Rust binary — DB inspection
 │   └── rom-manager-ui/      React + Express web app
 ├── libs/
@@ -270,8 +410,15 @@ gamemanager/
 ├── data/                    Runtime data directory
 │   ├── .env                 Environment variables (credentials, config)
 │   ├── roms.db              SQLite database
+│   ├── roms/                Built/downloaded ROM files
+│   │   ├── {collection}/
+│   │   │   ├── PSV/
+│   │   │   │   ├── Games/
+│   │   │   │   ├── DLCs/
+│   │   │   │   └── Updates/
+│   │   │   └── ...
+│   ├── downloads/           Temp directory for in-progress downloads
 │   └── media/               Downloaded scraper media
-│       └── <platform>-<year>-<title>/
 ├── docs/
 │   ├── specs.md             This file
 │   ├── cli-reference.md     Full CLI command reference
@@ -326,19 +473,39 @@ build-cli build offlinelist-nintendo-gameboy /roms/import/ --base-dir /roms/ --d
 
 ### DAT-O-MATIC Collection Example
 
-DAT-O-MATIC (datomatic.no-intro.org) provides No-Intro DATs in Logiqx XML format. DATs are downloaded automatically via a three-step form flow.
+DAT-O-MATIC (datomatic.no-intro.org) provides No-Intro DATs in Logiqx XML format.
 
 ```bash
 # Import via server (auto-download):
 # POST /api/versions/import-online { collection_id: 1, version: "Nintendo - Game Boy", source: "DATOMATIC" }
 
-# Or import manually:
-# 1. Download DAT from https://datomatic.no-intro.org/index.php?page=download
-# 2. Import the DAT
-parse-cli import "Nintendo - Game Boy.dat" datomatic "Nintendo - Game Boy" --db data/roms.db
-
-# 3. Build ROM set
+# Build ROM set
 build-cli build datomatic-nintendo-game-boy /roms/import/ --base-dir /roms/ --db data/roms.db
+```
+
+### NPS (NoPayStation) Collection Example
+
+NPS provides PlayStation game PKG files for PSV, PS3, PSP, PSX, and PSM.
+
+```bash
+# 1. Import game list (fetches TSV from nopaystation.com)
+nps-cli scan 1 /data/roms/nps-psv --db data/roms.db
+
+# 2. Scan for downloaded files
+nps-cli scan 6 /data/roms/nps-psv --db data/roms.db
+
+# 3. Scan a single game after download
+nps-cli scan 6 /data/roms/nps-psv --game-id 53978 --db data/roms.db
+
+# 4. Build (copy/download PKG files into structured dirs)
+nps-cli build 6 /data/roms/nps-psv --input-dir /path/to/pkgs --db data/roms.db
+```
+
+**NPS folder structure:**
+```
+data/roms/nps-psv/PSV/Games/<filename>.pkg
+data/roms/nps-psv/PSV/DLCs/<filename>.pkg
+data/roms/nps-psv/PSV/Updates/<filename>.pkg
 ```
 
 ### UI Workflow
@@ -364,3 +531,7 @@ build-cli build datomatic-nintendo-game-boy /roms/import/ --base-dir /roms/ --db
 5. **Idempotent builds** — any build can be re-run at any time, picking up where it left off
 6. **Mode enforcement** — once a build mode is chosen for a source, it's locked in
 7. **Hash-based ROM matching** — extract ZIP, hash internal files, compare against DAT's `rom_entries`
+8. **sql.js in-memory DB** — server loads DB into memory at startup; autosave overwrites file edits
+9. **CLIs write to `scanned_games`, server reads and updates `game_state`** — consistent pattern for NPS and DAT
+10. **Reuse from prior version dirs** — server checks `{collectionDir}/{priorVersion}/roms/` for matched `.zip` files
+11. **Per-ROM download status** — checked against `download_queue` completed entries, shown as ✓/✗ in ROM table
