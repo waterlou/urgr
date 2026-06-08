@@ -293,3 +293,12 @@ export function getDbPath() {
 export function closeDb() {
   if (db) db.close();
 }
+
+export function reloadDb() {
+  if (db && dbFilePath && fs.existsSync(dbFilePath)) {
+    db.close();
+    const buffer = fs.readFileSync(dbFilePath);
+    db = new SQL.Database(buffer);
+    db.run('PRAGMA foreign_keys = ON');
+  }
+}
