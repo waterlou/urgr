@@ -46,6 +46,9 @@ app.use((err, req, res, next) => {
 // =============================================================================
 app.use('/assets', express.static(path.join(distPath, 'assets')));
 
+const iconsDir = path.join(__dirname, '..', '..', '..', 'icons');
+app.use('/icons', express.static(iconsDir));
+
 app.use((req, res) => {
   const filePath = path.join(distPath, 'index.html');
   if (fs.existsSync(filePath)) {

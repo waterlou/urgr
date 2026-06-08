@@ -267,37 +267,42 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
 
   function platformToLogo(platform) {
     const map = {
-      'Arcade': 'sports_esports',
-      'Console': 'videogame_asset',
-      'PlayStation': 'stadia_controller',
-      'Nintendo': 'smart_toy',
-      'Sega': 'toys',
-      'Atari': 'album',
-      'NEC': 'radio',
-      'SNK': 'diversity_3',
-      'Bandai': 'pets',
-      'Coleco': 'extension',
-      'Commodore': 'computer',
-      'Microsoft': 'computer',
-      'Mattel': 'toys',
-      'Fairchild': 'album',
-      'Watara': 'phone_android',
-      'Tiger': 'pets',
-      'Magnavox': 'tv',
-      'GCE': 'videogame_asset',
+      'Arcade': 'arcade',
+      'Console': 'fc',
+      'PlayStation': 'ps',
+      'PlayStation Vita': 'psp',
+      'PlayStation 3': 'ps',
+      'PlayStation Portable': 'psp',
+      'PlayStation Mobile': 'ps',
+      'Nintendo': 'fc',
+      'Sega': 'md',
+      'Dreamcast': 'dc',
+      'Atari': 'atari',
+      'NEC': 'pce',
+      'SNK': 'neogeo',
+      'Bandai': 'ws',
+      'Coleco': 'col',
+      'Commodore': 'c64',
+      'Microsoft': 'msx',
+      'Mattel': 'vectrex',
+      'Fairchild': 'fairchild',
+      'Watara': 'supervision',
+      'Tiger': 'gamecom',
+      'Magnavox': 'ody',
+      'GCE': 'vectrex',
     }
     for (const [key, icon] of Object.entries(map)) {
       if (platform.toLowerCase().includes(key.toLowerCase())) return icon
     }
-    return 'sports_esports'
+    return 'arcade'
   }
 
   const PLATFORM_ICONS = {
-    'MAME': 'sports_esports',
-    'Final Burn Neo': 'local_fire_department',
-    'OfflineList (No-Intro)': 'videogame_asset',
-    'DAT-O-MATIC': 'inventory_2',
-    'NoPayStation': 'stadia_controller',
+    'MAME': 'mame',
+    'Final Burn Neo': 'mame',
+    'OfflineList (No-Intro)': 'fc',
+    'DAT-O-MATIC': 'fc',
+    'NoPayStation': 'ps',
   }
 
   return (
@@ -437,10 +442,10 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
           <div className="form-group">
             <label>Logo / Icon</label>
             <div className="logo-picker">
-              {['sports_esports', 'videogame_asset', 'stadia_controller', 'smart_toy', 'toys', 'album', 'computer', 'phone_android', 'tv', 'radio', 'diversity_3', 'pets', 'extension', 'local_fire_department', 'inventory_2', 'desktop_windows', 'ads_click', 'star', 'emoji_events', 'rocket', 'auto_awesome'].map(ic => (
+              {['arcade', 'mame', 'fc', 'sfc', 'n64', 'gb', 'gbc', 'gba', 'nds', 'vb', 'md', 'ms', 'gg', '32X', 'segacd', 'dc', 'ps', 'psp', 'neogeo', 'ngp', 'ngpc', 'pce', 'ws', 'wsc', 'atari', 'lynx', 'vectrex', 'col', 'msx', 'c64', 'amiga', 'zxs', 'x68000', 'dos'].map(ic => (
                 <button type="button" key={ic}
                   className={`logo-option ${logo === ic ? 'active' : ''}`}
-                  onClick={() => setLogo(ic)}><IconDisplay name={ic} className="" /></button>
+                  onClick={() => setLogo(ic)}><IconDisplay name={ic} size={20} /></button>
               ))}
             </div>
           </div>
