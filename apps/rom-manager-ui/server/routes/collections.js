@@ -329,11 +329,11 @@ router.post('/api/collections/:id/build', async (req, res) => {
       try {
         const isNps = sv.source === 'NPS';
         if (scan) {
-          // Unified scan: CLI updates scanned_games, server updates game_state
+          // Unified scan: always use collection's ROM dir, never import_dir
           if (isNps) {
             execCli(['scan', String(version_id), collectionDir], { binary: 'nps' });
           } else {
-            execCli(['scan', String(version_id), import_dir], { binary: 'build' });
+            execCli(['scan', String(version_id), collectionDir], { binary: 'build' });
           }
           reloadDb();
           // Update game_state from scanned_games — matched games get available=1
