@@ -76,6 +76,18 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
     }
   }
 
+  async function handleCancelScrapeAll() {
+    if (scrapeAllJobId) {
+      try {
+        await cancelJob(scrapeAllJobId)
+      } catch {}
+    }
+    setScrapeAllRunning(false)
+    setScrapeAllProgress('')
+    setScrapeAllResult(null)
+    setScrapeAllJobId(null)
+  }
+
   if (loading) {
     return <div className="loading-screen"><div className="loading-spinner" /></div>
   }
@@ -150,8 +162,13 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
               </button>
             )}
             {scrapeAllRunning && (
-              <div className="loading-inline">
-                <div className="loading-spinner-sm" /> {scrapeAllProgress}
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <div className="loading-inline">
+                  <div className="loading-spinner-sm" /> {scrapeAllProgress}
+                </div>
+                <button className="btn btn-sm btn-danger" onClick={handleCancelScrapeAll} title="Cancel">
+                  <span className="icon icon-sm">close</span>
+                </button>
               </div>
             )}
             {scrapeAllResult && (
