@@ -205,7 +205,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                     <th>Filename</th>
                     <th>Type</th>
                     <th>Size</th>
-                    <th>Downloaded</th>
+                    <th>Available</th>
                     <th>SHA1</th>
                   </tr>
                 </thead>
@@ -215,7 +215,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                       <td className="rom-filename">{rom.filename}</td>
                       <td><span className="badge">{rom.subtype || 'game'}</span></td>
                       <td>{rom.size != null ? formatSize(rom.size) : '-'}</td>
-                      <td>{rom.downloaded ? <span className="badge" style={{background:'var(--accent)',fontSize:11}}>downloaded</span> : <span className="badge" style={{background:'#555',fontSize:11}}>missing</span>}</td>
+                      <td>{rom.downloaded ? <span className="icon" style={{color:'var(--accent)',fontSize:16}}>check</span> : <span className="icon" style={{color:'#888',fontSize:16}}>close</span>}</td>
                       <td className="rom-hash">{rom.sha1 ? rom.sha1.slice(0, 16) + '...' : '-'}</td>
                     </tr>
                   ))}
