@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,8 +26,9 @@ fn install_signal_handlers() {
 
 #[derive(Serialize)]
 struct ScanOutput {
-    found: usize,
-    total: usize,
+    total_files: usize,
+    matched_games: usize,
+    missing_games: usize,
 }
 
 #[derive(Serialize)]
@@ -179,33 +181,24 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
         Err(e) => { eprintln!("Database error: {}", e); return ExitCode::FAILURE; }
     };
 
-    // Reset all games to unavailable
-    if let Err(e) = db.reset_all_unavailable(version_id) {
-        eprintln!("Failed to reset availability: {}", e);
-        return ExitCode::FAILURE;
-    }
-
-    // Build title_id -> game_entry_id map
+    // Build title_id -> game_entry_id and name maps
     let games = match db.list_nps_games(version_id) {
         Ok(g) => g,
         Err(e) => { eprintln!("Failed to list games: {}", e); return ExitCode::FAILURE; }
     };
 
-    let mut title_to_game: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    let mut title_to_game: HashMap<String, &NpsGame> = HashMap::new();
     for game in &games {
         if let Some(ref tid) = game.title_id {
-            title_to_game.insert(tid.clone(), game.id);
+            title_to_game.insert(tid.clone(), game);
         }
-        title_to_game.insert(game.name.clone(), game.id);
+        title_to_game.insert(game.name.clone(), game);
     }
 
-    // Walk directory for .pkg files
-    let mut found = 0;
-    let total_files: usize = WalkDir::new(dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .count();
+    // Clear existing scanned_games and walk directory
+    let _ = db.clear_scanned_games(version_id);
+    let mut matched_names: HashSet<String> = HashSet::new();
+    let mut total_files = 0;
 
     for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
         if CANCEL_FLAG.load(Ordering::Relaxed) {
@@ -214,28 +207,37 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
         }
 
         if !entry.file_type().is_file() { continue; }
+        let full_path = entry.path().to_string_lossy().to_string();
         let filename = entry.file_name().to_string_lossy();
         if !filename.ends_with(".pkg") { continue; }
+        total_files += 1;
 
         let title_id = match extract_title_id(&filename) {
             Some(tid) => tid,
             None => continue,
         };
 
-        if let Some(&game_id) = title_to_game.get(&title_id) {
-            if let Err(e) = db.update_game_available(game_id, true) {
-                eprintln!("Failed to update game {}: {}", game_id, e);
-            } else {
-                found += 1;
-            }
+        if let Some(game) = title_to_game.get(&title_id) {
+            let name = &game.name;
+            matched_names.insert(name.clone());
+            let _ = db.upsert_scanned_game(version_id, name, &full_path, None, None, "ok");
         }
     }
 
-    let result = ScanOutput { found, total: games.len() };
+    // Mark missing games
+    for game in &games {
+        if !matched_names.contains(&game.name) {
+            let _ = db.upsert_scanned_game(version_id, &game.name, "", None, None, "missing");
+        }
+    }
+
+    let matched = matched_names.len();
+    let missing = games.len() - matched;
+    let result = ScanOutput { total_files, matched_games: matched, missing_games: missing };
     if json {
         print_json(&result);
     } else {
-        println!("Scan complete: {} games matched ({} files scanned)", result.found, total_files);
+        println!("Scan complete: {} files, {} matched, {} missing", total_files, matched, missing);
     }
     ExitCode::SUCCESS
 }

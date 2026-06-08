@@ -327,40 +327,39 @@ router.post('/api/collections/:id/build', async (req, res) => {
 
     setTimeout(async () => {
       try {
-        if (sv.source === 'NPS') {
-          if (scan) {
-            const result = execCli(['scan', String(version_id), collectionDir], { binary: 'nps' });
-            reloadDb();
-            doneJob(jobId, { added: result.found, exists: 0, reused: 0, missing: result.total - result.found });
+        const isNps = sv.source === 'NPS';
+        if (scan) {
+          // Unified scan: CLI updates scanned_games, server updates game_state
+          if (isNps) {
+            execCli(['scan', String(version_id), collectionDir], { binary: 'nps' });
           } else {
-            fs.mkdirSync(collectionDir, { recursive: true });
-            const result = execCli(['build', String(version_id), collectionDir, '--input-dir', collectionDir], { binary: 'nps' });
-            reloadDb();
-            try {
-              const foundGames = new Set();
-              function scanDir(dir) {
-                for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-                  if (entry.isDirectory()) scanDir(path.join(dir, entry.name));
-                  else if (entry.name.endsWith('.pkg')) foundGames.add(entry.name);
-                }
-              }
-              if (fs.existsSync(collectionDir)) scanDir(collectionDir);
-              runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
-                SELECT ge.id, 0, datetime('now') FROM game_entries ge WHERE ge.version_id = ?
-                ON CONFLICT(game_entry_id) DO UPDATE SET available = 0, updated_at = datetime('now')`, [version_id]);
-              for (const fname of foundGames) {
-                runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
-                  SELECT r.game_entry_id, 1, datetime('now') FROM rom_entries r
-                  WHERE r.filename = ? AND r.game_entry_id IN (SELECT id FROM game_entries WHERE version_id = ?)
-                  ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [fname, version_id]);
-              }
-            } catch (_) {}
-            doneJob(jobId, { built: result.built, skipped: result.skipped });
+            execCli(['scan', String(version_id), import_dir], { binary: 'build' });
           }
+          reloadDb();
+          // Update game_state from scanned_games — matched games get available=1
+          runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
+            SELECT ge.id, 1, datetime('now')
+            FROM game_entries ge
+            JOIN scanned_games sg ON sg.version_id = ge.version_id AND sg.name = ge.name
+            WHERE ge.version_id = ? AND sg.filename != ''
+            ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id]);
+          const matched = get('SELECT COUNT(*) as c FROM scanned_games WHERE version_id = ? AND filename != ?', [version_id, '']).c;
+          const total = get('SELECT COUNT(*) as c FROM scanned_games WHERE version_id = ?', [version_id]).c;
+          doneJob(jobId, { added: matched, exists: 0, reused: 0, missing: total - matched });
+        } else if (isNps) {
+          fs.mkdirSync(collectionDir, { recursive: true });
+          const result = execCli(['build', String(version_id), collectionDir, '--input-dir', collectionDir], { binary: 'nps' });
+          reloadDb();
+          runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
+            SELECT ge.id, 1, datetime('now')
+            FROM game_entries ge
+            JOIN scanned_games sg ON sg.version_id = ge.version_id AND sg.name = ge.name
+            WHERE ge.version_id = ? AND sg.filename != ''
+            ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id]);
+          doneJob(jobId, { built: result.built, skipped: result.skipped });
         } else {
-          // DAT sources: use build-cli
+          // DAT build — uses progress streaming
           const args = ['build', sv.source, import_dir, '--version-id', String(version_id), '--base-dir', collectionDir, '--collection-dir', collectionDir, '--progress'];
-          if (scan) args.push('--dry-run');
           execCliStream(args, {
             binary: 'build',
             onProgress: (p) => updateProgress(jobId, p.pct || 0, p.msg || ''),
