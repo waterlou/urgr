@@ -9,7 +9,7 @@ function statusBadge(status) {
 export default function BuildManager({ collectionId, collection, versions, onBuildsChange, onError, onInfo }) {
   const [builds, setBuilds] = useState([])
   const [buildProgress, setBuildProgress] = useState({})
-  const [buildVersion, setBuildVersion] = useState('')
+  const [buildVersion, setBuildVersion] = useState(() => versions.length === 1 ? String(versions[0].id) : '')
   const [buildImportDir, setBuildImportDir] = useState(() => localStorage.getItem('rom-manager-import-dir') || '')
   const [buildRunning, setBuildRunning] = useState(false)
   const [buildScanRunning, setBuildScanRunning] = useState(false)
@@ -29,7 +29,6 @@ export default function BuildManager({ collectionId, collection, versions, onBui
   useEffect(() => {
     getCollectionBuilds(collectionId).catch(() => []).then(data => {
       setBuildsWithSync(data)
-      // Auto-reconnect to any builds that are still running
       const running = data.filter(b => b.status === 'building')
       for (const b of running) {
         subscribeToRunningBuild(b.id)
@@ -41,6 +40,11 @@ export default function BuildManager({ collectionId, collection, versions, onBui
       eventSourcesRef.current = {}
     }
   }, [collectionId])
+
+  // Auto-select version when only one exists
+  useEffect(() => {
+    if (versions.length === 1) setBuildVersion(String(versions[0].id))
+  }, [versions])
 
   function subscribeToRunningBuild(buildId) {
     if (eventSourcesRef.current[buildId]) return
@@ -216,12 +220,18 @@ export default function BuildManager({ collectionId, collection, versions, onBui
         </p>
         <div className="build-form-row">
           <input type="text" className="build-select" placeholder="Import directory (e.g. /path/to/roms)" value={buildImportDir} onChange={e => { setBuildImportDir(e.target.value); localStorage.setItem('rom-manager-import-dir', e.target.value); }} style={{flex:1}} />
-          <select className="build-select" value={buildVersion} onChange={e => setBuildVersion(e.target.value)}>
-            <option value="">Select version...</option>
-            {versions.map(v => (
-              <option key={v.id} value={v.id}>{v.source} — {v.version} ({v.total_games} games)</option>
-            ))}
-          </select>
+          {versions.length > 1 ? (
+            <select className="build-select" value={buildVersion} onChange={e => setBuildVersion(e.target.value)}>
+              <option value="">Select version...</option>
+              {versions.map(v => (
+                <option key={v.id} value={v.id}>{v.source} — {v.version} ({v.total_games} games)</option>
+              ))}
+            </select>
+          ) : versions.length === 1 && buildVersion ? (
+            <span className="badge" style={{padding:'8px 12px',fontSize:13,whiteSpace:'nowrap',background:'var(--bg-elevated)',border:'1px solid var(--border)',borderRadius:'var(--radius)'}}>
+              {versions[0].source} — {versions[0].version} ({versions[0].total_games} games)
+            </span>
+          ) : null}
           <button className="btn btn-primary" onClick={handleBuildStart} disabled={!buildVersion || !buildImportDir || buildRunning || buildScanRunning}>
             <span className="icon">build</span> Build
           </button>

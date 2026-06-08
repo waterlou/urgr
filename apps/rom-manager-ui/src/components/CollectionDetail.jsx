@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import IconDisplay from './IconDisplay.jsx'
-import { getCollectionVersions, getCollectionGames, scrapeAllCollectionGames } from '../api.js'
+import { getCollectionVersions, getCollectionGames, scrapeAllCollectionGames, importOnlineVersion, importNps } from '../api.js'
 import { subscribeJobSSE, cancelJob } from '../api.js'
 import VersionManager from './VersionManager.jsx'
 import IaDownload from './IaDownload.jsx'
@@ -11,6 +11,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
   const [versions, setVersions] = useState([])
   const [builds, setBuilds] = useState([])
   const [loading, setLoading] = useState(true)
+  const [importing, setImporting] = useState(false)
   const [gameCount, setGameCount] = useState(0)
   const [error, setError] = useState(null)
   const [info, setInfo] = useState(null)
@@ -18,6 +19,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
   const [scrapeAllProgress, setScrapeAllProgress] = useState('')
   const [scrapeAllResult, setScrapeAllResult] = useState(null)
   const [scrapeAllJobId, setScrapeAllJobId] = useState(null)
+  const importRan = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -26,6 +28,29 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
         const vers = await getCollectionVersions(collectionId).catch(() => [])
         if (cancelled) return
         setVersions(vers)
+
+        // Auto-import on first mount if collection has preset but no versions yet
+        if (!importRan.current && vers.length === 0 && collection?.has_dataset && collection?.dataset_preset && collection?.folder) {
+          importRan.current = true
+          setImporting(true)
+          try {
+            const preset = collection.dataset_preset
+            if (preset === 'NPS') {
+              const platform = collection.folder.replace(/^nps-/i, '').toUpperCase()
+              if (platform) await importNps(collectionId, platform)
+            } else {
+              const systemName = collection.name.replace(/^(OfflineList|DAT-O-MATIC)\s*/i, '')
+              if (systemName) await importOnlineVersion(collectionId, systemName, preset)
+            }
+          } catch (e) {
+            console.error('Auto-import failed:', e.message)
+          }
+          setImporting(false)
+          // Reload versions after import
+          const updated = await getCollectionVersions(collectionId).catch(() => [])
+          if (!cancelled) setVersions(updated)
+        }
+
         const games = await getCollectionGames(collectionId, { limit: 1 })
         if (cancelled) return
         setGameCount(games.total || 0)
@@ -86,6 +111,13 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
     setScrapeAllProgress('')
     setScrapeAllResult(null)
     setScrapeAllJobId(null)
+  }
+
+  if (importing) {
+    return <div className="loading-screen">
+      <div className="loading-spinner" />
+      <p style={{marginTop:12,opacity:0.7}}>Importing dataset... this may take a moment</p>
+    </div>
   }
 
   if (loading) {
