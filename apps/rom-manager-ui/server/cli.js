@@ -9,6 +9,7 @@ const CLI_NAMES = {
   scraper: 'scraper-cli',
   parse: 'parse-cli',
   build: 'build-cli',
+  nps: 'nps-cli',
 };
 
 const SETTINGS_PATH = path.join(__dirname, '..', '..', '..', 'data', '.env');
@@ -45,6 +46,7 @@ function loadScraperEnv() {
 function findBinary(binary) {
   const envKey = binary === 'scraper' ? 'SCRAPER_CLI_BINARY'
     : binary === 'parse' ? 'PARSE_CLI_BINARY'
+    : binary === 'nps' ? 'NPS_CLI_BINARY'
     : 'BUILD_CLI_BINARY';
   const envBin = process.env[envKey];
   if (envBin && (envBin.includes('/') || fs.existsSync(envBin))) return envBin;
@@ -97,7 +99,7 @@ export function execCliStream(args, { binary = 'build', onProgress, signal } = {
     const bin = findBinary(binary);
     const dbPath = getDbPath();
 
-    const needsDb = binary === 'parse' || binary === 'build';
+  const needsDb = binary === 'parse' || binary === 'build' || binary === 'nps';
     if (needsDb) saveDb();
 
     const cmdArgs = [...args, '--json', '--progress', '--db', dbPath];
