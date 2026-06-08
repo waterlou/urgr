@@ -24,7 +24,7 @@ function getDatSource(folder) {
   return 'MAME'
 }
 
-export default function VersionManager({ collectionId, collection, onVersionsChange, onRefresh }) {
+export default function VersionManager({ collectionId, collection, versions = [], onVersionsChange, onRefresh }) {
   const [availableDats, setAvailableDats] = useState(null)
   const [importingVer, setImportingVer] = useState(null)
   const [showAllMame, setShowAllMame] = useState(false)

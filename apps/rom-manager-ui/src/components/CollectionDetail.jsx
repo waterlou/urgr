@@ -83,6 +83,7 @@ export default function CollectionDetail({ collectionId, collection, onBrowseGam
         <VersionManager
           collectionId={collectionId}
           collection={collection}
+          versions={versions}
           onVersionsChange={setVersions}
           onRefresh={onRefresh}
         />
