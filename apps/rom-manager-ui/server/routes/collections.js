@@ -124,14 +124,14 @@ router.get('/api/collections/:id/games', async (req, res) => {
   await dbReady;
   try {
     const { id } = req.params;
-    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, parents_only, favourites_only, roms_only } = req.query;
+    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, parents_only, favourites_only, roms_only, version_id } = req.query;
     const collection = get('SELECT * FROM collections WHERE id = ?', [id]);
     if (!collection) return res.status(404).json({ error: 'not found' });
 
     const versions = all('SELECT version_id FROM collection_versions WHERE collection_id = ?', [id]);
     if (!versions.length) return res.json({ collection, games: [], platforms: [], total: 0 });
 
-    const vids = versions.map(v => v.version_id);
+    const vids = version_id ? [Number(version_id)] : versions.map(v => v.version_id);
     const ph = vids.map(() => '?').join(',');
     const sortCol = sort === 'rating' ? 'MAX(COALESCE(r.rating, 0))' : sort === 'play_count' ? 'MAX(COALESCE(r.play_count, 0))' : 'g.name';
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
@@ -193,7 +193,16 @@ router.get('/api/collections/:id/games', async (req, res) => {
 
     const platforms = all(`SELECT DISTINCT sv.source as platform FROM set_versions sv WHERE sv.id IN (${ph})`, vids).map(p => p.platform);
 
-    res.json({ collection, games, platforms, total, limit: Number(limit), offset: Number(offset) });
+    const collectionVersions = all(`
+      SELECT sv.id, sv.source, sv.version, sv.created_at,
+        (SELECT COUNT(*) FROM game_entries WHERE version_id = sv.id) as total_games
+      FROM set_versions sv
+      JOIN collection_versions cv ON cv.version_id = sv.id
+      WHERE cv.collection_id = ?
+      ORDER BY sv.created_at DESC
+    `, [id]);
+
+    res.json({ collection, games, platforms, total, versions: collectionVersions, limit: Number(limit), offset: Number(offset) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

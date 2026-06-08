@@ -14,6 +14,7 @@ export default function GameBrowser({
   romsOnly, onRomsOnlyChange,
   listImageMode, onListImageModeChange,
   onToggleSidebar,
+  selectedVersionId, onSelectedVersionChange, collectionVersions,
 }) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchResults, setSearchResults] = useState([])
@@ -303,6 +304,27 @@ export default function GameBrowser({
           </div>
         </div>
       </div>
+
+      {activeView === 'collection' && collectionVersions?.length > 1 && (
+        <div className="version-chips">
+          <button
+            className={`version-chip ${!selectedVersionId ? 'active' : ''}`}
+            onClick={() => onSelectedVersionChange(null)}
+          >
+            All Versions
+          </button>
+          {collectionVersions.map(v => (
+            <button
+              key={v.id}
+              className={`version-chip ${selectedVersionId === v.id ? 'active' : ''}`}
+              onClick={() => onSelectedVersionChange(v.id)}
+            >
+              {v.source} {v.version}
+              <span className="version-chip-count">{v.total_games}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="browser-content">
         {loading && games.length === 0 ? (

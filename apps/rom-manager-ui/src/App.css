@@ -556,6 +556,51 @@ html, body, #root {
   flex-shrink: 0;
 }
 
+.version-chips {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.version-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.version-chip:hover {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.version-chip.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.version-chip-count {
+  background: rgba(0,0,0,0.1);
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+}
+
+.version-chip.active .version-chip-count {
+  background: rgba(255,255,255,0.2);
+}
+
 .view-mode-toggle {
   display: flex;
   gap: 2px;

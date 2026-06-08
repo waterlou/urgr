@@ -41,7 +41,7 @@ export function getCollections() { return fetchJson('/collections'); }
 export function createCollection(data) { return fetchWithBody('/collections', 'POST', data); }
 export function updateCollection(id, data) { return fetchWithBody(`/collections/${id}`, 'PUT', data); }
 export function deleteCollection(id) { return fetchWithBody(`/collections/${id}`, 'DELETE'); }
-export function getCollectionGames(id, { limit, offset, sort, order, q, parents_only, favourites_only, roms_only } = {}) {
+export function getCollectionGames(id, { limit, offset, sort, order, q, parents_only, favourites_only, roms_only, version_id } = {}) {
   const p = new URLSearchParams();
   if (limit) p.set('limit', limit);
   if (offset) p.set('offset', offset);
@@ -51,6 +51,7 @@ export function getCollectionGames(id, { limit, offset, sort, order, q, parents_
   if (parents_only) p.set('parents_only', parents_only);
   if (favourites_only) p.set('favourites_only', favourites_only);
   if (roms_only) p.set('roms_only', roms_only);
+  if (version_id) p.set('version_id', version_id);
   return fetchJson(`/collections/${id}/games${p.toString() ? '?' + p.toString() : ''}`);
 }
 

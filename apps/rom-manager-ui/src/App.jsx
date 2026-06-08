@@ -46,6 +46,8 @@ export default function App() {
   const [romsOnly, setRomsOnly] = useState(() => localStorage.getItem('rom-manager-roms-only') === 'true')
   const [listImageMode, setListImageMode] = useState(() => localStorage.getItem('rom-manager-list-image') || 'cover')
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [selectedVersionId, setSelectedVersionId] = useState(null)
+  const [collectionVersions, setCollectionVersions] = useState([])
 
   function handleSetParentsOnly(v) {
     setParentsOnly(v);
@@ -110,7 +112,7 @@ export default function App() {
   const PAGE_SIZE = 500
   const loadingMoreRef = useRef(false)
 
-  const loadGames = useCallback(async (view, id, mode, sort, order, q, po, fo, ro) => {
+  const loadGames = useCallback(async (view, id, mode, sort, order, q, po, fo, ro, vid) => {
     setLoading(true)
     setOffset(0)
     try {
@@ -122,12 +124,13 @@ export default function App() {
         setPlatforms([])
         setHasMore(data.games.length < data.total)
       } else if (view === 'collection') {
-        const data = await getCollectionGames(id, { limit: PAGE_SIZE, sort, order, q, parents_only: po ? 'true' : undefined, favourites_only: fo ? 'true' : undefined, roms_only: ro ? 'true' : undefined })
+        const data = await getCollectionGames(id, { limit: PAGE_SIZE, sort, order, q, parents_only: po ? 'true' : undefined, favourites_only: fo ? 'true' : undefined, roms_only: ro ? 'true' : undefined, version_id: vid || undefined })
         setGames(data.games)
         setActiveMeta(data.collection)
         setPlatforms(data.platforms || [])
         setTotalGames(data.total)
         setHasMore(data.games.length < data.total)
+        if (data.versions) setCollectionVersions(data.versions)
       } else if (view === 'game-set') {
         const data = await getGameSetGames(id, { limit: PAGE_SIZE, sort, order, q })
         setGames(data.games)
@@ -153,7 +156,7 @@ export default function App() {
       if (activeView === 'browse') {
         data = await getGames({ limit: PAGE_SIZE, offset: offset + PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery, parents_only: parentsOnly ? 'true' : undefined, favourites_only: favouritesOnly ? 'true' : undefined, roms_only: romsOnly ? 'true' : undefined })
       } else if (activeView === 'collection') {
-        data = await getCollectionGames(activeId, { limit: PAGE_SIZE, offset: offset + PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery, parents_only: parentsOnly ? 'true' : undefined, favourites_only: favouritesOnly ? 'true' : undefined, roms_only: romsOnly ? 'true' : undefined })
+        data = await getCollectionGames(activeId, { limit: PAGE_SIZE, offset: offset + PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery, parents_only: parentsOnly ? 'true' : undefined, favourites_only: favouritesOnly ? 'true' : undefined, roms_only: romsOnly ? 'true' : undefined, version_id: selectedVersionId || undefined })
       } else if (activeView === 'game-set') {
         data = await getGameSetGames(activeId, { limit: PAGE_SIZE, offset: offset + PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery })
       }
@@ -173,14 +176,15 @@ export default function App() {
   useEffect(() => { loadSidebar() }, [loadSidebar])
 
   useEffect(() => {
-    loadGames(activeView, activeId, viewMode, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, romsOnly)
-  }, [activeView, activeId, viewMode, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, romsOnly, loadGames])
+    loadGames(activeView, activeId, viewMode, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, romsOnly, selectedVersionId)
+  }, [activeView, activeId, viewMode, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, romsOnly, selectedVersionId, loadGames])
 
   function handleSelect(view, id) {
     pushViewHistory(view, id)
     setActiveView(view)
     setActiveId(id)
     setSearchQuery('')
+    setSelectedVersionId(null)
     if (view === 'collection') setCollectionSubView('detail')
     else setSelectedGame(null)
   }
@@ -373,6 +377,9 @@ export default function App() {
                   listImageMode={listImageMode}
                   onListImageModeChange={handleSetListImageMode}
                   onToggleSidebar={handleToggleSidebar}
+                  selectedVersionId={selectedVersionId}
+                  onSelectedVersionChange={setSelectedVersionId}
+                  collectionVersions={collectionVersions}
                 />
               </div>
               <div className="view-stack-page">
