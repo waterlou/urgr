@@ -9,6 +9,8 @@ pub mod builder;
 pub use db::Database;
 pub use error::{Error, Result};
 pub use models::*;
+pub use db::NpsGame;
+pub use db::NpsRom;
 pub use scanner::scan_directory;
 pub use verifier::verify_version;
 pub use builder::{build_version, BuildProgress, BuildResult};

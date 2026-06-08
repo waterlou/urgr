@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { getDb, saveDb } from './db.js';
 import { all, get, run, runNow } from './helpers.js';
+import { execCli } from './cli.js';
 
 const NPS_BASE_URL = 'https://nopaystation.com/tsv';
 const NPS_PLATFORMS = ['PSV', 'PS3', 'PSP', 'PSX', 'PSM'];
@@ -168,120 +169,15 @@ export async function importNps(platform, versionId) {
 }
 
 export function scanNpsDir(dir, versionId) {
-  const db = getDb();
-  const games = all('SELECT id, name, title_id FROM game_entries WHERE version_id = ?', [versionId]);
-  const gameMap = new Map();
-  for (const g of games) {
-    gameMap.set(g.title_id, g.id);
-    gameMap.set(g.name, g.id);
-  }
-
-  const found = new Set();
-  if (!fs.existsSync(dir)) return { found: 0 };
-
-  function walk(d) {
-    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
-      const full = path.join(d, entry.name);
-      if (entry.isDirectory()) { walk(full); continue; }
-      if (!entry.name.endsWith('.pkg')) continue;
-      const titleId = entry.name.replace('.pkg', '').split('_')[0];
-      if (gameMap.has(titleId)) found.add(gameMap.get(titleId));
-    }
-  }
-  walk(dir);
-
-  runNow(`
-    INSERT INTO game_state (game_entry_id, available, updated_at)
-    SELECT ge.id, 0, datetime('now') FROM game_entries ge WHERE ge.version_id = ?
-    ON CONFLICT(game_entry_id) DO UPDATE SET available = 0, updated_at = datetime('now')
-  `, [versionId]);
-
-  for (const entryId of found) {
-    runNow(`
-      INSERT INTO game_state (game_entry_id, available, updated_at)
-      VALUES (?, 1, datetime('now'))
-      ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')
-    `, [entryId]);
-  }
-
-  return { found: found.size, total: games.length };
+  const result = execCli(['scan', String(versionId), dir], { binary: 'nps' });
+  return { found: result.found, total: result.total };
 }
 
-export async function buildNps(collectionDir, versionId, inputDir, onProgress) {
-  const db = getDb();
-  const games = all(`
-    SELECT g.id, g.name, g.title_id, g.platform,
-           r.filename, r.subtype, r.size as rom_size, r.sha1 as rom_sha1
-    FROM game_entries g
-    LEFT JOIN rom_entries r ON r.game_entry_id = g.id
-    WHERE g.version_id = ?
-  `, [versionId]);
-
-  const gameGroups = new Map();
-  for (const row of games) {
-    if (!gameGroups.has(row.id)) {
-      gameGroups.set(row.id, { ...row, roms: [] });
-    }
-    if (row.filename) {
-      gameGroups.get(row.id).roms.push({
-        filename: row.filename,
-        subtype: row.subtype,
-        size: row.rom_size,
-        sha1: row.rom_sha1,
-      });
-    }
-  }
-
-  let built = 0;
-  let skipped = 0;
-  let total = 0;
-
-  for (const [, game] of gameGroups) {
-    for (const rom of game.roms) {
-      total++;
-      const subtypeDir = rom.subtype === 'dlc' ? 'DLCs' : rom.subtype === 'update' ? 'Updates' : 'Games';
-      const destDir = path.join(collectionDir, game.platform || 'Games', subtypeDir);
-      fs.mkdirSync(destDir, { recursive: true });
-
-      const destFile = path.join(destDir, rom.filename);
-      const srcFile = inputDir ? path.join(inputDir, rom.filename) : null;
-
-      if (fs.existsSync(destFile)) {
-        skipped++;
-        continue;
-      }
-
-      if (srcFile && fs.existsSync(srcFile)) {
-        fs.copyFileSync(srcFile, destFile);
-        built++;
-        if (onProgress) onProgress({ built, skipped, total, msg: `Copied ${rom.filename}` });
-      } else if (rom.size && rom.size > 0) {
-        const gameInfo = get('SELECT content_id FROM game_entries WHERE id = ?', [game.id]);
-        if (gameInfo && gameInfo.content_id) {
-          try {
-            const url = `https://d2wy0z66aukln1.cloudfront.net/${gameInfo.content_id}/${rom.filename}`;
-            const resp = await fetch(url, { signal: AbortSignal.timeout(30000) });
-            if (resp.ok) {
-              const buffer = Buffer.from(await resp.arrayBuffer());
-              fs.writeFileSync(destFile, buffer);
-              built++;
-              if (onProgress) onProgress({ built, skipped, total, msg: `Downloaded ${rom.filename}` });
-            } else {
-              skipped++;
-            }
-          } catch {
-            skipped++;
-          }
-        } else {
-          skipped++;
-        }
-      } else {
-        skipped++;
-      }
-    }
-  }
-
-  return { built, skipped, total };
+export function buildNps(collectionDir, versionId, inputDir) {
+  const args = ['build', String(versionId), collectionDir];
+  if (inputDir) args.push('--input-dir', inputDir);
+  const result = execCli(args, { binary: 'nps' });
+  return { built: result.built, skipped: result.skipped, total: result.total };
 }
 
 export async function fetchSonyScreenshots(contentId, titleId) {

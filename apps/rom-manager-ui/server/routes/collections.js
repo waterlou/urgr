@@ -678,23 +678,8 @@ router.post('/api/collections/:id/build-nps', async (req, res) => {
     const collectionDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', col.folder || col.slug);
     fs.mkdirSync(collectionDir, { recursive: true });
 
-    const jobId = crypto.randomUUID();
-    const job = createJob(jobId);
-    job._abort = new AbortController();
-
-    setTimeout(async () => {
-      try {
-        const result = await buildNps(collectionDir, version_id, input_dir, (progress) => {
-          updateProgress(jobId, Math.round((progress.built + progress.skipped) / progress.total * 100), progress.msg);
-        });
-        doneJob(jobId, result);
-      } catch (e) {
-        if (job._abort.signal.aborted) return cancelJob(jobId);
-        failJob(jobId, e.message);
-      }
-    }, 0);
-
-    res.status(202).json({ jobId });
+    const result = buildNps(collectionDir, version_id, input_dir);
+    res.json({ ok: true, ...result });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

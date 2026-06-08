@@ -474,6 +474,141 @@ impl Database {
             unchanged,
         })
     }
+
+    // ── NPS-specific methods ──
+
+    pub fn list_nps_games(&self, version_id: i64) -> Result<Vec<NpsGame>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT g.id, g.name, g.title_id, g.content_id, g.platform,
+                    GROUP_CONCAT(r.id || '|' || r.filename || '|' || r.subtype || '|' || COALESCE(r.size, 0) || '|' || COALESCE(r.sha1, ''), ';;') as roms
+             FROM game_entries g
+             LEFT JOIN rom_entries r ON r.game_entry_id = g.id
+             WHERE g.version_id = ?1
+             GROUP BY g.id
+             ORDER BY g.name",
+        )?;
+        let rows = stmt.query_map(params![version_id], |r| {
+            let roms_str: Option<String> = r.get(5)?;
+            let roms = parse_nps_roms(&roms_str.unwrap_or_default());
+            Ok(NpsGame {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                title_id: r.get(2)?,
+                content_id: r.get(3)?,
+                platform: r.get(4)?,
+                roms,
+            })
+        })?;
+        let mut games = Vec::new();
+        for row in rows {
+            games.push(row?);
+        }
+        Ok(games)
+    }
+
+    pub fn update_game_available(&self, game_id: i64, available: bool) -> Result<()> {
+        let val = if available { 1 } else { 0 };
+        self.conn.execute(
+            "INSERT INTO game_state (game_entry_id, available, updated_at)
+             VALUES (?1, ?2, datetime('now'))
+             ON CONFLICT(game_entry_id) DO UPDATE SET
+               available = excluded.available,
+               updated_at = datetime('now')",
+            params![game_id, val],
+        )?;
+        Ok(())
+    }
+
+    pub fn reset_all_unavailable(&self, version_id: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO game_state (game_entry_id, available, updated_at)
+             SELECT ge.id, 0, datetime('now')
+             FROM game_entries ge
+             WHERE ge.version_id = ?1
+             ON CONFLICT(game_entry_id) DO UPDATE SET
+               available = 0,
+               updated_at = datetime('now')",
+            params![version_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_games_needing_screenshots(&self, version_id: i64) -> Result<Vec<NpsGame>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT g.id, g.name, g.title_id, g.content_id, g.platform
+             FROM game_entries g
+             WHERE g.version_id = ?1
+               AND (g.screenshots IS NULL OR g.screenshots = '[]')
+               AND g.content_id IS NOT NULL
+               AND g.content_id != ''
+             ORDER BY g.name",
+        )?;
+        let rows = stmt.query_map(params![version_id], |r| {
+            Ok(NpsGame {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                title_id: r.get(2)?,
+                content_id: r.get(3)?,
+                platform: r.get(4)?,
+                roms: Vec::new(),
+            })
+        })?;
+        let mut games = Vec::new();
+        for row in rows {
+            games.push(row?);
+        }
+        Ok(games)
+    }
+
+    pub fn update_game_screenshots(&self, game_id: i64, screenshots: &[String]) -> Result<()> {
+        let json = serde_json::to_string(screenshots).unwrap_or_else(|_| "[]".to_string());
+        self.conn.execute(
+            "UPDATE game_entries SET screenshots = ?1 WHERE id = ?2",
+            params![json, game_id],
+        )?;
+        Ok(())
+    }
+}
+
+fn parse_nps_roms(s: &str) -> Vec<NpsRom> {
+    if s.is_empty() {
+        return Vec::new();
+    }
+    s.split(";;")
+        .filter_map(|part| {
+            let fields: Vec<&str> = part.split('|').collect();
+            if fields.len() >= 5 {
+                Some(NpsRom {
+                    id: fields[0].parse().ok()?,
+                    filename: fields[1].to_string(),
+                    subtype: fields[2].to_string(),
+                    size: fields[3].parse().ok(),
+                    sha1: if fields[4].is_empty() { None } else { Some(fields[4].to_string()) },
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct NpsGame {
+    pub id: i64,
+    pub name: String,
+    pub title_id: Option<String>,
+    pub content_id: Option<String>,
+    pub platform: Option<String>,
+    pub roms: Vec<NpsRom>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct NpsRom {
+    pub id: i64,
+    pub filename: String,
+    pub subtype: String,
+    pub size: Option<i64>,
+    pub sha1: Option<String>,
 }
 
 #[cfg(test)]
