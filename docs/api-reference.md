@@ -1,323 +1,777 @@
-# API Reference
+# ROM Manager UI — API Documentation
 
 Base URL: `http://localhost:3001/api`
 
-All `POST`/`PUT` bodies are JSON. All responses are JSON.
+---
+
+## Status
+
+### GET /api/status
+
+Returns row counts from all key tables.
+
+**Response `200`**
+```json
+{
+  "versions": 2,
+  "games": 0,
+  "roms": 0,
+  "scanned": 0,
+  "collections": 6,
+  "game_sets": 0
+}
+```
 
 ---
 
-## Status & Platforms
+## Platforms (reference)
 
-### `GET /status`
-Database summary counts.
+### GET /api/platforms
 
-**Response:**
+Known platform list.
+
+**Response `200`**
 ```json
-{ "versions": 2, "games": 2466, "roms": 58444, "scanned": 0, "collections": 1, "game_sets": 0 }
+[
+  "Arcade", "Multi", "NES", "SNES", "Nintendo 64",
+  "Game Boy", "Game Boy Color", "Game Boy Advance",
+  "Nintendo DS", "Nintendo 3DS", "Sega Genesis",
+  "Sega Saturn", "Sega Dreamcast", "PlayStation",
+  "PlayStation 2", "PlayStation Portable", "MSX",
+  "Commodore 64", "Amiga", "Atari 2600", "Atari 7800",
+  "TurboGrafx-16", "Neo Geo", "Neo Geo Pocket", "WonderSwan"
+]
 ```
-
-### `GET /platforms`
-List of known platform names.
 
 ---
 
 ## Collections
 
-### `GET /collections`
-List all ROM collections.
+### GET /api/collections
 
-**Response:**
+Lists all collections sorted by name, with computed game count from linked versions.
+
+**Response `200`**
 ```json
-[{ "id": 1, "name": "MAME", "icon": "..., "has_dataset": 1, ... }]
+[
+  {
+    "id": 1,
+    "name": "MAME",
+    "slug": "mame",
+    "platform": "Arcade",
+    "logo": "🕹️",
+    "folder": "mame",
+    "dataset_preset": null,
+    "has_dataset": 1,
+    "created_at": "2026-05-23 03:24:22",
+    "updated_at": "2026-05-23 03:24:22",
+    "total_games": 0
+  }
+]
 ```
 
-### `POST /collections`
-Create a new collection.
+---
 
-**Body:** `{ "name": "MAME", "icon": "arcade", "folder": "mame", ... }`
-**Response:** `{ "id": 1, ... }`
+### POST /api/collections
 
-### `PUT /collections/:id`
-Update collection metadata.
+Creates a new collection. Slug is auto‑deduplicated if it already exists.
 
-### `DELETE /collections/:id`
-Delete collection and all linked data.
-
-### `GET /collections/:id/games`
-List games in the collection, with optional `?sort` and pagination.
-
-### `POST /collections/:id/versions`
-Link a version to the collection.
-
-**Body:** `{ "version_id": 1 }`
-
-### `DELETE /collections/:id/versions/:versionId`
-Unlink a version from the collection.
-
-### `POST /collections/:id/scan`
-Scan a ROM directory. Returns `{ jobId }`, use SSE for progress.
-
-**Body:** `{ "version_id": 1, "dir": "/roms/mame" }`
-**Response:** `{ "jobId": "uuid" }`
-
-### `POST /collections/:id/verify`
-Verify ROM files against a DAT version with optional fallback.
-
-**Body:** `{ "version_id": 1, "dir": "/roms/mame", "fallback_id": 2 }`
-**Response:** `{ "jobId": "uuid" }`
-
-### `GET /collections/:id/builds`
-List all builds for the collection.
-
-**Response:**
-```json
-[{ "id": 1, "version_id": 1, "status": "building", "games_total": 1233,
-   "games_built": 500, "version": "0.28", "source": "mame", ... }]
-```
-
-### `POST /collections/:id/builds`
-Start a new build entry (creates the build row, does NOT run it yet).
-
-**Body:** `{ "version_id": 1, "format": "split" }`
-**Response:** `{ "id": 1, "version_id": 1, "status": "not_started", ... }`
-
-### `PUT /collections/:id/builds/:buildId`
-Update build status and progress.
-
-**Body:** `{ "status": "complete", "games_built": 1233 }`
-
-### `POST /collections/:id/builds/:buildId/run`
-Actually execute the build CLI. Spawns `build-cli build --progress`, returns jobId for SSE.
-
-**Body:**
+**Request Body**
 ```json
 {
-  "source": "mame",
-  "import_dir": "/roms/import/",
-  "base_dir": "/roms/",
-  "update": false
+  "name": "MAME 0.287",
+  "slug": "mame-0287",
+  "platform": "Arcade",
+  "logo": "🕹️",
+  "folder": "mame",
+  "has_dataset": 1,
+  "dataset_preset": "MAME",
+  "uploaded_version_id": null
 }
 ```
-**Response:** `{ "jobId": "uuid" }`
 
-### `POST /collections/:id/exports`
-Generate an export manifest.
+| Field | Required | Description |
+|---|---|---|
+| `name` | Yes | Display name |
+| `slug` | Yes | URL‑friendly identifier (deduped if taken) |
+| `platform` | No | e.g. "Arcade", "NES" |
+| `logo` | No | Emoji icon (default "📁") |
+| `folder` | No | Filesystem folder name (defaults to slug) |
+| `has_dataset` | No | 1 for hash‑managed collections |
+| `dataset_preset` | No | "MAME", "Final Burn Neo", etc. |
+| `uploaded_version_id` | No | If set, links the version immediately |
 
-**Body:** `{ "format": "split", "version_id": 1 }`
+**Response `201`**
+```json
+{
+  "id": 7,
+  "name": "MAME 0.287",
+  "slug": "mame-0287",
+  "platform": "Arcade",
+  "logo": "🕹️",
+  "folder": "mame",
+  "has_dataset": 1,
+  "created_at": "2026-05-23 03:24:26",
+  "updated_at": "2026-05-23 03:24:26"
+}
+```
+
+---
+
+### PUT /api/collections/:id
+
+Partial update of collection fields.
+
+**Request Body**
+```json
+{
+  "name": "MAME Updated",
+  "platform": "Arcade",
+  "logo": "🎮",
+  "folder": "mame-updated"
+}
+```
+
+All fields optional. Only provided fields are updated. Sets `updated_at` to current timestamp.
+
+**Response `200`** — full updated collection row.
+
+---
+
+### DELETE /api/collections/:id
+
+Deletes a collection and its version links (CASCADE).
+
+**Response `200`**
+```json
+{ "ok": true }
+```
+
+---
+
+### GET /api/collections/:id/games
+
+Paginated games for a collection. Games are gathered from all versions linked to the collection.
+
+**Query Parameters**
+| Param | Default | Description |
+|---|---|---|
+| `limit` | 200 | Max results |
+| `offset` | 0 | Pagination offset |
+| `sort` | `name` | `name`, `rating`, `favourite`, `play_count` |
+| `order` | `asc` | `asc` or `desc` |
+
+**Response `200`**
+```json
+{
+  "collection": { "id": 1, "name": "MAME", ... },
+  "games": [ ... ],
+  "platforms": ["Arcade"],
+  "total": 100,
+  "limit": 200,
+  "offset": 0
+}
+```
+
+---
+
+### POST /api/collections/:id/versions
+
+Links an existing version to a collection.
+
+**Request Body**
+```json
+{ "version_id": 2 }
+```
+
+**Response `200`**
+```json
+{ "ok": true }
+```
+
+---
+
+### DELETE /api/collections/:id/versions/:versionId
+
+Unlinks a version from a collection.
+
+**Response `200`**
+```json
+{ "ok": true }
+```
+
+---
+
+### POST /api/collections/:id/scan
+
+Scans a ROM directory against a DAT version. Returns a job ID — poll or subscribe via SSE to get the result.
+
+**Request Body**
+```json
+{
+  "version_id": 2,
+  "dir": "/roms/mame"
+}
+```
+
+**Response `202`**
+```json
+{ "jobId": "uuid" }
+```
+
+---
+
+### POST /api/collections/:id/verify
+
+Verifies a ROM set against a DAT version. Returns a job ID.
+
+**Request Body**
+```json
+{
+  "version_id": 2,
+  "dir": "/roms/mame",
+  "fallback_id": null
+}
+```
+
+**Response `202`**
+```json
+{ "jobId": "uuid" }
+```
+
+---
+
+### GET /api/collections/:id/builds
+
+All builds for a collection, joined with version info, ordered by created_at DESC.
+
+**Response `200`**
+```json
+[
+  {
+    "id": 1,
+    "collection_id": 1,
+    "version_id": 2,
+    "status": "complete",
+    "format": "split",
+    "games_total": 100,
+    "games_built": 100,
+    "started_at": "2026-05-23 03:24:26",
+    "completed_at": "2026-05-23 03:24:30",
+    "created_at": "2026-05-23 03:24:26",
+    "version": "0.37",
+    "source": "MAME"
+  }
+]
+```
+
+Status values: `not_started`, `building`, `complete`, `failed`
+
+---
+
+### POST /api/collections/:id/builds
+
+Starts a new build. Enforces two rules:
+1. **Forward‑only**: cannot build older version than last completed build (MAME versioned only)
+2. **Must‑complete‑current**: cannot start a new build while one is in `building` status
+
+**Request Body**
+```json
+{
+  "version_id": 2,
+  "format": "split"
+}
+```
+
+`format`: `"split"`, `"merged"`, or `"non-merged"`
+
+**Response `200`** — full build row with version info.
+
+**Error `400`**
+```json
+{ "error": "Build already in progress for version ..." }
+```
+```json
+{ "error": "Cannot build version 0.37: already built 0.287. Only forward builds allowed." }
+```
+
+---
+
+### PUT /api/collections/:id/builds/:buildId
+
+Updates build status.
+
+**Request Body**
+```json
+{
+  "status": "complete",
+  "games_built": 100
+}
+```
+
+When status is `complete`, `completed_at` is set automatically. `games_built` is optional.
+
+**Response `200`** — updated build row.
+
+---
+
+### POST /api/collections/:id/exports
+
+Generates a full ROM manifest for a collection.
+
+**Request Body**
+```json
+{
+  "format": "split",
+  "version_id": 2
+}
+```
+
+`format`: `"split"`, `"merged"`, or `"non-merged"`. If `version_id` is omitted, uses the latest completed build.
+
+**Response `200`**
+```json
+{
+  "collection": "MAME",
+  "version": "0.37",
+  "format": "split",
+  "total_games": 100,
+  "total_roms": 250,
+  "games": [ ... ]
+}
+```
+
+**Error `400`**
+```json
+{ "error": "No completed builds to export" }
+```
 
 ---
 
 ## Game Sets
 
-### `GET /game-sets`
-List all game sets.
+### GET /api/game-sets
 
-### `POST /game-sets`
-Create a new game set.
+Lists all game sets with computed game count.
 
-### `PUT /game-sets/:id`
-Update game set metadata.
-
-### `DELETE /game-sets/:id`
-Delete a game set.
-
-### `GET /game-sets/:id/games`
-List games in the set, with pagination.
-
-### `POST /game-sets/:id/games`
-Add a game to the set.
-
-**Body:** `{ "game_entry_id": 42 }`
-
-### `DELETE /game-sets/:id/games/:gameId`
-Remove a game from the set.
-
-### `GET /game-sets/:id/exports`
-Export the game set.
+**Response `200`**
+```json
+[
+  {
+    "id": 1,
+    "name": "Fighting Games",
+    "icon": "🥊",
+    "description": "",
+    "platforms": "Arcade,SNES",
+    "created_at": "2026-05-23 03:24:26",
+    "total_games": 5
+  }
+]
+```
 
 ---
 
-## Games
+### POST /api/game-sets
 
-### `GET /games`
-List games, with optional `?search`, `?platform`, `?source`, `?limit`, `?offset`.
+**Request Body**
+```json
+{
+  "name": "Fighting Games",
+  "description": "Best fighting games",
+  "icon": "🥊",
+  "platforms": "Arcade,SNES"
+}
+```
 
-### `GET /games/:id`
-Get a single game with full metadata and ROM info.
+**Response `201`** — full game set row.
 
-### `PUT /games/:id/rating`
-Update a game's rating.
+---
 
-**Body:** `{ "rating": 4 }`
+### PUT /api/game-sets/:id
 
-### `GET /games/:id/cover`
-Get the primary cover image metadata.
+Partial update.
+
+**Response `200`** — updated row.
+
+---
+
+### DELETE /api/game-sets/:id
+
+**Response `200`**
+```json
+{ "ok": true }
+```
+
+---
+
+### GET /api/game-sets/:id/games
+
+Paginated games in a set with ratings and total ROM size.
+
+**Query Parameters**: `limit` (200), `offset` (0), `sort`, `order`
+
+**Response `200`**
+```json
+{
+  "game_set": { "id": 1, "name": "Fighting Games", ... },
+  "games": [ ... ],
+  "total": 5,
+  "total_size": 567890,
+  "limit": 200,
+  "offset": 0
+}
+```
+
+---
+
+### POST /api/game-sets/:id/games
+
+Adds one or more games to a set.
+
+**Request Body**
+```json
+{ "game_entry_ids": [1, 2, 3] }
+```
+
+**Response `200`**
+```json
+{ "ok": true, "added": 3 }
+```
+
+---
+
+### DELETE /api/game-sets/:id/games/:gameId
+
+**Response `200`**
+```json
+{ "ok": true }
+```
+
+---
+
+### GET /api/game-sets/:id/exports
+
+Exports game set metadata (no ROM details).
+
+**Response `200`**
+```json
+{
+  "game_set": { ... },
+  "games": [ ... ],
+  "total_games": 1
+}
+```
+
+---
+
+## Games (global)
+
+### GET /api/games
+
+Paginated search and browse across all games. Merges old `/api/browse` and `/api/search`.
+
+**Query Parameters**
+| Param | Default | Description |
+|---|---|---|
+| `limit` | 200 | Max results |
+| `offset` | 0 | Pagination |
+| `sort` | `name` | `name`, `rating`, `favourite`, `play_count` |
+| `order` | `asc` | `asc` or `desc` |
+| `q` | — | Text filter (LIKE on name, description, source) |
+| `collection_id` | — | Filter by collection (games from linked versions) |
+| `version_id` | — | Filter by specific version |
+
+**Response `200`**
+```json
+{
+  "games": [
+    {
+      "id": 1,
+      "version_id": 1,
+      "name": "pacman",
+      "description": "Pac-Man",
+      "year": "1980",
+      "manufacturer": "Namco",
+      "cloneof": null,
+      "source": "MAME",
+      "version": "0.37",
+      "rating": 0,
+      "favourite": 0,
+      "play_count": null
+    }
+  ],
+  "total": 5000,
+  "limit": 200,
+  "offset": 0
+}
+```
+
+---
+
+### GET /api/games/:id
+
+Full game detail with ROM entries, scanned games, and rating.
+
+**Response `200`**
+```json
+{
+  "id": 1,
+  "version_id": 1,
+  "name": "pacman",
+  "source": "MAME",
+  "version": "0.37",
+  "roms": [
+    {
+      "filename": "pacman.rom",
+      "size": 16384,
+      "crc32": "ABCD1234",
+      "md5": "abc...",
+      "sha1": "def...",
+      "status": "good",
+      "merge_target": null
+    }
+  ],
+  "scanned_games": [ ... ],
+  "rating": { "rating": 4, "favourite": 1 }
+}
+```
+
+---
+
+### PUT /api/games/:id/rating
+
+Upserts rating and/or favourite for a game.
+
+**Request Body**
+```json
+{
+  "rating": 4,
+  "favourite": true
+}
+```
+
+`rating`: 0–5 integer. `favourite`: boolean. All fields optional.
+
+**Response `200`**
+```json
+{ "ok": true }
+```
+
+---
+
+### GET /api/games/:id/cover
+
+Deterministic SVG placeholder cover. MD5 hash of game name generates HSL color. Shows first letter.
+
+**Response `200`**: `image/svg+xml`, cached 86400s.
 
 ---
 
 ## Versions
 
-### `GET /versions`
-List all version sets (from `set_versions` table).
+### GET /api/versions
 
-**Response:**
+All imported versions with game counts, sorted by created_at DESC.
+
+**Response `200`**
 ```json
-[{ "id": 1, "source": "mame", "version": "0.28", "total_games": 1233, "total_roms": 29290, "dir": "/roms/mame", ... }]
+[
+  {
+    "id": 2,
+    "source": "MAME",
+    "version": "0.287",
+    "dir": null,
+    "created_at": "2026-05-23 03:24:26",
+    "total_games": 12000
+  }
+]
 ```
-
-### `GET /versions/:id/games`
-List games in a specific version set.
-
-### `GET /versions/available`
-Check for available DAT updates. Returns latest version + list of missing versions.
-
-**Query:** `?source=MAME|FBNEO|FBALPHA43|FBALPHA44|OFFLINELIST|DATOMATIC`
-
-- **MAME/FBNeo/FBAlpha**: Fetches available versions from GitHub
-- **OFFLINELIST**: Fetches available DATs from nointro.free.fr (OfflineList XML format)
-- **DATOMATIC**: Returns system list from datomatic.no-intro.org, auto-downloads DATs via form submission
-
-### `POST /versions/import-dat`
-Import a DAT file. Wraps `parse-cli import`.
-
-**Body:** `{ "file": "/path/to/mame.xml", "source": "mame", "version": "0.29", "dir": "/roms/mame" }`
-
-### `POST /versions/import-online`
-Download and import a DAT from the internet.
-
-**Body:** `{ "version": "0.29", "source": "MAME" }`
-
-**Sources:**
-- `MAME` — Downloads from progettosnaps.net (Logiqx XML)
-- `FBNeo` — Downloads from GitHub (ClrMAMEPro/Logiqx)
-- `FBAlpha43`/`FBAlpha44` — Downloads from GitHub
-- `OFFLINELIST` — Downloads from nointro.free.fr (OfflineList XML)
-- `DATOMATIC` — Downloads from datomatic.no-intro.org (three-step form flow)
 
 ---
 
-## Scraper
+### GET /api/versions/:id/games
 
-### `POST /scraper/search`
-Search games by name via a scraper provider.
+Paginated games for a specific version.
 
-**Body:** `{ "query": "Super Mario", "platform": "snes" }`
-**Response:**
-```json
-{"results": [{"id":"136","title":"Super Mario World","platform":"Super Nintendo (SNES)","release_date":"1991-08-23"}]}
-```
+**Query Parameters**: `limit` (100), `offset` (0), `q` (text filter)
 
-### `POST /scraper/scrape`
-Scrape a ROM file. Computes hashes, searches by hash then filename, returns full metadata. Optionally downloads media.
-
-**Body:** `{ "file": "/roms/smw.zip", "game_name": "Super Mario World", "platform": "snes" }`
-**Response:**
+**Response `200`**
 ```json
 {
-  "hashes": { "crc32": "...", "md5": "...", "sha1": "..." },
-  "matched": {
-    "id": "1070", "title": "Super Mario World", "platform": "Arcade",
-    "description": "...", "publisher": "Nintendo", "genres": ["Platform"],
-    "covers": ["https://..."], "screenshots": ["https://..."], ...
-  }
+  "games": [ ... ],
+  "limit": 100,
+  "offset": 0
 }
 ```
 
-### `POST /scraper/hash`
-Compute ROM hashes only (no scrape).
+---
 
-**Body:** `{ "file": "/roms/smw.zip" }`
+### GET /api/versions/available
 
-### Settings UI: Test Connection
-Test provider credentials live:
+Scrapes `progettosnaps.net` for available MAME DAT versions. Cross-references with DB to show imported vs missing. Cached for 10 minutes.
 
-- **`POST /settings/test-igdb`** — body: `{ "client_id": "...", "client_secret": "..." }` → `{ "ok": true/false, "error": "..." }`
-- **`POST /settings/test-tgdb`** — body: `{ "api_key": "..." }` → `{ "ok": true/false, "error": "..." }`
+**Response `200`**
+```json
+{
+  "latest": "0.287",
+  "latestParsed": [0, 287, 0],
+  "hasNewer": true,
+  "available": [ ... ],
+  "imported": [ ... ],
+  "missing": [ ... ]
+}
+```
+
+| Field | Description |
+|---|---|
+| `latest` | Latest version string found on the page |
+| `hasNewer` | True if latest is NOT in the imported list |
+| `available` | All versions that have a DAT file available |
+| `imported` | Versions already imported into set_versions |
+| `missing` | Versions with DAT files but not yet imported |
 
 ---
 
-## Jobs
+### POST /api/versions/import-online
 
-Jobs track long-running CLI operations (scan, verify, build). Progress is pushed via **Server-Sent Events**.
+Creates a `set_versions` entry for a MAME version and links it to a collection.
 
-### `GET /jobs/:jobId`
-Subscribe to job progress via SSE.
-
-**SSE events:**
+**Request Body**
+```json
+{
+  "collection_id": 1,
+  "version": "0.37"
+}
 ```
-data: {"type":"progress","pct":30,"msg":"Copying ROMs (500/1233)"}
+
+**Response `200`**
+```json
+{ "ok": true, "version_id": 2 }
+```
+
+---
+
+### POST /api/versions/import-dat
+
+Parses a raw DAT file (XML or ClrMAMEPro format) and creates a version with extracted games.
+
+Accepts:
+- **MAME listxml**: `<mame><game name="pacman">...</game></mame>`
+- **ClrMAMEPro XML**: `<datafile><game name="pacman">...</game></datafile>`
+- **Simple DAT**: `game ( name "pacman" )`
+
+**Request Body** (JSON):
+```json
+{
+  "content": "<datafile><game name=\"pacman\">...</game></datafile>"
+}
+```
+
+**Response `200`**
+```json
+{
+  "ok": true,
+  "version_id": 2,
+  "source": "DAT",
+  "version": "1.0",
+  "total_games": 2
+}
+```
+
+**Error `400`**
+```json
+{ "error": "No games found in DAT file" }
+```
+
+---
+
+## Scraper (external metadata)
+
+### POST /api/scraper/search
+
+ScreenScraper search by game name.
+
+**Request Body**
+```json
+{
+  "query": "pacman",
+  "platform": "Arcade"
+}
+```
+
+**Response `200`** — delegate to `scraper-cli`.
+
+### POST /api/scraper/scrape
+
+Hash a file and look up metadata on ScreenScraper.
+
+**Request Body**
+```json
+{
+  "file": "/roms/mame/pacman.zip",
+  "game_name": "pacman",
+  "platform": "Arcade"
+}
+```
+
+### POST /api/scraper/hash
+
+Compute hashes only (no network lookup).
+
+**Request Body**
+```json
+{
+  "file": "/roms/mame/pacman.zip"
+}
+```
+
+---
+
+## Jobs (SSE progress streams)
+
+### GET /api/jobs/:jobId
+
+If job is still running, returns an SSE stream with progress events. If job is done, returns the result directly as JSON.
+
+**SSE Events**
+```
+data: {"type":"progress","pct":50,"msg":"Scanning..."}
 data: {"type":"result","data":{...}}
-data: {"type":"error","error":"Build failed: ..."}
+data: {"type":"error","error":"..."}
 data: {"type":"cancelled"}
 ```
 
-If the job is already finished (not `running`), returns plain JSON:
-```json
-{ "type": "done", "data": { ... } }
-```
-
-### `POST /jobs/:jobId/cancel`
-Cancel a running job. Sends `SIGTERM` to the CLI process (or calls `AbortController.abort()` for build jobs).
-
-**Response:** `{ "ok": true }` or `{ "ok": false, "error": "Job not running" }`
-
----
-
-## Settings
-
-Settings are read/written to `data/.env`. Only whitelisted keys are exposed.
-
-### `GET /settings`
-Read current settings.
-
-**Response:**
+**Direct response (completed job)**
 ```json
 {
-  "SS_DEVID": "...",
-  "IGDB_CLIENT_ID": "...",
-  "TGDB_API_KEY": "...",
-  "SCRAPER_SOURCE": "thegamesdb"
+  "type": "done",
+  "data": { ... }
 }
 ```
 
-### `PUT /settings`
-Save settings. Only whitelisted keys are written. Setting a value to `null`/`""` removes the key.
+### POST /api/jobs/:jobId/cancel
 
-**Body:** `{ "IGDB_CLIENT_ID": "xxx", "SCRAPER_SOURCE": "igdb" }`
-**Response:** `{ "ok": true }`
+Cancels a running job (sends SIGTERM to child process).
 
-### Settings Keys
-| Key | Description |
-|-----|-------------|
-| `SCRAPER_SOURCE` | Default scraper provider |
-| `SS_DEVID` | ScreenScraper dev ID |
-| `SS_DEVPASSWORD` | ScreenScraper dev password |
-| `SS_USERNAME` | ScreenScraper username (optional) |
-| `SS_PASSWORD` | ScreenScraper password (optional) |
-| `IGDB_CLIENT_ID` | Twitch Client ID |
-| `IGDB_CLIENT_SECRET` | Twitch Client Secret |
-| `TGDB_API_KEY` | TheGamesDB API key (optional) |
+**Response `200`**
+```json
+{ "ok": true }
+```
 
 ---
 
-## Common Patterns
+## Error Format
 
-### Long-running operations (scan, verify, build)
-```
-POST /api/collections/:id/scan       → { "jobId": "uuid" }
-GET  /api/jobs/uuid                   → SSE stream with progress
-POST /api/jobs/uuid/cancel            → Cancels the running job
-```
+All errors follow a consistent format:
 
-### Build lifecycle
-```
-POST /api/collections/:id/builds      → Create build row (status: not_started)
-POST /api/collections/:id/builds/:id/run → Execute build CLI, returns jobId
-GET  /api/jobs/:jobId                 → SSE progress
-POST /api/jobs/:jobId/cancel          → Cancel build
+```json
+{ "error": "Human-readable error message" }
 ```
 
-### Surviving builds across UI sessions
-- Build CLI keeps running when UI tab is closed
-- On page reload, fetch `GET /collections/:id/builds`, find any with `status: "building"`, reconnect SSE via `GET /jobs/:buildId`
-- Orphaned builds (server restart) are reset to `failed` on startup
+HTTP status codes used:
+- `200` — Success
+- `201` — Created
+- `202` — Accepted (job started)
+- `400` — Bad request (validation error)
+- `404` — Resource not found
+- `500` — Internal server error
