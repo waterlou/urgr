@@ -1334,8 +1334,8 @@ html, body, #root {
 }
 
 .logo-option {
-  width: 40px;
-  height: 40px;
+  width: 48px;
+  height: 48px;
   border: 2px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
@@ -1346,7 +1346,7 @@ html, body, #root {
   transition: all 0.15s;
 }
 
-.logo-option .icon { font-size: 22px; }
+.logo-option .icon { font-size: 26px; }
 
 .logo-option.active {
   border-color: var(--accent);

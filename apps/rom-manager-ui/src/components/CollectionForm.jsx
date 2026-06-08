@@ -445,7 +445,7 @@ export default function CollectionForm({ datasets, platforms, versions, editTarg
               {['arcade', 'mame', 'fc', 'sfc', 'n64', 'gb', 'gbc', 'gba', 'nds', 'vb', 'md', 'ms', 'gg', '32X', 'segacd', 'dc', 'ps', 'psp', 'neogeo', 'ngp', 'ngpc', 'pce', 'ws', 'wsc', 'atari', 'lynx', 'vectrex', 'col', 'msx', 'c64', 'amiga', 'zxs', 'x68000', 'dos'].map(ic => (
                 <button type="button" key={ic}
                   className={`logo-option ${logo === ic ? 'active' : ''}`}
-                  onClick={() => setLogo(ic)}><IconDisplay name={ic} size={20} /></button>
+                  onClick={() => setLogo(ic)}><IconDisplay name={ic} size={28} /></button>
               ))}
             </div>
           </div>
