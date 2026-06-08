@@ -13,7 +13,12 @@ const router = Router();
 // =============================================================================
 router.get('/api/jobs/:jobId', (req, res) => {
   const job = getJob(req.params.jobId);
-  if (!job) return res.status(404).json({ error: 'Job not found' });
+  if (!job) {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+    res.write(`data: ${JSON.stringify({ type: 'error', error: 'Job not found' })}\n\n`);
+    res.end();
+    return;
+  }
 
   if (job.status !== 'running') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
