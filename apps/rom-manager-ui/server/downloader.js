@@ -1,8 +1,11 @@
 import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
+import { fileURLToPath } from 'url'
 import { getDb } from './db.js'
 import { all, get, run } from './helpers.js'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 let currentJob = null
 
@@ -78,14 +81,21 @@ export async function processNext() {
     run('UPDATE download_queue SET status = ?, progress = 0 WHERE id = ?', ['downloading', item.id])
     broadcastQueue()
 
-    const destDir = path.resolve('..', '..', 'data', 'downloads', String(item.version_id))
-    fs.mkdirSync(destDir, { recursive: true })
+    // Find the collection directory for this version
+    const col = get(`SELECT c.folder, c.slug FROM collections c
+      JOIN collection_versions cv ON cv.collection_id = c.id
+      WHERE cv.version_id = ? LIMIT 1`, [item.version_id])
+    const colFolder = col?.folder || col?.slug || String(item.version_id)
+    const game = get('SELECT platform FROM game_entries WHERE id = ?', [item.game_entry_id])
+    const platform = game?.platform || 'Games'
 
+    const dataDir = path.resolve(__dirname, '..', '..', '..', 'data')
+    const romsDir = path.join(dataDir, 'roms', colFolder, platform)
     const subDir = item.subtype === 'dlc' ? 'DLCs' : item.subtype === 'update' ? 'Updates' : 'Games'
-    const subPath = path.join(destDir, subDir)
+    const subPath = path.join(romsDir, subDir)
     fs.mkdirSync(subPath, { recursive: true })
 
-    const tempFile = path.join(destDir, `.${item.filename}.part`)
+    const tempFile = path.join(dataDir, 'downloads', `.${item.filename}.part`)
     const finalFile = path.join(subPath, item.filename)
 
     // Skip if already exists
@@ -161,14 +171,33 @@ export async function processNext() {
 async function checkGameComplete(gameEntryId) {
   const pending = get('SELECT COUNT(*) as cnt FROM download_queue WHERE game_entry_id = ? AND status NOT IN (?, ?)',
     [gameEntryId, 'completed', 'failed'])
-  const failed = get('SELECT COUNT(*) as cnt FROM download_queue WHERE game_entry_id = ? AND status = ?',
-    [gameEntryId, 'failed'])
-  if (pending.cnt === 0 && failed.cnt === 0) {
-    run(`INSERT INTO game_state (game_entry_id, available, updated_at)
-         VALUES (?, 1, datetime('now'))
-         ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [gameEntryId])
-    broadcastQueue()
-  }
+  if (pending.cnt > 0) return
+
+  // All downloads for this game entry are done — scan collection dir to detect ALL files
+  try {
+    const game = get('SELECT g.*, c.folder FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id LEFT JOIN collection_versions cv ON cv.version_id = sv.id LEFT JOIN collections c ON c.id = cv.collection_id WHERE g.id = ?', [gameEntryId])
+    if (game && game.folder) {
+      const collectionDir = path.resolve(__dirname, '..', '..', '..', 'data', 'roms', game.folder)
+      if (fs.existsSync(collectionDir)) {
+        const foundFiles = []
+        function walkDir(dir) {
+          for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (entry.isDirectory()) walkDir(path.join(dir, entry.name))
+            else if (entry.name.endsWith('.pkg')) foundFiles.push(entry.name)
+          }
+        }
+        walkDir(collectionDir)
+        // Match PKG filenames against rom_entries and update game_state
+        for (const fname of foundFiles) {
+          run(`INSERT INTO game_state (game_entry_id, available, updated_at)
+            SELECT r.game_entry_id, 1, datetime('now') FROM rom_entries r
+            WHERE r.filename = ? AND r.game_entry_id IN (SELECT id FROM game_entries WHERE version_id = ?)
+            ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [fname, game.version_id])
+        }
+      }
+    }
+  } catch (_) {}
+  broadcastQueue()
 }
 
 export function retryDownload(id) {

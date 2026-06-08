@@ -32,6 +32,17 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
     }).catch(console.error)
   }, [gameId])
 
+  // Refresh game data when tab becomes visible (download state may have changed)
+  useEffect(() => {
+    function onVisibility() {
+      if (document.visibilityState === 'visible') {
+        getGame(gameId).then(g => { if (g) setGame(g) }).catch(() => {})
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [gameId])
+
   useEffect(() => {
     function handleKey(e) {
       if (e.key === 'Escape') { if (lightbox) setLightbox(null); else onBack?.() }
@@ -142,14 +153,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                 <span className="icon">refresh</span> {game.manufacturer ? 'Rescrape' : 'Scrape'}
               </button>
             )}
-            {game.source === 'NPS' && (
-              game.available
-                ? <span className="badge" style={{background:'var(--accent)', color:'#fff'}}>Downloaded</span>
-                : <button className="btn btn-sm" onClick={handleDownload} style={{marginLeft: 8}}>
-                    <span className="icon">download</span> Download
-                  </button>
-            )}
-            {downloadMsg && <p className="scrape-success" style={{marginTop: 4}}>{downloadMsg}</p>}
+            {downloadMsg && <p className="scrape-success">{downloadMsg}</p>}
           </div>
         </div>
 
@@ -200,6 +204,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                 <thead>
                   <tr>
                     <th>Filename</th>
+                    <th>Type</th>
                     <th>Size</th>
                     <th>Status</th>
                     <th>SHA1</th>
@@ -209,6 +214,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                   {game.roms.map(rom => (
                     <tr key={rom.id}>
                       <td className="rom-filename">{rom.filename}</td>
+                      <td><span className="badge">{rom.subtype || 'game'}</span></td>
                       <td>{rom.size != null ? formatSize(rom.size) : '-'}</td>
                       <td><span className={`rom-status rom-status-${rom.status}`}>{rom.status}</span></td>
                       <td className="rom-hash">{rom.sha1 ? rom.sha1.slice(0, 16) + '...' : '-'}</td>
@@ -220,29 +226,25 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
           </section>
         )}
 
-        {game.scanned_games && game.scanned_games.length > 0 && (
+        {game.source === 'NPS' && (
           <section>
-            <h2>Scanned Files ({game.scanned_games.length})</h2>
-            <div className="rom-table-wrapper">
-              <table className="rom-table">
-                <thead>
-                  <tr>
-                    <th>Filename</th>
-                    <th>Size</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {game.scanned_games.map(sg => (
-                    <tr key={sg.id}>
-                      <td className="rom-filename">{sg.filename}</td>
-                      <td>{sg.size != null ? formatSize(sg.size) : '-'}</td>
-                      <td><span className={`rom-status rom-status-${sg.status}`}>{sg.status}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {game.available
+              ? <span className="badge" style={{background:'var(--accent)', color:'#fff', marginBottom:8}}>Downloaded</span>
+              : <button className="btn btn-sm" onClick={handleDownload}>
+                  <span className="icon">download</span> Download
+                </button>
+            }
+            {(() => {
+              const dlcs = game.roms?.filter(r => r.subtype === 'dlc').length || 0;
+              const updates = game.roms?.filter(r => r.subtype === 'update').length || 0;
+              const extra = [];
+              if (dlcs) extra.push(`${dlcs} DLC${dlcs > 1 ? 's' : ''}`);
+              if (updates) extra.push(`${updates} update${updates > 1 ? 's' : ''}`);
+              return extra.length > 0
+                ? <p style={{fontSize:12, opacity:0.6, marginTop:4}}>Includes {extra.join(', ')}</p>
+                : null;
+            })()}
+            {downloadMsg && <p className="scrape-success" style={{marginTop:4}}>{downloadMsg}</p>}
           </section>
         )}
       </div>

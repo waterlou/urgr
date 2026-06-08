@@ -348,7 +348,21 @@ router.post('/api/collections/:id/build', async (req, res) => {
             ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id]);
           const matched = get('SELECT COUNT(*) as c FROM scanned_games WHERE version_id = ? AND filename != ?', [version_id, '']).c;
           const total = get('SELECT COUNT(*) as c FROM scanned_games WHERE version_id = ?', [version_id]).c;
-          doneJob(jobId, { exists: matched, reused: 0, missing: total - matched });
+          // Calculate reuse from previous version builds
+          let reused = 0;
+          const priorVersions = all('SELECT DISTINCT sv.version FROM set_versions sv JOIN collection_builds cb ON cb.version_id = sv.id WHERE cb.collection_id = ? AND cb.version_id != ? AND cb.status = ?', [col.id, version_id, 'complete']);
+          if (priorVersions.length > 0 && fs.existsSync(collectionDir)) {
+            const matchedGames = all('SELECT name FROM scanned_games WHERE version_id = ? AND filename != ?', [version_id, '']);
+            for (const game of matchedGames) {
+              for (const pv of priorVersions) {
+                const pvRoms = path.join(collectionDir, pv.version, 'roms');
+                if (!fs.existsSync(pvRoms)) continue;
+                const found = fs.readdirSync(pvRoms, { recursive: true }).some(f => path.basename(f) === `${game.name}.zip`);
+                if (found) { reused++; break; }
+              }
+            }
+          }
+          doneJob(jobId, { exists: matched - reused, reused, missing: total - matched });
         } else if (isNps) {
           // NPS build
           fs.mkdirSync(collectionDir, { recursive: true });
