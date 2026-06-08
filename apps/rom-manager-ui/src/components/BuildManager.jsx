@@ -107,7 +107,7 @@ export default function BuildManager({ collectionId, collection, versions, onBui
         onResult: (data) => {
           setBuildScanResult(data)
           setBuildScanRunning(false)
-          onInfo(`Scan complete: ${data.added} would be added, ${data.exists} exist, ${data.reused} reusable, ${data.missing} missing`)
+          onInfo(`Scan complete: ${data.added} matched, ${data.missing} missing`)
         },
         onError: (err) => {
           setBuildScanRunning(false)
@@ -255,8 +255,8 @@ export default function BuildManager({ collectionId, collection, versions, onBui
         )}
         {buildScanResult && (
           <div className="info-box" style={{marginTop:12}}>
-            <strong>Scan result</strong> — no files were copied<br />
-            ✓ {buildScanResult.added} would be added · {buildScanResult.exists} exist · ♻ {buildScanResult.reused} reusable · ✗ {buildScanResult.missing} missing
+            <strong>Scan result</strong><br />
+            ✓ {buildScanResult.added} matched · ✗ {buildScanResult.missing} missing
             {buildScanResult.missing > 0 && buildScanResult.missing_games?.length > 0 && (
               <details style={{marginTop:8,fontSize:13}}>
                 <summary>Missing games ({buildScanResult.missing})</summary>
