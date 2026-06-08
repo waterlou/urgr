@@ -100,6 +100,7 @@ export async function importNps(platform, versionId) {
   let romsImported = 0;
 
   // Group by normalized name — strip firmware suffixes like "(3.61+!) [3.63]"
+  // Each group becomes: 1 parent (cloneof=NULL) + N clones (one per regional variant)
   const grouped = new Map();
   for (const row of allGames) {
     if (shouldIgnore(row.Name || '')) continue;
@@ -110,61 +111,78 @@ export async function importNps(platform, versionId) {
     const groupKey = normalizeForGroup(name);
     if (!grouped.has(groupKey)) {
       grouped.set(groupKey, {
-        name,
-        titleIds: [],
+        variants: [],
         originalName: row['Original Name'] || row.original_name || '',
-        regions: [],
       });
     }
     const g = grouped.get(groupKey);
-    g.titleIds.push(row['Title ID'] || '');
-    g.regions.push(row.Region || row.region || '');
+    g.variants.push({
+      name,
+      titleId: row['Title ID'] || '',
+      region: row.Region || row.region || '',
+      pkgUrl,
+      fileSize: parseInt(row['File Size'] || row.file_size || '0', 10),
+      sha256: row.SHA256 || row.sha256 || '',
+      originalName: row['Original Name'] || row.original_name || '',
+    });
     if (!g.originalName) g.originalName = row['Original Name'] || row.original_name || '';
   }
 
-  // Create game entries
   for (const [groupKey, g] of grouped) {
-    const existing = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ?', [versionId, g.name]);
+    const regions = [...new Set(g.variants.map(v => v.region))];
+    const parentName = groupKey; // normalized name without firmware suffix
+
+    // Skip if parent already exists
+    const existing = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ?', [versionId, parentName]);
     if (existing) continue;
 
-    const regions = [...new Set(g.regions)].join(', ');
+    // Determine preferred parent region: US first, then JP, then first available
+    const preferredOrder = ['US', 'JP', 'EU', 'ASIA'];
+    let parentVariant = g.variants.find(v => v.region === 'US');
+    if (!parentVariant) parentVariant = g.variants.find(v => v.region === 'JP');
+    if (!parentVariant) parentVariant = g.variants[0];
+
+    // Create parent game (cloneof=NULL, year=all regions)
     run('INSERT INTO game_entries (version_id, name, description, year, platform, title_id, content_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [versionId, g.name, g.originalName, regions, info.folder, g.titleIds[0], '']);
+      [versionId, parentName, g.originalName, regions.join(', '), info.folder, parentVariant.titleId, '']);
     gamesImported++;
+
+    // Create clone entries for each variant (cloneof=parent name)
+    const cloneNamesSeen = new Set();
+    for (const v of g.variants) {
+      // Skip if variant name equals parent name — that's the parent itself
+      if (v.name === parentName) continue;
+
+      // Append region suffix if name already used by another variant
+      let cloneName = v.name;
+      if (cloneNamesSeen.has(cloneName)) {
+        cloneName = `${v.name} (${v.region})`;
+      }
+      cloneNamesSeen.add(v.name);
+
+      const cloneEntry = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ? AND cloneof = ?', [versionId, cloneName, parentName]);
+      if (cloneEntry) continue;
+
+      run('INSERT INTO game_entries (version_id, name, description, year, cloneof, platform, title_id, content_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [versionId, cloneName, g.originalName, v.region, parentName, info.folder, v.titleId, '']);
+      gamesImported++;
+
+      // Create ROM for this clone
+      const cloneGame = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ? AND cloneof = ?', [versionId, cloneName, parentName]);
+      if (!cloneGame) continue;
+
+      run('INSERT INTO rom_entries (game_entry_id, filename, size, sha1, subtype) VALUES (?, ?, ?, ?, ?)',
+        [cloneGame.id, `${v.region}_${v.titleId}.pkg`, v.fileSize || 0, v.sha256, 'game']);
+      romsImported++;
+    }
   }
 
-  // Create ROM entries — one per region per game
-  const romSeen = new Set();
-  for (const row of allGames) {
-    if (shouldIgnore(row.Name || '')) continue;
-    const titleId = row['Title ID'] || row.title_id || '';
-    const name = row.Name || row.name || '';
-    const region = row.Region || row.region || '';
-    const pkgUrl = row['PKG direct link'] || row.pkg_url || '';
-    const fileSize = parseInt(row['File Size'] || row.file_size || '0', 10);
-    const sha256 = row.SHA256 || row.sha256 || '';
-
-    if (!pkgUrl) continue;
-
-    const gameEntry = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ?', [versionId, name]);
-    if (!gameEntry) continue;
-
-    // Deduplicate by name+region+titleId
-    const romKey = `${name}|${region}|${titleId}`;
-    if (romSeen.has(romKey)) continue;
-    romSeen.add(romKey);
-
-    run('INSERT INTO rom_entries (game_entry_id, filename, size, sha1, subtype) VALUES (?, ?, ?, ?, ?)',
-      [gameEntry.id, `${region}_${titleId}.pkg`, fileSize || 0, sha256, 'game']);
-    romsImported++;
-  }
-
-  // Map titleIds to gameEntryIds for DLC/update linking
+  // Map titleIds to gameEntryIds for DLC/update linking (map to clones)
   const gameMap = new Map();
   for (const row of allGames) {
     const titleId = row['Title ID'] || row.title_id || '';
     const name = row.Name || row.name || '';
-    const gameEntry = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ?', [versionId, name]);
+    const gameEntry = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ? AND cloneof IS NOT NULL', [versionId, name]);
     if (gameEntry) gameMap.set(titleId, gameEntry.id);
   }
 
