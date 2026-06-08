@@ -1,10 +1,15 @@
 import { Router } from 'express';
 import crypto, { createHash } from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { getDb } from '../db.js';
 import { execCli } from '../cli.js';
 import { createJob, updateProgress, doneJob, failJob } from '../jobs.js';
 import { all, get, run, runNow, dbReady } from '../helpers.js';
 import { fetchSonyScreenshots } from '../nps.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const router = Router();
 
@@ -117,6 +122,97 @@ router.get('/:id', async (req, res) => {
       parent = get('SELECT id, name, region FROM game_entries WHERE name = ? AND version_id = ? AND cloneof IS NULL', [game.cloneof, game.version_id]);
     }
     res.json({ ...game, roms, scanned_games: scanned, rating: state?.rating || 0, favourite: state?.favourite || 0, available: state?.available || 0, play_count: state?.play_count || 0, clones, parent });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Serve a ROM file for emulation
+router.get('/:id/rom/:romId', async (req, res) => {
+  await dbReady;
+  try {
+    const game = get('SELECT g.*, sv.source FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [req.params.id]);
+    if (!game) return res.status(404).json({ error: 'Game not found' });
+
+    const rom = get('SELECT * FROM rom_entries WHERE id = ? AND game_entry_id = ?', [req.params.romId, req.params.id]);
+    if (!rom) return res.status(404).json({ error: 'ROM not found' });
+
+    let filePath = null
+
+    // For arcade/MAME/FBNeo: the zip file path is in scanned_games
+    const scanned = get('SELECT filename FROM scanned_games WHERE name = ? AND version_id = ?', [game.name, game.version_id]);
+    if (scanned && scanned.filename && fs.existsSync(scanned.filename)) {
+      filePath = scanned.filename
+    }
+
+    // For NPS: find the pkg/game file on disk
+    if (!filePath && game.source === 'NPS') {
+      const col = get(`SELECT c.folder, c.slug FROM collections c
+        JOIN collection_versions cv ON cv.collection_id = c.id
+        WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
+      const colFolder = col?.folder || col?.slug || String(game.version_id);
+      const dataDir = path.resolve(__dirname, '..', '..', '..', 'data');
+      const subDir = rom.subtype === 'dlc' ? 'DLCs' : rom.subtype === 'update' ? 'Updates' : 'Games'
+      const candidate = path.join(dataDir, 'roms', colFolder, game.platform, subDir, rom.filename)
+      if (fs.existsSync(candidate)) filePath = candidate
+    }
+
+    // For No-Intro/DAT: try common locations
+    if (!filePath) {
+      const col = get(`SELECT c.folder, c.slug FROM collections c
+        JOIN collection_versions cv ON cv.collection_id = c.id
+        WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
+      const colFolder = col?.folder || col?.slug || String(game.version_id);
+      const dataDir = path.resolve(__dirname, '..', '..', '..', 'data');
+      const baseRomsDir = path.join(dataDir, 'roms', colFolder);
+      const candidates = [
+        path.join(baseRomsDir, 'Games', rom.filename),
+        path.join(baseRomsDir, rom.filename),
+      ]
+      if (!rom.filename.endsWith('.zip')) {
+        candidates.push(path.join(baseRomsDir, 'Games', rom.filename + '.zip'))
+        candidates.push(path.join(baseRomsDir, rom.filename + '.zip'))
+      }
+      for (const c of candidates) {
+        if (fs.existsSync(c)) { filePath = c; break }
+      }
+    }
+
+    if (!filePath) return res.status(404).json({ error: 'ROM file not found on disk' })
+
+    const ext = path.extname(filePath).toLowerCase()
+    const contentTypes = {
+      '.zip': 'application/zip',
+      '.nes': 'application/octet-stream',
+      '.sfc': 'application/octet-stream',
+      '.smc': 'application/octet-stream',
+      '.gb': 'application/octet-stream',
+      '.gbc': 'application/octet-stream',
+      '.gba': 'application/octet-stream',
+      '.nds': 'application/octet-stream',
+      '.n64': 'application/octet-stream',
+      '.z64': 'application/octet-stream',
+      '.v64': 'application/octet-stream',
+      '.gen': 'application/octet-stream',
+      '.md': 'application/octet-stream',
+      '.sms': 'application/octet-stream',
+      '.gg': 'application/octet-stream',
+      '.pce': 'application/octet-stream',
+      '.vb': 'application/octet-stream',
+      '.iso': 'application/octet-stream',
+      '.cue': 'application/octet-stream',
+      '.bin': 'application/octet-stream',
+      '.pkg': 'application/octet-stream',
+    }
+
+    const contentType = contentTypes[ext] || 'application/octet-stream'
+    const stat = fs.statSync(filePath)
+
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Content-Length': stat.size,
+      'Content-Disposition': `inline; filename="${path.basename(filePath)}"`,
+      'Cache-Control': 'public, max-age=3600',
+    })
+    fs.createReadStream(filePath).pipe(res)
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

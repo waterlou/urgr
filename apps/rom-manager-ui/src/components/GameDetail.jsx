@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { getGame, coverUrl, scrapeGameMetadata, enqueueDownload } from '../api.js'
+import { isEmulatorSupported } from '../platformEmulator.js'
+import EmulatorModal from './EmulatorModal.jsx'
 
 export default function GameDetail({ gameId, onBack, onNavigate }) {
   const [game, setGame] = useState(null)
@@ -10,6 +12,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
   const [lightbox, setLightbox] = useState(null)
   const [coverFailed, setCoverFailed] = useState(false)
   const [downloadMsg, setDownloadMsg] = useState(null)
+  const [showEmulator, setShowEmulator] = useState(false)
 
   useEffect(() => {
     getGame(gameId).then(g => {
@@ -148,11 +151,32 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
 
             {scrapedTitle && <p className="scrape-success">Matched: {scrapedTitle}</p>}
 
-            {!scraping && (
-              <button className="btn btn-sm rescrape-btn" onClick={handleScrape}>
-                <span className="icon">refresh</span> {game.manufacturer ? 'Rescrape' : 'Scrape'}
-              </button>
-            )}
+            <div className="detail-actions">
+              {!scraping && (
+                <button className="btn btn-sm rescrape-btn" onClick={handleScrape}>
+                  <span className="icon">refresh</span> {game.manufacturer ? 'Rescrape' : 'Scrape'}
+                </button>
+              )}
+              {game.roms && game.roms.length > 0 && (() => {
+                const supported = isEmulatorSupported(game.platform)
+                const canPlay = game.available === 1
+                return (
+                  <button
+                    className={`btn btn-sm play-btn ${!supported ? 'play-btn-unsupported' : ''}`}
+                    onClick={() => canPlay && supported && setShowEmulator(true)}
+                    disabled={!canPlay || !supported}
+                    title={!supported
+                      ? `EmulatorJS does not support ${game.platform || 'this platform'}`
+                      : !canPlay
+                        ? 'ROM not available — import or download first'
+                        : `Play ${game.name}`}
+                  >
+                    <span className="icon">play_arrow</span>
+                    {supported ? 'Play' : 'Not Supported'}
+                  </button>
+                )
+              })()}
+            </div>
           </div>
         </div>
 
@@ -247,6 +271,10 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
           </section>
         )}
       </div>
+
+      {showEmulator && game.roms && game.roms.length > 0 && (
+        <EmulatorModal game={game} rom={game.roms[0]} onClose={() => setShowEmulator(false)} />
+      )}
     </div>
   )
 }

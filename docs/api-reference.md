@@ -567,6 +567,15 @@ Deterministic SVG placeholder cover. MD5 hash of game name generates HSL color. 
 
 ---
 
+### GET /api/games/:id/rom/:romId
+
+Serve a ROM file for in-browser emulation via EmulatorJS. For arcade/MAME/FBNeo games, serves the zip file from `scanned_games`. For NPS/No-Intro, finds the file on disk.
+
+**Response `200`**: ROM file binary with appropriate `Content-Type` (`application/zip`, `application/octet-stream`, etc.).
+**Response `404`**: `{ "error": "ROM file not found on disk" }`
+
+---
+
 ## Versions
 
 ### GET /api/versions

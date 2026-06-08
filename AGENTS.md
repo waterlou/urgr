@@ -1,6 +1,6 @@
 # ROM Manager
 
-A ROM collection manager with DAT parsing, metadata scraping, ROM building, and game set playlists.
+A ROM collection manager with DAT parsing, metadata scraping, ROM building, game set playlists, and in-browser emulation via EmulatorJS.
 
 ## Tech Stack
 
