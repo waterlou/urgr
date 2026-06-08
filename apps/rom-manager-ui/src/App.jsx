@@ -192,11 +192,10 @@ export default function App() {
     setActiveId(id)
     setSearchQuery('')
     setSelectedVersionId(null)
+    setSelectedGame(null)
     if (view === 'collection') {
       const col = collections.find(c => c.id === id);
       setCollectionSubView(col?.total_games > 0 ? 'games' : 'detail');
-    } else {
-      setSelectedGame(null)
     }
   }
 
