@@ -228,18 +228,17 @@ export function getJobStatus(jobId) {
 }
 
 export function subscribeJobSSE(jobId, { onProgress, onResult, onError, onDone }) {
-  let done = false
   const evtSource = new EventSource(`${BASE}/jobs/${jobId}`);
   evtSource.onmessage = (event) => {
     const msg = JSON.parse(event.data);
     if (msg.type === 'progress') onProgress?.(msg);
-    else if (msg.type === 'result') { done = true; onResult?.(msg.data); onDone?.(); evtSource.close(); }
-    else if (msg.type === 'error') { done = true; onError?.(msg.error); evtSource.close(); }
-    else if (msg.type === 'cancelled') { done = true; evtSource.close(); }
-    else if (msg.type === 'done') { done = true; onDone?.(); evtSource.close(); }
-    else if (msg.type === 'failed') { done = true; onError?.(msg.error); evtSource.close(); }
+    else if (msg.type === 'result') { onResult?.(msg.data); onDone?.(); evtSource.close(); }
+    else if (msg.type === 'error') { onError?.(msg.error); evtSource.close(); }
+    else if (msg.type === 'cancelled') { evtSource.close(); }
+    else if (msg.type === 'done') { onDone?.(); evtSource.close(); }
+    else if (msg.type === 'failed') { onError?.(msg.error); evtSource.close(); }
   };
-  evtSource.onerror = () => { evtSource.close(); if (!done) onError?.('Connection lost'); };
+  evtSource.onerror = () => { evtSource.close(); onError?.('Connection lost'); };
   return evtSource;
 }
 
