@@ -110,7 +110,7 @@ export async function importNps(platform, versionId) {
     if (existing) continue;
 
     run('INSERT INTO game_entries (version_id, name, description, platform, title_id, content_id) VALUES (?, ?, ?, ?, ?, ?)',
-      [versionId, name, region, info.folder, titleId, contentId]);
+      [versionId, name, '', info.folder, titleId, contentId]);
 
     const gameEntry = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ?', [versionId, name]);
     if (!gameEntry) continue;
