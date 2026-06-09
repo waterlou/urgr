@@ -280,3 +280,32 @@ export function clearDownload(id) {
 export function clearCompletedDownloads() {
   return fetchWithBody('/downloads/clear-completed', 'POST');
 }
+
+// ==============================
+// Operations
+// ==============================
+export function getOperations(collectionId) {
+  const params = collectionId ? `?collection_id=${collectionId}` : '';
+  return fetchJson(`/operations/list${params}`);
+}
+export function subscribeOperationsSSE({ onSnapshot, onNew, onUpdate, onRemoved }) {
+  const evtSource = new EventSource(`${BASE}/operations`);
+  evtSource.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'snapshot') onSnapshot?.(msg.operations);
+    else if (msg.type === 'new') onNew?.(msg.operation);
+    else if (msg.type === 'update') onUpdate?.(msg.operation);
+    else if (msg.type === 'progress') onUpdate?.(msg.operation);
+    else if (msg.type === 'result') onUpdate?.(msg.operation);
+    else if (msg.type === 'error') onUpdate?.(msg.operation);
+    else if (msg.type === 'removed') onRemoved?.(msg.id);
+  };
+  evtSource.onerror = () => {};
+  return evtSource;
+}
+export function cancelOperation(operationId) {
+  return fetchWithBody(`/operations/${operationId}/cancel`, 'POST');
+}
+export function createOperation(type, collectionId, params = {}) {
+  return fetchWithBody('/operations', 'POST', { type, collection_id: collectionId, ...params });
+}

@@ -183,6 +183,23 @@ CREATE TABLE IF NOT EXISTS download_queue (
     completed_at    TEXT,
     FOREIGN KEY (game_entry_id) REFERENCES game_entries(id)
 );
+
+CREATE TABLE IF NOT EXISTS operations (
+    id              TEXT PRIMARY KEY,
+    type            TEXT NOT NULL,
+    collection_id   INTEGER,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    progress_pct    INTEGER DEFAULT 0,
+    progress_msg    TEXT DEFAULT '',
+    result          TEXT,
+    error           TEXT,
+    params          TEXT,
+    created_at      TEXT DEFAULT (datetime('now')),
+    updated_at      TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_operations_status ON operations(status);
+CREATE INDEX IF NOT EXISTS idx_operations_collection ON operations(collection_id);
 `;
 
 export function initDb(dbPath) {
@@ -270,6 +287,11 @@ export function initDb(dbPath) {
 
   // Migration: add pkg_url column to rom_entries
   try { db.run("ALTER TABLE rom_entries ADD COLUMN pkg_url TEXT DEFAULT ''"); } catch (_) {}
+
+  // Startup: mark orphaned operations as failed
+  try {
+    db.run("UPDATE operations SET status='failed', error='Server restarted' WHERE status IN ('pending','running')");
+  } catch (_) {}
 
   return db;
 }

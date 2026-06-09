@@ -4,7 +4,7 @@ import {
   getCollectionGames, getGameSetGames, createCollection, deleteCollection,
   updateCollection, addCollectionVersion, removeCollectionVersion,
   createGameSet, deleteGameSet, updateGameSet, addGameSetGames, removeGameSetGame,
-  getDownloadQueue,
+  getDownloadQueue, getOperations,
 } from './api.js'
 import useRouter from './hooks/useRouter.js'
 import Sidebar from './components/Sidebar.jsx'
@@ -15,6 +15,7 @@ import CollectionForm from './components/CollectionForm.jsx'
 import GameSetForm from './components/GameSetForm.jsx'
 import Settings from './components/Settings.jsx'
 import DownloadManager from './components/DownloadManager.jsx'
+import OperationsPage from './components/OperationsPage.jsx'
 import Dashboard from './components/Dashboard.jsx'
 
 export default function App() {
@@ -83,6 +84,7 @@ export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('rom-manager-theme') || 'dark')
   const [showSettings, setShowSettings] = useState(false)
   const [queueCount, setQueueCount] = useState(0)
+  const [operationCount, setOperationCount] = useState(0)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -99,10 +101,11 @@ export default function App() {
 
   const loadSidebar = useCallback(async () => {
     try {
-      const [cols, sets, vers, plats, dq] = await Promise.all([
+      const [cols, sets, vers, plats, dq, ops] = await Promise.all([
         getCollections(), getGameSets(), getVersions(),
         getPlatforms().catch(() => []),
         getDownloadQueue().catch(() => ({ queue: [] })),
+        getOperations().catch(() => []),
       ])
       console.log('[loadSidebar] collections:', cols.length, cols.map(c => c.name))
       setCollections(cols)
@@ -111,6 +114,7 @@ export default function App() {
       setDatasets({ popular: POPULAR_DATASETS, imported: vers })
       setKnownPlatforms(plats)
       setQueueCount((dq.queue || []).filter(i => i.status === 'pending' || i.status === 'downloading').length)
+      setOperationCount((ops || []).filter(o => o.status === 'running' || o.status === 'pending').length)
     } catch (e) {
       console.error('[loadSidebar] FAILED:', e)
     }
@@ -330,6 +334,7 @@ export default function App() {
         activeId={activeId}
         sidebarOpen={sidebarOpen}
         queueCount={queueCount}
+        operationCount={operationCount}
         onSelect={(view, id) => { handleSelect(view, id); setSidebarOpen(false) }}
         onNewCollection={() => { setEditTarget(null); setShowCollectionForm(true); setSidebarOpen(false) }}
         onNewGameSet={() => { setEditTarget(null); setShowGameSetForm(true); setSidebarOpen(false) }}
@@ -347,6 +352,8 @@ export default function App() {
           <Dashboard onSelectCollection={(id) => handleSelect('collection', id)} />
         ) : activeView === 'downloads' ? (
           <DownloadManager onBack={() => handleSelect('home', null)} />
+        ) : activeView === 'operations' ? (
+          <OperationsPage onBack={() => handleSelect('home', null)} />
         ) : activeView === 'collection' && collectionSubView === 'detail' ? (
           <CollectionDetail
             collectionId={activeId}

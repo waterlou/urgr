@@ -13,6 +13,7 @@ import scraperRouter from './routes/scraper.js';
 import iaRouter from './routes/ia.js';
 import miscRouter from './routes/misc.js';
 import downloadsRouter from './routes/downloads.js';
+import operationsRouter from './routes/operations.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -32,6 +33,7 @@ app.use(scraperRouter);        // /api/scraper/*
 app.use(iaRouter);             // /api/ia/*
 app.use(miscRouter);           // /api/jobs/*, /api/settings/*
 app.use(downloadsRouter);      // /api/downloads/*
+app.use(operationsRouter);     // /api/operations/*
 
 // =============================================================================
 // Global error handler
