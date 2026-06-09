@@ -372,7 +372,7 @@ router.post('/api/collections/:id/build', async (req, res) => {
               } catch {}
             }
           }
-          doneJob(jobId, { exists: matched - reused, reused, missing: total - matched });
+          doneJob(jobId, { exists: matched, reused, missing: total - matched });
         } else if (isNps) {
           // NPS build
           fs.mkdirSync(collectionDir, { recursive: true });

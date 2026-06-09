@@ -278,6 +278,18 @@ export function initDb(dbPath) {
   // Drop scanned_games table (CLI now returns JSON directly)
   try { db.run("DROP TABLE IF EXISTS scanned_games"); } catch (_) {}
 
+  // Migration: normalize NULL regions and deduplicate game_entries
+  try {
+    db.run("PRAGMA foreign_keys=OFF");
+    // Delete NULL-region entries where an empty-region entry already exists for same name+version
+    db.run("DELETE FROM game_entries WHERE region IS NULL AND EXISTS (SELECT 1 FROM game_entries e2 WHERE e2.version_id = game_entries.version_id AND e2.name = game_entries.name AND e2.region = '')");
+    // Normalize remaining NULL to empty string
+    db.run("UPDATE game_entries SET region = '' WHERE region IS NULL");
+    // Deduplicate any remaining duplicates (keep newest)
+    db.run("DELETE FROM game_entries WHERE id NOT IN (SELECT MAX(id) FROM game_entries GROUP BY version_id, name, region)");
+    db.run("PRAGMA foreign_keys=ON");
+  } catch (_) {}
+
   // Startup: mark orphaned operations as failed
   try {
     db.run("UPDATE operations SET status='failed', error='Server restarted' WHERE status IN ('pending','running')");
