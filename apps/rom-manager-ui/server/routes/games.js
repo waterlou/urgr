@@ -107,15 +107,15 @@ router.get('/:id', async (req, res) => {
     if (typeof game.screenshots === 'string') try { game.screenshots = JSON.parse(game.screenshots); } catch { game.screenshots = []; }
     if (typeof game.synopsis === 'string') try { game.synopsis = JSON.parse(game.synopsis); } catch {}
     const roms = all('SELECT * FROM rom_entries WHERE game_entry_id = ?', [game.id]);
-    // Mark which ROMs have been downloaded
+    const state = get('SELECT * FROM game_state WHERE game_entry_id = ?', [game.id]);
+    // Mark which ROMs are available: downloaded via queue, or imported (game_state.available)
     const completedDownloads = new Set(
       all('SELECT filename FROM download_queue WHERE game_entry_id = ? AND status = ?', [game.id, 'completed']).map(r => r.filename)
     );
     for (const rom of roms) {
-      rom.downloaded = completedDownloads.has(rom.filename);
+      rom.downloaded = completedDownloads.has(rom.filename) || state?.available === 1
     }
     const scanned = all('SELECT * FROM scanned_games WHERE name = ? AND version_id = ?', [game.name, game.version_id]);
-    const state = get('SELECT * FROM game_state WHERE game_entry_id = ?', [game.id]);
     const clones = all(`SELECT id, name, description, cloneof, region FROM game_entries WHERE name = ? AND version_id = ? AND id != ?${game.cloneof ? ' AND cloneof IS NOT NULL' : ''} ORDER BY name`, [game.cloneof || game.name, game.version_id, game.id]);
     let parent = null;
     if (game.cloneof) {

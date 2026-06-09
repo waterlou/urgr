@@ -144,6 +144,7 @@ impl Database {
     // ── Game Entries ──
 
     pub fn insert_game(&self, version_id: i64, game: &GameEntry) -> Result<i64> {
+        let region = game.region.as_deref().unwrap_or("");
         self.conn.execute(
             "INSERT INTO game_entries (version_id, name, description, year, manufacturer, cloneof, platform, region)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -161,7 +162,7 @@ impl Database {
                 game.manufacturer,
                 game.cloneof,
                 game.platform,
-                game.region,
+                region,
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -178,6 +179,7 @@ impl Database {
     pub fn insert_games_batch(&self, version_id: i64, games: &[GameEntry]) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         for game in games {
+            let region = game.region.as_deref().unwrap_or("");
             tx.execute(
                 "INSERT INTO game_entries (version_id, name, description, year, manufacturer, cloneof, platform, region)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -195,7 +197,7 @@ impl Database {
                     game.manufacturer,
                     game.cloneof,
                     game.platform,
-                    game.region,
+                    region,
                 ],
             )?;
         }

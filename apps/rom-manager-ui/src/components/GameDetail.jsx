@@ -229,8 +229,9 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                     <th>Filename</th>
                     <th>Type</th>
                     <th>Size</th>
+                    {game.source !== 'NPS' && <th>Status</th>}
                     <th>Available</th>
-                    <th>SHA1</th>
+                    <th>Checksum</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -240,7 +241,10 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                       <td><span className="badge">{rom.subtype || 'game'}</span></td>
                       <td>{rom.size != null ? formatSize(rom.size) : '-'}</td>
                       <td>{rom.downloaded ? <span className="icon" style={{color:'var(--accent)',fontSize:16}}>check</span> : <span className="icon" style={{color:'#888',fontSize:16}}>close</span>}</td>
-                      <td className="rom-hash">{rom.sha1 ? rom.sha1.slice(0, 16) + '...' : '-'}</td>
+                      {game.source !== 'NPS' && (
+                        <td><span className={`rom-status rom-status-${rom.status}`}>{rom.status}</span></td>
+                      )}
+                      <td className="rom-hash">{rom.crc32 || rom.sha1 ? (rom.crc32 || rom.sha1).slice(0, 12) + '...' : '-'}</td>
                     </tr>
                   ))}
                 </tbody>
