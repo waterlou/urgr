@@ -1649,7 +1649,9 @@ html, body, #root {
 
 .rom-table tr:hover td { background: rgba(255,255,255,0.02); }
 
-.rom-filename { font-family: 'SF Mono', monospace; font-size: 12px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+.rom-filename { display: flex; align-items: baseline; white-space: nowrap; }
+.rom-filename-body { font-family: 'SF Mono', monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; max-width: 300px; }
+.rom-filename-ext { font-family: 'SF Mono', monospace; font-size: 12px; flex-shrink: 0; white-space: nowrap; }
 .rom-hash { font-family: 'SF Mono', monospace; font-size: 11px; color: var(--text-muted); }
 
 .rom-status { padding: 2px 8px; border-radius: 3px; font-size: 10px; font-weight: 600; text-transform: uppercase; }

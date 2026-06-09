@@ -237,7 +237,11 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                 <tbody>
                   {game.roms.map(rom => (
                     <tr key={rom.id}>
-                      <td className="rom-filename">{rom.filename}</td>
+                      <td className="rom-filename">{(() => {
+                        const dot = rom.filename.lastIndexOf('.')
+                        if (dot === -1 || dot === rom.filename.length - 1) return rom.filename
+                        return <><span className="rom-filename-body">{rom.filename.slice(0, dot)}</span><span className="rom-filename-ext">{rom.filename.slice(dot)}</span></>
+                      })()}</td>
                       <td><span className="badge">{rom.subtype || 'game'}</span></td>
                       <td>{rom.size != null ? formatSize(rom.size) : '-'}</td>
                       <td>{rom.downloaded ? <span className="icon" style={{color:'var(--accent)',fontSize:16}}>check</span> : <span className="icon" style={{color:'#888',fontSize:16}}>close</span>}</td>

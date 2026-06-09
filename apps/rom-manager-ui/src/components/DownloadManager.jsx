@@ -77,7 +77,11 @@ export default function DownloadManager({ onBack }) {
               <tbody>
                 {queue.map(item => (
                   <tr key={item.id}>
-                    <td className="rom-filename" style={{maxWidth:300, overflow:'hidden', textOverflow:'ellipsis'}}>{item.filename}</td>
+                    <td className="rom-filename">{(() => {
+                      const dot = item.filename.lastIndexOf('.')
+                      if (dot === -1 || dot === item.filename.length - 1) return item.filename
+                      return <><span className="rom-filename-body">{item.filename.slice(0, dot)}</span><span className="rom-filename-ext">{item.filename.slice(dot)}</span></>
+                    })()}</td>
                     <td><span className="badge">{item.subtype}</span></td>
                     <td>{formatSize(item.file_size)}</td>
                     <td>
