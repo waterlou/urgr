@@ -41,7 +41,8 @@ Credentials may be set in `.env` (CWD) or `data/.env`. The server **Settings UI*
 | **TheGamesDB** | ✅ | ✅ | ✅ | ✅ | Built-in API key, zero-config |
 | **IGDB (Twitch)** | ✅ | ✅ | ✅ | ✅ | Needs `IGDB_CLIENT_ID` + `IGDB_CLIENT_SECRET` in `.env` |
 | **ScreenScraper** | ❌ | ❌ | ❌ | ❌ | Not tested — needs `SS_DEVID` + `SS_DEVPASSWORD` |
-| **no-intro-pictures** | ⬜ placeholder | ❌ | ✅ covers/screenshots | ❌ | No auth needed. Fetch box art from GitHub raw URLs. `search` returns placeholder; `detail` fetches images by platform + game name. |
+| **no-intro-pictures** | ⬜ placeholder | ❌ | ✅ covers/screenshots | ❌ | No auth needed. Fetch box art from GitHub raw URLs by platform + game name. |
+| **sony-store** | ⬜ placeholder | ❌ | ✅ screenshots | ❌ | No auth needed. Fetch screenshots from PlayStation Store API via content_id. |
 
 ## scrape Flow
 

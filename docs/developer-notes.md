@@ -90,6 +90,25 @@ Free, no-auth scraper for DAT-O-MATIC / No-Intro collections. Fetches box art, s
 - CLI usage: `scraper-cli detail "nes/1942 (Japan, USA)" --source no-intro-pictures`
 - JS fallback in `scrapeSingleGame` (`games.js`): after other scrapers, if collection is `DATOMATIC` and no covers/screenshots found, tries no-intro-pictures using the game's `description` field for matching (has full No-Intro naming with region)
 
+### sony-store
+
+Source: PlayStation Store public API (`store.playstation.com/store/api/chihiro/00_09_000/container/{region}/{lang}/{content_id}`)
+
+Free, no-auth scraper for NPS collections. Fetches screenshots (hero image + screens) from the Sony Store API.
+
+**How it works:**
+- Takes the NPS `content_id` (or `title_id`) as the game ID
+- Tries regions `us`, `eu`, `jp` with languages `en`, `en-3`, `ja`
+- Extracts `hero_image.urls` and `screens` from the API response
+- Returns up to 5 screenshots
+- No API key or authentication needed
+
+**Integration:**
+- `libs/rom-scraper/src/sources/sony_store.rs` — `GameScraper` trait implementation
+- Automatically included in `ScraperRegistry` (always available, priority 500)
+- CLI usage: `scraper-cli detail "UP4395-PCSE00890_00-..." --source sony-store`
+- Replaces the old JS `fetchSonyScreenshots()` function — all scraping logic in Rust
+
 ### Traditional scrapers
 
 - **ScreenScraper**: Requires `SS_DEVID` + `SS_DEVPASSWORD` (and optional `SS_USERNAME` + `SS_PASSWORD`) configured in Settings
