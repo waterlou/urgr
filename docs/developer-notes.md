@@ -69,3 +69,29 @@ The builder's import matcher compares CRC32 sets:
 - **scan=true**: Routes to appropriate CLI scan, no `import_dir` needed, uses `data/roms/{collection_folder}` as scan dir. Returns `{ exists, reused, missing }`.
 - **scan=false & NPS**: Calls `nps-cli build`. No `import_dir` needed.
 - **scan=false & DAT**: Calls `build-cli build` with progress streaming. Requires `import_dir`.
+
+## Scraping Sources
+
+### no-intro-pictures
+
+Source: `https://github.com/teeedubb/no-intro-pictures`
+
+Free, no-auth scraper for DAT-O-MATIC / No-Intro collections. Fetches box art, screenshots, and title logos from GitHub raw URLs.
+
+**How it works:**
+- Platform slugs (e.g., `nes`, `snes`, `megadriv`) are mapped to No-Intro folder names (e.g., `Nintendo - Nintendo Entertainment System`)
+- Images are stored in subdirectories: `Named_Boxarts/{game}.png`, `Named_Snaps/{game}.png`, `Named_Titles/{game}.png`
+- Uses HTTP HEAD to check existence before fetching
+- No API key or authentication needed (public GitHub repo)
+
+**Integration:**
+- `libs/rom-scraper/src/sources/no_intro_pictures.rs` — `GameScraper` trait implementation
+- Automatically included in `ScraperRegistry` (always available, priority 400)
+- CLI usage: `scraper-cli detail "nes/1942 (Japan, USA)" --source no-intro-pictures`
+- JS fallback in `scrapeSingleGame` (`games.js`): after other scrapers, if collection is `DATOMATIC` and no covers/screenshots found, tries no-intro-pictures using the game's `description` field for matching (has full No-Intro naming with region)
+
+### Traditional scrapers
+
+- **ScreenScraper**: Requires `SS_DEVID` + `SS_DEVPASSWORD` (and optional `SS_USERNAME` + `SS_PASSWORD`) configured in Settings
+- **IGDB**: Requires `IGDB_CLIENT_ID` + `IGDB_CLIENT_SECRET` configured in Settings
+- **TheGamesDb**: Built-in API key, always available

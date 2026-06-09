@@ -15,7 +15,7 @@ Retro game metadata scraper supporting multiple providers.
 
 | Flag | Description |
 |------|-------------|
-| `--source <s>` | Provider: `thegamesdb` (default), `screenscraper`, `igdb` |
+| `--source <s>` | Provider: `thegamesdb` (default), `screenscraper`, `igdb`, `no-intro-pictures` |
 | `--platform <p>` | Platform filter (e.g. `nes`, `snes`, `arcade`) |
 | `--download` | Download cover/screenshot media to `data/media/<platform>-<year>-<title_slug>/` |
 
@@ -41,6 +41,7 @@ Credentials may be set in `.env` (CWD) or `data/.env`. The server **Settings UI*
 | **TheGamesDB** | ✅ | ✅ | ✅ | ✅ | Built-in API key, zero-config |
 | **IGDB (Twitch)** | ✅ | ✅ | ✅ | ✅ | Needs `IGDB_CLIENT_ID` + `IGDB_CLIENT_SECRET` in `.env` |
 | **ScreenScraper** | ❌ | ❌ | ❌ | ❌ | Not tested — needs `SS_DEVID` + `SS_DEVPASSWORD` |
+| **no-intro-pictures** | ⬜ placeholder | ❌ | ✅ covers/screenshots | ❌ | No auth needed. Fetch box art from GitHub raw URLs. `search` returns placeholder; `detail` fetches images by platform + game name. |
 
 ## scrape Flow
 
@@ -91,6 +92,9 @@ scraper-cli scrape ~/roms/smb.zip --download --source igdb
 # Get full game detail by provider ID
 scraper-cli detail 1070 --source igdb
 scraper-cli detail 136 --source thegamesdb
+
+# Fetch box art from no-intro-pictures (free, no auth)
+scraper-cli detail "nes/1942 (Japan, USA)" --source no-intro-pictures
 ```
 
 ## Output
