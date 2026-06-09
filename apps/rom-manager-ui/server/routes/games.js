@@ -430,6 +430,38 @@ export async function scrapeSingleGame(gameId) {
     } catch {}
   }
 
+  // For DAT-O-MATIC collections, try to get covers/screenshots from no-intro-pictures
+  if (!updated.covers?.length && !updated.screenshots?.length) {
+    try {
+      const colVersion = get(`SELECT c.dataset_preset FROM collections c
+        JOIN collection_versions cv ON cv.collection_id = c.id
+        WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
+      if (colVersion?.dataset_preset === 'DATOMATIC') {
+        // Use description as game name (has full No-Intro naming with region)
+        const gameNameForUrl = game.description || game.name;
+        const detailResult = execCli(['detail', `${game.platform || 'unknown'}/${gameNameForUrl}`, '--source', 'no-intro-pictures'], { binary: 'scraper' });
+        if (detailResult && !detailResult.error) {
+          const updates = [];
+          const upParams = [];
+          if (detailResult.covers?.length) {
+            updates.push('covers = ?');
+            upParams.push(JSON.stringify(detailResult.covers));
+          }
+          if (detailResult.screenshots?.length) {
+            updates.push('screenshots = ?');
+            upParams.push(JSON.stringify(detailResult.screenshots));
+          }
+          if (updates.length > 0) {
+            upParams.push(game.id);
+            run(`UPDATE game_entries SET ${updates.join(', ')} WHERE id = ?`, upParams);
+            if (detailResult.covers?.length) updated.covers = detailResult.covers;
+            if (detailResult.screenshots?.length) updated.screenshots = detailResult.screenshots;
+          }
+        }
+      }
+    } catch {}
+  }
+
   const hadData = synopsis || year || manufacturer || detailResult.covers?.length || detailResult.screenshots?.length;
   return { scraped: true, saved: !!hadData, title: matchedTitle || first.title, game: updated, gameId };
 }

@@ -90,6 +90,24 @@ impl HttpClient {
         Ok(resp.json().await?)
     }
 
+    pub async fn head(&self, url: &str) -> crate::Result<reqwest::Response> {
+        let resp = self
+            .inner
+            .head(url)
+            .header("User-Agent", &self.user_agent)
+            .send()
+            .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(crate::Error::Source(format!(
+                "HTTP {} from {}",
+                status.as_u16(),
+                url
+            )));
+        }
+        Ok(resp)
+    }
+
     pub async fn post_form_json<T: serde::de::DeserializeOwned>(
         &self,
         url: &str,

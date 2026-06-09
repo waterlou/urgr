@@ -85,6 +85,7 @@ pub enum ScrapeSource {
     TheGamesDb,
     Igdb,
     Local,
+    NoIntroPictures,
 }
 
 impl std::fmt::Display for ScrapeSource {
@@ -94,6 +95,7 @@ impl std::fmt::Display for ScrapeSource {
             Self::TheGamesDb => write!(f, "thegamesdb"),
             Self::Igdb => write!(f, "igdb"),
             Self::Local => write!(f, "local"),
+            Self::NoIntroPictures => write!(f, "no-intro-pictures"),
         }
     }
 }

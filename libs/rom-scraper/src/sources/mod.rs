@@ -1,4 +1,5 @@
 mod igdb;
+mod no_intro_pictures;
 mod screenscraper;
 mod thegamesdb;
 
@@ -10,6 +11,7 @@ use crate::hasher::RomHashes;
 use crate::models::{Game, HashType, ScrapeSource};
 
 pub use igdb::Igdb;
+pub use no_intro_pictures::NoIntroPictures;
 pub use screenscraper::ScreenScraper;
 pub use thegamesdb::TheGamesDb;
 
@@ -52,6 +54,8 @@ impl ScraperRegistry {
         if config.thegamesdb.is_some() {
             scrapers.push(Box::new(TheGamesDb::new(config)));
         }
+        // NoIntroPictures is always available (public GitHub repo, no auth needed)
+        scrapers.push(Box::new(NoIntroPictures::new(config)));
 
         let mut registry = Self { scrapers };
 

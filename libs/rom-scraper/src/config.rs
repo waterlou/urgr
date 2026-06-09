@@ -49,6 +49,7 @@ impl Default for Config {
                 SourceEntry { source: ScrapeSource::TheGamesDb, priority: 100 },
                 SourceEntry { source: ScrapeSource::ScreenScraper, priority: 200 },
                 SourceEntry { source: ScrapeSource::Igdb, priority: 300 },
+                SourceEntry { source: ScrapeSource::NoIntroPictures, priority: 400 },
             ],
         }
     }

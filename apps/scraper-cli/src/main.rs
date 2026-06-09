@@ -474,8 +474,9 @@ fn parse_source(args: &[String]) -> Option<rom_scraper::ScrapeSource> {
             "screenscraper" => Some(rom_scraper::ScrapeSource::ScreenScraper),
             "igdb" => Some(rom_scraper::ScrapeSource::Igdb),
             "thegamesdb" => Some(rom_scraper::ScrapeSource::TheGamesDb),
+            "no-intro-pictures" => Some(rom_scraper::ScrapeSource::NoIntroPictures),
             _ => {
-                eprintln!("Unknown source '{}'. Valid: screenscraper, igdb, thegamesdb", val);
+                eprintln!("Unknown source '{}'. Valid: screenscraper, igdb, thegamesdb, no-intro-pictures", val);
                 None
             }
         };
@@ -486,6 +487,7 @@ fn parse_source(args: &[String]) -> Option<rom_scraper::ScrapeSource> {
             "screenscraper" => Some(rom_scraper::ScrapeSource::ScreenScraper),
             "igdb" => Some(rom_scraper::ScrapeSource::Igdb),
             "thegamesdb" => Some(rom_scraper::ScrapeSource::TheGamesDb),
+            "no-intro-pictures" => Some(rom_scraper::ScrapeSource::NoIntroPictures),
             _ => None,
         };
     }
