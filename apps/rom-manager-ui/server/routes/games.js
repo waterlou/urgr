@@ -115,13 +115,12 @@ router.get('/:id', async (req, res) => {
     for (const rom of roms) {
       rom.downloaded = completedDownloads.has(rom.filename) || state?.available === 1
     }
-    const scanned = all('SELECT * FROM scanned_games WHERE name = ? AND version_id = ?', [game.name, game.version_id]);
     const clones = all(`SELECT id, name, description, cloneof, region FROM game_entries WHERE name = ? AND version_id = ? AND id != ?${game.cloneof ? ' AND cloneof IS NOT NULL' : ''} ORDER BY name`, [game.cloneof || game.name, game.version_id, game.id]);
     let parent = null;
     if (game.cloneof) {
       parent = get('SELECT id, name, region FROM game_entries WHERE name = ? AND version_id = ? AND cloneof IS NULL', [game.cloneof, game.version_id]);
     }
-    res.json({ ...game, roms, scanned_games: scanned, rating: state?.rating || 0, favourite: state?.favourite || 0, available: state?.available || 0, play_count: state?.play_count || 0, clones, parent });
+    res.json({ ...game, roms, rating: state?.rating || 0, favourite: state?.favourite || 0, available: state?.available || 0, play_count: state?.play_count || 0, clones, parent });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -133,30 +132,64 @@ router.get('/:id/play', async (req, res) => {
     if (!game) return res.status(404).json({ error: 'Game not found' });
 
     let filePath = null
+    const dataDir = path.resolve(__dirname, '..', '..', '..', '..', 'data')
 
-    // 1. Arcade/MAME/FBNeo: zip from scanned_games
-    const scanned = get('SELECT filename FROM scanned_games WHERE name = ? AND version_id = ?', [game.name, game.version_id]);
-    if (scanned && scanned.filename && fs.existsSync(scanned.filename)) {
-      filePath = scanned.filename
+    // Helper: search directory recursively for a .zip matching game name
+    function findInDir(dir) {
+      if (!fs.existsSync(dir)) return null
+      try {
+        const entries = fs.readdirSync(dir)
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry)
+          if (fs.statSync(fullPath).isDirectory()) {
+            const found = findInDir(fullPath)
+            if (found) return found
+          } else if (entry.endsWith('.zip')) {
+            const stem = path.basename(entry, '.zip')
+            if (stem === game.name) return fullPath
+          }
+        }
+      } catch {}
+      return null
+    }
+
+    // 1. Arcade/MAME/FBNeo: find zip in version directory
+    const col1 = get(`SELECT c.folder, c.slug FROM collections c
+      JOIN collection_versions cv ON cv.collection_id = c.id
+      WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
+    const colFolder1 = col1?.folder || col1?.slug;
+    if (colFolder1) {
+      const vers = get('SELECT version FROM set_versions WHERE id = ?', [game.version_id]);
+      if (vers) {
+        const searchDirs = [
+          path.join(dataDir, 'roms', colFolder1, vers.version, 'roms', 'arcade'),
+          path.join(dataDir, 'roms', colFolder1, vers.version, 'roms'),
+        ];
+        for (const d of searchDirs) {
+          filePath = findInDir(d)
+          if (filePath) break
+        }
+      }
     }
 
     // 1b. FBNeo/MAME only: fallback to older versions via .version
     if (!filePath && (game.source === 'FBNeo' || game.source === 'MAME')) {
-      const col = get(`SELECT c.folder, c.slug FROM collections c
-        JOIN collection_versions cv ON cv.collection_id = c.id
-        WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
-      const colFolder = col?.folder || col?.slug;
-      if (colFolder) {
-        const versionFile = path.join(path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms'), colFolder, '.version')
+      if (colFolder1) {
+        const versionFile = path.join(path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms'), colFolder1, '.version')
         if (fs.existsSync(versionFile)) {
           const versions = fs.readFileSync(versionFile, 'utf-8').split('\n').map(s => s.trim()).filter(Boolean)
           const idx = versions.indexOf(game.version)
           if (idx > 0) {
             for (const v of versions.slice(0, idx).reverse()) {
-              const older = get('SELECT id FROM set_versions WHERE source = ? AND version = ?', [game.source, v])
-              if (!older) continue
-              const sc = get('SELECT filename FROM scanned_games WHERE name = ? AND version_id = ? AND filename != ""', [game.name, older.id])
-              if (sc?.filename && fs.existsSync(sc.filename)) { filePath = sc.filename; break }
+              const olderDirs = [
+                path.join(dataDir, 'roms', colFolder1, v, 'roms', 'arcade'),
+                path.join(dataDir, 'roms', colFolder1, v, 'roms'),
+              ];
+              for (const d of olderDirs) {
+                filePath = findInDir(d)
+                if (filePath) break
+              }
+              if (filePath) break
             }
           }
         }
@@ -385,7 +418,6 @@ export async function scrapeSingleGame(gameId) {
   if (typeof updated.covers === 'string') try { updated.covers = JSON.parse(updated.covers); } catch { updated.covers = []; }
   if (typeof updated.screenshots === 'string') try { updated.screenshots = JSON.parse(updated.screenshots); } catch { updated.screenshots = []; }
   updated.roms = all('SELECT * FROM rom_entries WHERE game_entry_id = ?', [game.id]);
-  updated.scanned_games = all('SELECT * FROM scanned_games WHERE name = ? AND version_id = ?', [game.name, game.version_id]);
 
   // For NPS/PlayStation games, try to get screenshots from Sony Store API if not already scraped
   if (updated.source === 'NPS' && (!updated.screenshots || updated.screenshots.length === 0)) {

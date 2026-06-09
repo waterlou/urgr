@@ -59,22 +59,17 @@ export class BuildOperation extends Operation {
     // Reset availability
     run('UPDATE game_state SET available = 0 WHERE game_entry_id IN (SELECT id FROM game_entries WHERE version_id = ?)', [version_id]);
 
-    execCli(['scan', String(version_id), scanDir]);
-    reloadDb();
+    const scanResult = execCli(['scan', String(version_id), scanDir]);
 
-    // Update availability from scanned games (same as original code)
-    run(`INSERT INTO game_state (game_entry_id, available, updated_at)
-      SELECT ge.id, 1, datetime('now')
-      FROM game_entries ge
-      JOIN scanned_games sg ON sg.version_id = ge.version_id AND sg.name = ge.name
-      WHERE ge.version_id = ? AND sg.filename != ''
-      ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id]);
-    run(`INSERT INTO game_state (game_entry_id, available, updated_at)
-      SELECT ge.id, 0, datetime('now')
-      FROM game_entries ge
-      LEFT JOIN scanned_games sg ON sg.version_id = ge.version_id AND sg.name = ge.name
-      WHERE ge.version_id = ? AND (sg.filename IS NULL OR sg.filename = '')
-      ON CONFLICT(game_entry_id) DO UPDATE SET available = 0, updated_at = datetime('now')`, [version_id]);
+    // Update availability from scan result JSON
+    const matchedNames = (scanResult?.matches || []).map(m => m.name);
+    if (matchedNames.length > 0) {
+      const ph = matchedNames.map(() => '?').join(',');
+      run(`INSERT INTO game_state (game_entry_id, available, updated_at)
+        SELECT ge.id, 1, datetime('now') FROM game_entries ge
+        WHERE ge.version_id = ? AND ge.name IN (${ph})
+        ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id, ...matchedNames]);
+    }
 
     // Count results
     const total = get('SELECT COUNT(*) as c FROM game_entries WHERE version_id = ?', [version_id]).c;
@@ -84,16 +79,25 @@ export class BuildOperation extends Operation {
     let reused = 0;
     const priorVersions = all('SELECT DISTINCT sv.version, sv.id FROM set_versions sv JOIN collection_versions cv ON cv.version_id = sv.id WHERE cv.collection_id = ? AND sv.id < ? ORDER BY sv.id', [this.collectionId, version_id]);
     if (priorVersions.length > 0 && fs.existsSync(collectionDir)) {
-      const matchedGames = all('SELECT name FROM scanned_games WHERE version_id = ? AND filename != ?', [version_id, '']);
-      for (const game of matchedGames) {
-        for (const pv of priorVersions) {
-          const pvRoms = path.join(collectionDir, pv.version, 'roms');
-          if (!fs.existsSync(pvRoms)) continue;
-          try {
-            const found = fs.readdirSync(pvRoms, { recursive: true }).some(f => path.basename(f) === `${game.name}.zip`);
-            if (found) { reused++; break; }
-          } catch {}
-        }
+      const currentNames = new Set(all('SELECT DISTINCT name FROM game_entries WHERE version_id = ?', [version_id]).map(r => r.name));
+      for (const pv of priorVersions) {
+        const pvRoms = path.join(collectionDir, pv.version, 'roms');
+        if (!fs.existsSync(pvRoms)) continue;
+        try {
+          const readDir = (d) => {
+            const results = [];
+            for (const e of fs.readdirSync(d)) {
+              const fp = path.join(d, e);
+              if (fs.statSync(fp).isDirectory()) results.push(...readDir(fp));
+              else if (e.endsWith('.zip')) results.push(path.basename(e, '.zip'));
+            }
+            return results;
+          };
+          const priorFiles = readDir(pvRoms);
+          for (const stem of priorFiles) {
+            if (currentNames.has(stem)) reused++;
+          }
+        } catch {}
       }
     }
 

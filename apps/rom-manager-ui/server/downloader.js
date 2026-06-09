@@ -174,7 +174,7 @@ async function checkGameComplete(gameEntryId) {
     [gameEntryId, 'completed', 'failed'])
   if (pending.cnt > 0) return
 
-  // Run a single-game scan to update scanned_games and game_state
+  // Run a single-game scan to check if the file was downloaded
   try {
     const game = get('SELECT g.id, g.version_id, sv.source, c.folder FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id LEFT JOIN collection_versions cv ON cv.version_id = sv.id LEFT JOIN collections c ON c.id = cv.collection_id WHERE g.id = ?', [gameEntryId])
     if (game && game.folder && game.source === 'NPS') {
@@ -182,10 +182,10 @@ async function checkGameComplete(gameEntryId) {
       execCli(['scan', String(game.version_id), collectionDir, '--game-id', String(game.id)], { binary: 'nps' })
     }
   } catch (_) {}
-  // Update game_state from scanned_games
+  // Update game_state - set available=1 since download completed
   run(`INSERT INTO game_state (game_entry_id, available, updated_at)
     SELECT ge.id, 1, datetime('now') FROM game_entries ge
-    WHERE ge.id = ? AND EXISTS (SELECT 1 FROM scanned_games sg WHERE sg.version_id = ge.version_id AND sg.name = ge.name AND sg.filename != '')
+    WHERE ge.id = ?
     ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [gameEntryId])
   broadcastQueue()
 }

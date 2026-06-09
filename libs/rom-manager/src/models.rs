@@ -34,17 +34,6 @@ pub struct RomEntry {
     pub merge_target: Option<String>,
 }
 
-#[derive(Debug, Clone)]
-pub struct ScannedGame {
-    pub id: i64,
-    pub version_id: i64,
-    pub name: String,
-    pub filename: String,
-    pub sha1: Option<String>,
-    pub size: Option<i64>,
-    pub status: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DatFormat {
     MameListXml,

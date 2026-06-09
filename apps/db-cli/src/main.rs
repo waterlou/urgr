@@ -66,7 +66,6 @@ fn cmd_summary(db: Database, _db_path: String) -> ExitCode {
     println!("  set_versions    {:>8}  (imported DAT sets)", table_count(&db, "set_versions"));
     println!("  game_entries    {:>8}  (parsed games)",      table_count(&db, "game_entries"));
     println!("  rom_entries     {:>8}  (ROM files)",         table_count(&db, "rom_entries"));
-    println!("  scanned_games   {:>8}  (on-disk scans)",     table_count(&db, "scanned_games"));
 
     let versions = db.list_versions().unwrap_or_default();
     if !versions.is_empty() {

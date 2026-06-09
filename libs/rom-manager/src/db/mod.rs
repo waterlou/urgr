@@ -313,71 +313,15 @@ impl Database {
         Ok(roms)
     }
 
-    // ── Scanned Games ──
-
-    pub fn upsert_scanned_game(
-        &self,
-        version_id: i64,
-        name: &str,
-        filename: &str,
-        sha1: Option<&str>,
-        size: Option<i64>,
-        status: &str,
-    ) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO scanned_games (version_id, name, filename, sha1, size, status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(version_id, name) DO UPDATE SET
-               filename = excluded.filename, sha1 = excluded.sha1,
-               size = excluded.size, status = excluded.status",
-            params![version_id, name, filename, sha1, size, status],
-        )?;
-        Ok(())
-    }
-
-    pub fn list_scanned_games(&self, version_id: i64) -> Result<Vec<ScannedGame>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, version_id, name, filename, sha1, size, status
-             FROM scanned_games WHERE version_id = ?1 ORDER BY name",
-        )?;
-        let rows = stmt.query_map(params![version_id], |r| {
-            Ok(ScannedGame {
-                id: r.get(0)?,
-                version_id: r.get(1)?,
-                name: r.get(2)?,
-                filename: r.get(3)?,
-                sha1: r.get(4)?,
-                size: r.get(5)?,
-                status: r.get(6)?,
-            })
-        })?;
-        let mut games = Vec::new();
-        for row in rows {
-            games.push(row?);
-        }
-        Ok(games)
-    }
-
-    pub fn clear_scanned_games(&self, version_id: i64) -> Result<()> {
-        self.conn
-            .execute("DELETE FROM scanned_games WHERE version_id = ?1", params![version_id])?;
-        Ok(())
-    }
-
     // ── Queries ──
 
     pub fn get_version_game_count(&self, version_id: i64) -> Result<(i64, i64)> {
-        let scanned: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM scanned_games WHERE version_id = ?1",
-            params![version_id],
-            |r| r.get(0),
-        )?;
-        let expected: i64 = self.conn.query_row(
+        let total: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM game_entries WHERE version_id = ?1",
             params![version_id],
             |r| r.get(0),
         )?;
-        Ok((scanned, expected))
+        Ok((total, total))
     }
 
     pub fn find_older_versions(&self, source: &str, version: &str) -> Result<Vec<SetVersion>> {
@@ -744,35 +688,13 @@ mod tests {
     }
 
     #[test]
-    fn test_scanned_games() {
-        let db = make_db();
-        let vid = db.import_version("mame", "0.261", None).unwrap();
-
-        db.upsert_scanned_game(vid, "sf2", "/roms/sf2.zip", Some("AAAA"), Some(4096), "ok").unwrap();
-        let scanned = db.list_scanned_games(vid).unwrap();
-        assert_eq!(scanned.len(), 1);
-        assert_eq!(scanned[0].name, "sf2");
-        assert_eq!(scanned[0].status, "ok");
-
-        db.upsert_scanned_game(vid, "sf2", "/roms/sf2.zip", Some("BBBB"), Some(4096), "mismatch").unwrap();
-        let scanned = db.list_scanned_games(vid).unwrap();
-        assert_eq!(scanned[0].status, "mismatch");
-
-        db.clear_scanned_games(vid).unwrap();
-        assert!(db.list_scanned_games(vid).unwrap().is_empty());
-    }
-
-    #[test]
     fn test_get_version_game_count() {
         let db = make_db();
         let vid = db.import_version("mame", "0.261", None).unwrap();
         db.insert_game(vid, &sample_game("sf2")).unwrap();
         db.insert_game(vid, &sample_game("sf3")).unwrap();
-        db.upsert_scanned_game(vid, "sf2", "/roms/sf2.zip", None, None, "ok").unwrap();
-
-        let (scanned, expected) = db.get_version_game_count(vid).unwrap();
-        assert_eq!(scanned, 1);
-        assert_eq!(expected, 2);
+        let (total, _) = db.get_version_game_count(vid).unwrap();
+        assert_eq!(total, 2);
     }
 
     #[test]

@@ -1,9 +1,10 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rom_manager::builder::build_version;
-use rom_manager::scanner::scan_directory;
+use rom_manager::scanner::{scan_directory, ScanMatch};
 use rom_manager::verifier::{verify_version, GameStatus};
 use rom_manager::Database;
 use serde::Serialize;
@@ -37,9 +38,11 @@ struct VersionEntry {
 
 #[derive(Serialize)]
 struct ScanOutput {
-    total_files: usize,
-    matched_games: usize,
-    missing_games: usize,
+    total: usize,
+    matched: usize,
+    missing: usize,
+    matches: Vec<ScanMatch>,
+    missing_names: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -285,55 +288,39 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
     if !dir.exists() { eprintln!("Directory not found: {}", clean_args[2]); return ExitCode::FAILURE; }
 
     let db = match open_db() { Ok(d) => d, Err(e) => { eprintln!("{}", e); return ExitCode::FAILURE; } };
+    let games = match db.list_games(version_id) {
+        Ok(g) => g, Err(e) => { eprintln!("Database error: {}", e); return ExitCode::FAILURE; }
+    };
+    let expected_names: HashSet<String> = games.iter().map(|g| g.name.clone()).collect();
 
     if let Some(gid) = game_id {
         // Single game scan
-        let games = match db.list_games(version_id) {
-            Ok(g) => g, Err(e) => { eprintln!("Database error: {}", e); return ExitCode::FAILURE; }
-        };
         let game = match games.iter().find(|g| g.id == gid) {
             Some(g) => g.clone(),
             None => { eprintln!("Game not found: {}", gid); return ExitCode::FAILURE; }
         };
-        let mut matched = 0;
-        let mut total_files = 0;
-        fn walk_dir_zip(dir: &std::path::Path, game_name: &str, full_path: &mut String, count: &mut usize) {
-            if let Ok(entries) = std::fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_dir() { walk_dir_zip(&path, game_name, full_path, count); }
-                    else if let Some(ext) = path.extension() {
-                        if ext == "zip" {
-                            *count += 1;
-                            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-                            if stem == game_name {
-                                *full_path = path.to_string_lossy().to_string();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        let mut found_path = String::new();
-        walk_dir_zip(dir, &game.name, &mut found_path, &mut total_files);
-        if !found_path.is_empty() {
-            let _ = db.upsert_scanned_game(version_id, &game.name, &found_path, None, None, "ok");
-            matched = 1;
-        } else {
-            let _ = db.upsert_scanned_game(version_id, &game.name, "", None, None, "missing");
-        }
-        let result = ScanOutput { total_files, matched_games: matched, missing_games: 1 - matched };
+        let expected: HashSet<String> = [game.name.clone()].into();
+        let matches = match scan_directory(&expected, dir) {
+            Ok(m) => m, Err(e) => { eprintln!("Scan error: {}", e); return ExitCode::FAILURE; }
+        };
+        let matched = matches.len();
+        let missing: Vec<String> = if matched == 0 { vec![game.name.clone()] } else { vec![] };
+        let result = ScanOutput { total: 1, matched, missing: 1 - matched, matches, missing_names: missing };
         if json { print_json(&result); }
-        else { println!("Scan complete: {} files, {} matched, {} missing", total_files, matched, 1 - matched); }
+        else { println!("Scan complete: {} matched, {} missing", matched, 1 - matched); }
     } else {
         // Full scan
-        let result = match scan_directory(&db, version_id, dir) {
-            Ok(r) => r, Err(e) => { eprintln!("Scan error: {}", e); return ExitCode::FAILURE; }
+        let matches = match scan_directory(&expected_names, dir) {
+            Ok(m) => m, Err(e) => { eprintln!("Scan error: {}", e); return ExitCode::FAILURE; }
         };
+        let matched_names: HashSet<String> = matches.iter().map(|m| m.name.clone()).collect();
+        let missing: Vec<String> = expected_names.difference(&matched_names).cloned().collect();
+        let matched = matches.len();
+        let result = ScanOutput { total: expected_names.len(), matched, missing: missing.len(), matches, missing_names: missing.clone() };
         if json {
-            print_json(&ScanOutput { total_files: result.total_files, matched_games: result.matched_games, missing_games: result.missing_games });
+            print_json(&result);
         } else {
-            println!("Scan complete: {} files, {} matched, {} missing", result.total_files, result.matched_games, result.missing_games);
+            println!("Scan complete: {} files, {} matched, {} missing", expected_names.len(), matched, missing.len());
         }
     }
     ExitCode::SUCCESS

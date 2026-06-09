@@ -59,18 +59,6 @@ CREATE TABLE IF NOT EXISTS rom_entries (
     UNIQUE(game_entry_id, filename)
 );
 
-CREATE TABLE IF NOT EXISTS scanned_games (
-    id          INTEGER PRIMARY KEY,
-    version_id  INTEGER NOT NULL,
-    name        TEXT NOT NULL,
-    filename    TEXT NOT NULL,
-    sha1        TEXT,
-    size        INTEGER,
-    status      TEXT NOT NULL DEFAULT 'ok',
-    FOREIGN KEY (version_id) REFERENCES set_versions(id) ON DELETE CASCADE,
-    UNIQUE(version_id, name)
-);
-
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
@@ -79,7 +67,6 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE INDEX IF NOT EXISTS idx_game_entries_version ON game_entries(version_id);
 CREATE INDEX IF NOT EXISTS idx_rom_entries_game ON rom_entries(game_entry_id);
 CREATE INDEX IF NOT EXISTS idx_rom_entries_sha1 ON rom_entries(sha1);
-CREATE INDEX IF NOT EXISTS idx_scanned_games_version ON scanned_games(version_id);
 
 CREATE TABLE IF NOT EXISTS collections (
     id          INTEGER PRIMARY KEY,
@@ -287,6 +274,9 @@ export function initDb(dbPath) {
 
   // Migration: add pkg_url column to rom_entries
   try { db.run("ALTER TABLE rom_entries ADD COLUMN pkg_url TEXT DEFAULT ''"); } catch (_) {}
+
+  // Drop scanned_games table (CLI now returns JSON directly)
+  try { db.run("DROP TABLE IF EXISTS scanned_games"); } catch (_) {}
 
   // Startup: mark orphaned operations as failed
   try {

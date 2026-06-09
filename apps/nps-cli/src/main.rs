@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use rom_manager::scanner::{scan_nps_directory, ScanMatch};
 use rom_manager::{Database, NpsGame};
 use serde::Serialize;
-use walkdir::WalkDir;
 
 static CANCEL_FLAG: AtomicBool = AtomicBool::new(false);
 
@@ -26,9 +26,11 @@ fn install_signal_handlers() {
 
 #[derive(Serialize)]
 struct ScanOutput {
-    total_files: usize,
-    matched_games: usize,
-    missing_games: usize,
+    total: usize,
+    matched: usize,
+    missing: usize,
+    matches: Vec<ScanMatch>,
+    missing_names: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -94,25 +96,6 @@ fn send_progress(pct: u32, msg: &str) {
     }
 }
 
-fn extract_title_id(filename: &str) -> Option<String> {
-    let base = filename.strip_suffix(".pkg")?;
-    // NPS PKG format: {prefix}-{title_id}_{num}-{name}_bg_{n}_{hash}
-    // e.g., UP4395-PCSE00890_00-10SECNINJAVITAUS_bg_1_97017d2fc8def61a2dbca9151ae7091b31242bf1
-    // title_id is after first '-' and before next '_'
-    if let Some(dash_pos) = base.find('-') {
-        let after_dash = &base[dash_pos + 1..];
-        if let Some(us_pos) = after_dash.find('_') {
-            return Some(after_dash[..us_pos].to_string());
-        }
-    }
-    // Fallback: extract everything before first '_'
-    if let Some(pos) = base.find('_') {
-        Some(base[..pos].to_string())
-    } else {
-        Some(base.to_string())
-    }
-}
-
 fn print_usage() {
     eprintln!("Usage: nps-cli <command> [options] [--json] [--progress] --db <path>");
     eprintln!();
@@ -175,7 +158,6 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
         i += 1;
     }
 
-    // Skip command name (clean_args[0] is "scan")
     if clean_args.len() < 3 {
         eprintln!("Usage: nps-cli scan <version-id> <dir> [--game-id <id>]");
         return ExitCode::FAILURE;
@@ -186,7 +168,7 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
     };
     let dir = Path::new(&clean_args[2]);
     if !dir.exists() {
-        eprintln!("Directory not found: {}", clean_args[1]);
+        eprintln!("Directory not found: {}", clean_args[2]);
         return ExitCode::FAILURE;
     }
 
@@ -200,7 +182,6 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
         Err(e) => { eprintln!("Failed to list games: {}", e); return ExitCode::FAILURE; }
     };
 
-    // Filter to specific game if --game-id provided
     let target_games: Vec<&NpsGame> = if let Some(gid) = game_id {
         games.iter().filter(|g| g.id == gid).collect()
     } else {
@@ -212,64 +193,28 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let mut title_to_game: HashMap<String, &NpsGame> = HashMap::new();
+    let mut title_to_game: HashMap<String, String> = HashMap::new();
     for game in &target_games {
         if let Some(ref tid) = game.title_id {
-            title_to_game.insert(tid.clone(), game);
+            title_to_game.insert(tid.clone(), game.name.clone());
         }
-        title_to_game.insert(game.name.clone(), game);
+        title_to_game.insert(game.name.clone(), game.name.clone());
     }
 
-    // Full scan: clear all scanned_games. Single game: just clear that game's entry.
-    let matched_names: HashSet<String> = if game_id.is_some() {
-        // Single game — don't clear all, just upsert result
-        HashSet::new()
-    } else {
-        let _ = db.clear_scanned_games(version_id);
-        HashSet::new()
+    let matches = match scan_nps_directory(&title_to_game, dir) {
+        Ok(m) => m,
+        Err(e) => { eprintln!("Scan error: {}", e); return ExitCode::FAILURE; }
     };
 
-    let mut matched_names = matched_names;
-    let mut total_files = 0;
+    let matched_names: HashSet<String> = matches.iter().map(|m| m.name.clone()).collect();
+    let expected_names: HashSet<String> = target_games.iter().map(|g| g.name.clone()).collect();
+    let missing: Vec<String> = expected_names.difference(&matched_names).cloned().collect();
 
-    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
-        if CANCEL_FLAG.load(Ordering::Relaxed) {
-            eprintln!("Scan cancelled");
-            break;
-        }
-
-        if !entry.file_type().is_file() { continue; }
-        let full_path = entry.path().to_string_lossy().to_string();
-        let filename = entry.file_name().to_string_lossy();
-        if !filename.ends_with(".pkg") { continue; }
-        total_files += 1;
-
-        let title_id = match extract_title_id(&filename) {
-            Some(tid) => tid,
-            None => continue,
-        };
-
-        if let Some(game) = title_to_game.get(&title_id) {
-            let name = &game.name;
-            matched_names.insert(name.clone());
-            let _ = db.upsert_scanned_game(version_id, name, &full_path, None, None, "ok");
-        }
-    }
-
-    // Mark missing
-    for game in &target_games {
-        if !matched_names.contains(&game.name) {
-            let _ = db.upsert_scanned_game(version_id, &game.name, "", None, None, "missing");
-        }
-    }
-
-    let matched = matched_names.len();
-    let missing = target_games.len() - matched;
-    let result = ScanOutput { total_files, matched_games: matched, missing_games: missing };
+    let result = ScanOutput { total: expected_names.len(), matched: matches.len(), missing: missing.len(), matches: matches.clone(), missing_names: missing.clone() };
     if json {
         print_json(&result);
     } else {
-        println!("Scan complete: {} files, {} matched, {} missing", total_files, matched, missing);
+        println!("Scan complete: {} files, {} matched, {} missing", expected_names.len(), matches.len(), missing.len());
     }
     ExitCode::SUCCESS
 }
@@ -301,6 +246,25 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
         Err(e) => { eprintln!("Failed to list games: {}", e); return ExitCode::FAILURE; }
     };
 
+    // Build title_id -> game_name mapping for scanning
+    let mut title_to_game: HashMap<String, String> = HashMap::new();
+    for game in &games {
+        if let Some(ref tid) = game.title_id {
+            title_to_game.insert(tid.clone(), game.name.clone());
+        }
+    }
+
+    // Scan input directory to find matching files (shared logic with cmd_scan)
+    let matches: Vec<rom_manager::scanner::ScanMatch> = if let Some(ref input) = input_dir {
+        match scan_nps_directory(&title_to_game, input) {
+            Ok(m) => m,
+            Err(e) => { eprintln!("Scan error: {}", e); return ExitCode::FAILURE; }
+        }
+    } else {
+        Vec::new()
+    };
+    let matched_by_name: HashMap<String, &rom_manager::scanner::ScanMatch> = matches.iter().map(|m| (m.name.clone(), m)).collect();
+
     let total = games.iter().map(|g| g.roms.len()).sum::<usize>();
     let mut built = 0;
     let mut skipped = 0;
@@ -313,6 +277,7 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
         }
 
         let platform = game.platform.as_deref().unwrap_or("Games");
+        let matched = matched_by_name.get(&game.name);
 
         for rom in &game.roms {
             processed += 1;
@@ -335,12 +300,12 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
                 continue;
             }
 
-            // Try local input dir first
             let mut copied = false;
-            if let Some(ref input) = input_dir {
-                let src_file = input.join(&rom.filename);
-                if src_file.exists() {
-                    if let Err(e) = std::fs::copy(&src_file, &dest_file) {
+
+            // Try local copy from scanned match first
+            if let Some(m) = matched {
+                if let Some(ref src) = m.filename {
+                    if let Err(e) = std::fs::copy(src, &dest_file) {
                         eprintln!("Failed to copy {}: {}", rom.filename, e);
                     } else {
                         built += 1;
