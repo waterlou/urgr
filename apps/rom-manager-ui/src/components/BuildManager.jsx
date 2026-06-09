@@ -111,7 +111,8 @@ export default function BuildManager({ collectionId, collection, versions, onBui
         onResult: (data) => {
           setBuildScanResult(data)
           setBuildScanRunning(false)
-          onInfo(`Scan complete: ${data.exists} exist${data.reused > 0 ? `, ${data.reused} reused` : ''}, ${data.missing} missing`)
+          const sv = collection?.dataset_preset === 'MAME' || collection?.dataset_preset === 'Final Burn Neo'
+          onInfo(`Scan complete: ${data.exists} exist${sv ? `, ${data.reused} reused` : ''}, ${data.missing} missing`)
         },
         onError: (err) => {
           setBuildScanRunning(false)
@@ -266,7 +267,12 @@ export default function BuildManager({ collectionId, collection, versions, onBui
         {buildScanResult && (
           <div className="info-box" style={{marginTop:12}}>
             <strong>Scan result</strong><br />
-            ✓ {buildScanResult.exists} exist{buildScanResult.reused > 0 ? ` · ♻ ${buildScanResult.reused} reused` : ''} · ✗ {buildScanResult.missing} missing
+            ✓ {buildScanResult.exists} exist
+            {(() => {
+              const sv = collection?.dataset_preset === 'MAME' || collection?.dataset_preset === 'Final Burn Neo'
+              return sv ? ` · ♻ ${buildScanResult.reused} reused` : ''
+            })()}
+            · ✗ {buildScanResult.missing} missing
             {buildScanResult.missing > 0 && buildScanResult.missing_games?.length > 0 && (
               <details style={{marginTop:8,fontSize:13}}>
                 <summary>Missing games ({buildScanResult.missing})</summary>
