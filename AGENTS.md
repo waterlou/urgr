@@ -76,3 +76,10 @@ Key commands: `browser-harness-js --start`, `--stop`, `--restart`, `--status`, `
 - If the bug is trival, you can skip the test part if you have high confident that you will fix it.  But if same bug happen after you though you've fixed, you should setup a testable environement so that you can find the bug and debug it by yourself.
 - The project is developed in express.js for the server, but having lot of cli app written in rust for performance issues.  Don't write same features twice in both languages.  For CLI that is a long running process, you must consider how to communicate with the server for prgress update and cancellation.
 - Avoid patch here and there for fixing bugs.  Also consider where to fix the bug is the cleanest method.  Suggest user about refactoring if any part of the project is complicate enough for refactoring.
+
+## Design Decisions
+
+- **Version fallback**: When looking for a ROM across versions, ALWAYS prefer **older** versions over newer ones. Newer versions (e.g., nightly) may have different ROM sets. Older versions are more stable and predictable.
+- **EmulatorJS core names**: Use `fbneo` (not `arcade`) for FBNeo/MAME arcade games. The CDN core files are named `fbneo-wasm.data`, not `arcade-wasm.data`.
+- **Region field**: Always store `''` (empty string) for region, never `NULL`. SQLite treats `NULL != NULL` in UNIQUE constraints, causing duplicate entries. The Rust code enforces this with `game.region.as_deref().unwrap_or("")`.
+- **Scanner directory**: DAT builds scan `collectionDir/{version}` (version-specific), NOT the collection root. Scanning the root causes cross-version ROM misassignment.

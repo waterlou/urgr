@@ -56,11 +56,11 @@ const PLATFORM_TO_CORE = {
   'jaguar': 'jaguar',
 
   // Arcade
-  'arcade': 'arcade',
+  'arcade': 'fbneo',
   'mame': 'mame2003',
   'mame 2003': 'mame2003',
-  'fbneo': 'arcade',
-  'final burn neo': 'arcade',
+  'fbneo': 'fbneo',
+  'final burn neo': 'fbneo',
 
   // Other
   'commodore 64': 'c64',

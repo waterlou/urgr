@@ -140,6 +140,24 @@ router.get('/:id/play', async (req, res) => {
       filePath = scanned.filename
     }
 
+    // 1b. Fallback: look for the same game name in older versions of this collection
+    if (!filePath) {
+      const otherScanned = get(`SELECT sc.filename FROM scanned_games sc
+        JOIN set_versions sv ON sv.id = sc.version_id
+        JOIN collection_versions cv ON cv.version_id = sv.id
+        WHERE sc.name = ? AND sc.filename != '' AND sc.filename IS NOT NULL
+        AND cv.collection_id IN (
+          SELECT cv2.collection_id FROM collection_versions cv2
+          JOIN set_versions sv2 ON sv2.id = cv2.version_id
+          WHERE sv2.id = ?
+        ) AND sc.version_id < ?
+        ORDER BY sc.version_id DESC
+        LIMIT 1`, [game.name, game.version_id, game.version_id]);
+      if (otherScanned && otherScanned.filename && fs.existsSync(otherScanned.filename)) {
+        filePath = otherScanned.filename
+      }
+    }
+
     // 2. NPS: find the downloaded file
     if (!filePath && game.source === 'NPS') {
       const rom = get('SELECT * FROM rom_entries WHERE game_entry_id = ? AND subtype = ? LIMIT 1', [game.id, 'game']);
