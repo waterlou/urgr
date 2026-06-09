@@ -635,14 +635,6 @@ pub fn build_version(
                 cleanup_empty_dirs(&roms_dir);
             }
 
-            // Update .version file
-            let version_file = cd.join(VERSION_FILE);
-            let mut all_versions: Vec<String> = prior_versions.clone();
-            all_versions.push(latest.version.clone());
-            all_versions.sort_by(|a, b| version_cmp(a, b));
-            all_versions.dedup();
-            std::fs::write(&version_file, all_versions.join("\n") + "\n")?;
-            info!(".version updated: {}", all_versions.join(" → "));
         }
 
         // ── Phase 7: Replace old version (update mode) ──

@@ -9,6 +9,7 @@ import { execCli, execCliStream } from '../cli.js';
 import { createJob, updateProgress, doneJob, failJob } from '../jobs.js';
 import { all, get, run, runNow, unescapeXml, dbReady } from '../helpers.js';
 import { importNps, scanNpsDir, buildNps, NPS_PLATFORMS, NPS_PLATFORM_MAP } from '../nps.js';
+import { sortVersions } from '../versionSort.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = Router();
@@ -178,11 +179,16 @@ async function getFBNeoVersions() {
     const imported = all("SELECT id, source, version, created_at FROM set_versions WHERE source IN ('FBNeo','FBAlpha43','FBAlpha44') ORDER BY version");
     const importedSet = new Set(imported.map(v => `${v.source}:${v.version}`));
 
-    const allVersions = [
-      ...fbalphaVersions,
-      ...versions.slice().reverse().map(v => ({ version: v, source: 'FBNeo', repo: FBNEO_REPO, ref: v })),
-      { version: 'nightly', source: 'FBNeo', repo: FBNEO_REPO, ref: 'master', nightly: true },
-    ];
+    const allVersions = sortVersions([
+      ...fbalphaVersions.map(v => v.version),
+      ...versions.slice().reverse(),
+      'nightly',
+    ]).flatMap(v => {
+      if (v === 'nightly') return [{ version: 'nightly', source: 'FBNeo', repo: FBNEO_REPO, ref: 'master', nightly: true }]
+      const fbalpha = fbalphaVersions.find(fv => fv.version === v)
+      if (fbalpha) return [fbalpha]
+      return [{ version: v, source: 'FBNeo', repo: FBNEO_REPO, ref: v }]
+    });
 
     const missing = allVersions.filter(v => !importedSet.has(`${v.source}:${v.version}`));
     const result = {
@@ -722,6 +728,18 @@ router.post('/api/versions/import-online', async (req, res) => {
       const row = get('SELECT id FROM set_versions WHERE source = ? AND version = ?', [srcLabel, version]);
       if (row) run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, row.id]);
 
+      // Update .version file so fallback can find this version
+      const col = get('SELECT c.folder FROM collections c WHERE c.id = ?', [collection_id])
+      if (col?.folder) {
+        const versionFile = path.join(path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms'), col.folder, '.version')
+        let versions = []
+        if (fs.existsSync(versionFile)) {
+          versions = fs.readFileSync(versionFile, 'utf-8').split('\n').map(s => s.trim()).filter(Boolean)
+        }
+        versions.push(version)
+        fs.writeFileSync(versionFile, sortVersions([...new Set(versions)]).join('\n') + '\n')
+      }
+
       fbneoDatsCache = null;
       res.json({ ok: true, version_id: row.id, total_games: totalGames });
       return;
@@ -879,6 +897,18 @@ router.post('/api/versions/import-online', async (req, res) => {
         if (!versionId) throw new Error(`Failed to create version for MAME "${version}"`);
 
         run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, versionId]);
+
+        // Update .version file so fallback can find this version
+        const col = get('SELECT c.folder FROM collections c WHERE c.id = ?', [collection_id])
+        if (col?.folder) {
+          const versionFile = path.join(path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms'), col.folder, '.version')
+          let versions = []
+          if (fs.existsSync(versionFile)) {
+            versions = fs.readFileSync(versionFile, 'utf-8').split('\n').map(s => s.trim()).filter(Boolean)
+          }
+          versions.push(version)
+          fs.writeFileSync(versionFile, sortVersions([...new Set(versions)]).join('\n') + '\n')
+        }
 
         mameDatsCache = null;
         res.json({ ok: true, version_id: versionId, total_games: totalGames });
@@ -1055,7 +1085,10 @@ router.get('/api/versions/available', async (req, res) => {
     const result = {
       source: 'MAME',
       latest: latestVer ? fmtVersion(latestVer) : null, latestParsed: latestVer,
-      available: rows.filter(r => r.hasDat).map(r => ({ version: r.version, numeric: r.numeric, date: r.date, year: r.year, parsed: r.parsed, url: r.url })),
+      available: sortVersions(rows.filter(r => r.hasDat).map(r => r.version)).map(ver => {
+        const r = rows.find(row => row.version === ver && row.hasDat)
+        return r ? { version: r.version, numeric: r.numeric, date: r.date, year: r.year, parsed: r.parsed, url: r.url } : null
+      }).filter(Boolean),
       imported: importedParsed,
       missing: availableDats.map(r => ({ version: r.version, numeric: r.numeric, date: r.date, parsed: r.parsed, url: r.url })),
       hasNewer,

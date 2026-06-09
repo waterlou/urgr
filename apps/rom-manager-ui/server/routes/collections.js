@@ -8,6 +8,7 @@ import { getDb, reloadDb } from '../db.js';
 import { execCli, execCliStream } from '../cli.js';
 import { createJob, getJob, updateProgress, doneJob, failJob, cancelJob } from '../jobs.js';
 import { all, get, run, runNow, unescapeXml, KNOWN_PLATFORMS, dbReady } from '../helpers.js';
+import { sortVersions } from '../versionSort.js';
 import { scanNpsDir, buildNps } from '../nps.js';
 import { scrapeSingleGame } from './games.js';
 
@@ -227,8 +228,8 @@ router.get('/api/collections/:id/versions', async (req, res) => {
       FROM set_versions sv
       JOIN collection_versions cv ON cv.version_id = sv.id
       WHERE cv.collection_id = ?
-      ORDER BY sv.created_at DESC
     `, [req.params.id]);
+    versions.sort((a, b) => sortVersions([a.version, b.version])[0] === a.version ? -1 : 1);
     res.json(versions);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -344,7 +345,9 @@ router.post('/api/collections/:id/build', async (req, res) => {
           if (isNps) {
             execCli(['scan', String(version_id), collectionDir], { binary: 'nps' });
           } else {
-            execCli(['scan', String(version_id), collectionDir], { binary: 'build' });
+            // DAT builds: scan version-specific directory (e.g. fbneo/v1.0.0.02)
+            const scanDir = path.join(collectionDir, sv.version);
+            execCli(['scan', String(version_id), scanDir], { binary: 'build' });
           }
           reloadDb();
           // Reset all to unavailable, then set matched ones to available

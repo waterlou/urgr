@@ -1,10 +1,15 @@
 import { Router } from 'express';
 import crypto, { createHash } from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { getDb } from '../db.js';
 import { execCli } from '../cli.js';
 import { createJob, updateProgress, doneJob, failJob } from '../jobs.js';
 import { all, get, run, runNow, dbReady } from '../helpers.js';
 import { fetchSonyScreenshots } from '../nps.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const router = Router();
 
@@ -102,21 +107,138 @@ router.get('/:id', async (req, res) => {
     if (typeof game.screenshots === 'string') try { game.screenshots = JSON.parse(game.screenshots); } catch { game.screenshots = []; }
     if (typeof game.synopsis === 'string') try { game.synopsis = JSON.parse(game.synopsis); } catch {}
     const roms = all('SELECT * FROM rom_entries WHERE game_entry_id = ?', [game.id]);
-    // Mark which ROMs have been downloaded
+    const state = get('SELECT * FROM game_state WHERE game_entry_id = ?', [game.id]);
+    // Mark which ROMs are available: downloaded via queue, or imported (game_state.available)
     const completedDownloads = new Set(
       all('SELECT filename FROM download_queue WHERE game_entry_id = ? AND status = ?', [game.id, 'completed']).map(r => r.filename)
     );
     for (const rom of roms) {
-      rom.downloaded = completedDownloads.has(rom.filename);
+      rom.downloaded = completedDownloads.has(rom.filename) || state?.available === 1
     }
     const scanned = all('SELECT * FROM scanned_games WHERE name = ? AND version_id = ?', [game.name, game.version_id]);
-    const state = get('SELECT * FROM game_state WHERE game_entry_id = ?', [game.id]);
     const clones = all(`SELECT id, name, description, cloneof, region FROM game_entries WHERE name = ? AND version_id = ? AND id != ?${game.cloneof ? ' AND cloneof IS NOT NULL' : ''} ORDER BY name`, [game.cloneof || game.name, game.version_id, game.id]);
     let parent = null;
     if (game.cloneof) {
       parent = get('SELECT id, name, region FROM game_entries WHERE name = ? AND version_id = ? AND cloneof IS NULL', [game.cloneof, game.version_id]);
     }
     res.json({ ...game, roms, scanned_games: scanned, rating: state?.rating || 0, favourite: state?.favourite || 0, available: state?.available || 0, play_count: state?.play_count || 0, clones, parent });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Serve a ROM file for emulation (auto-finds the correct file)
+router.get('/:id/play', async (req, res) => {
+  await dbReady;
+  try {
+    const game = get('SELECT g.*, sv.source FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [req.params.id]);
+    if (!game) return res.status(404).json({ error: 'Game not found' });
+
+    let filePath = null
+
+    // 1. Arcade/MAME/FBNeo: zip from scanned_games
+    const scanned = get('SELECT filename FROM scanned_games WHERE name = ? AND version_id = ?', [game.name, game.version_id]);
+    if (scanned && scanned.filename && fs.existsSync(scanned.filename)) {
+      filePath = scanned.filename
+    }
+
+    // 1b. FBNeo/MAME only: fallback to older versions via .version
+    if (!filePath && (game.source === 'FBNeo' || game.source === 'MAME')) {
+      const col = get(`SELECT c.folder, c.slug FROM collections c
+        JOIN collection_versions cv ON cv.collection_id = c.id
+        WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
+      const colFolder = col?.folder || col?.slug;
+      if (colFolder) {
+        const versionFile = path.join(path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms'), colFolder, '.version')
+        if (fs.existsSync(versionFile)) {
+          const versions = fs.readFileSync(versionFile, 'utf-8').split('\n').map(s => s.trim()).filter(Boolean)
+          const idx = versions.indexOf(game.version)
+          if (idx > 0) {
+            for (const v of versions.slice(0, idx).reverse()) {
+              const older = get('SELECT id FROM set_versions WHERE source = ? AND version = ?', [game.source, v])
+              if (!older) continue
+              const sc = get('SELECT filename FROM scanned_games WHERE name = ? AND version_id = ? AND filename != ""', [game.name, older.id])
+              if (sc?.filename && fs.existsSync(sc.filename)) { filePath = sc.filename; break }
+            }
+          }
+        }
+      }
+    }
+
+    // 2. NPS: find the downloaded file
+    if (!filePath && game.source === 'NPS') {
+      const rom = get('SELECT * FROM rom_entries WHERE game_entry_id = ? AND subtype = ? LIMIT 1', [game.id, 'game']);
+      if (rom) {
+        const col = get(`SELECT c.folder, c.slug FROM collections c
+          JOIN collection_versions cv ON cv.collection_id = c.id
+          WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
+        const colFolder = col?.folder || col?.slug || String(game.version_id);
+        const dataDir = path.resolve(__dirname, '..', '..', '..', '..', 'data')
+        const subDir = rom.subtype === 'dlc' ? 'DLCs' : rom.subtype === 'update' ? 'Updates' : 'Games'
+        const candidate = path.join(dataDir, 'roms', colFolder, game.platform, subDir, rom.filename)
+        if (fs.existsSync(candidate)) filePath = candidate
+      }
+    }
+
+    // 3. No-Intro/DAT: try first ROM entry in common locations
+    if (!filePath) {
+      const rom = get('SELECT * FROM rom_entries WHERE game_entry_id = ? LIMIT 1', [game.id]);
+      if (rom) {
+        const col = get(`SELECT c.folder, c.slug FROM collections c
+          JOIN collection_versions cv ON cv.collection_id = c.id
+          WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
+        const colFolder = col?.folder || col?.slug || String(game.version_id);
+        const dataDir = path.resolve(__dirname, '..', '..', '..', '..', 'data')
+        const baseRomsDir = path.join(dataDir, 'roms', colFolder);
+        const candidates = [
+          path.join(baseRomsDir, rom.filename),
+          path.join(baseRomsDir, 'Games', rom.filename),
+        ]
+        if (!rom.filename.endsWith('.zip')) {
+          candidates.push(path.join(baseRomsDir, rom.filename + '.zip'))
+          candidates.push(path.join(baseRomsDir, 'Games', rom.filename + '.zip'))
+        }
+        for (const c of candidates) {
+          if (fs.existsSync(c)) { filePath = c; break }
+        }
+      }
+    }
+
+    if (!filePath) return res.status(404).json({ error: 'ROM file not found on disk' })
+
+    const ext = path.extname(filePath).toLowerCase()
+    const contentTypes = {
+      '.zip': 'application/zip',
+      '.nes': 'application/octet-stream',
+      '.sfc': 'application/octet-stream',
+      '.smc': 'application/octet-stream',
+      '.gb': 'application/octet-stream',
+      '.gbc': 'application/octet-stream',
+      '.gba': 'application/octet-stream',
+      '.nds': 'application/octet-stream',
+      '.n64': 'application/octet-stream',
+      '.z64': 'application/octet-stream',
+      '.v64': 'application/octet-stream',
+      '.gen': 'application/octet-stream',
+      '.md': 'application/octet-stream',
+      '.sms': 'application/octet-stream',
+      '.gg': 'application/octet-stream',
+      '.pce': 'application/octet-stream',
+      '.vb': 'application/octet-stream',
+      '.iso': 'application/octet-stream',
+      '.cue': 'application/octet-stream',
+      '.bin': 'application/octet-stream',
+      '.pkg': 'application/octet-stream',
+    }
+
+    const contentType = contentTypes[ext] || 'application/octet-stream'
+    const stat = fs.statSync(filePath)
+
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Content-Length': stat.size,
+      'Content-Disposition': `inline; filename="${path.basename(filePath)}"`,
+      'Cache-Control': 'public, max-age=3600',
+    })
+    fs.createReadStream(filePath).pipe(res)
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

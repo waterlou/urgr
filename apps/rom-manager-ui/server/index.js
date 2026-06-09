@@ -89,3 +89,7 @@ process.on('SIGTERM', shutdown);
 process.on('unhandledRejection', (err) => {
   console.error('Unhandled rejection:', err?.stack || err?.message || err);
 });
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err?.stack || err?.message || err);
+  process.exit(1);
+});
