@@ -30,23 +30,38 @@ Game detail response includes `downloaded` flag per ROM entry, checked against `
 - Router: custom `useRouter` hook with query params (`?view=`, `?id=`, `?game=`)
 - BuildManager scan result displays: `✓ {exists} exist · ♻ {reused} reused · ✗ {missing} missing`
 - For unversioned collections (NPS, No-Intro): `reused` is always 0 (not shown by frontend)
-- For versioned collections (FBNeo, MAME): `reused` calculated by checking prior version directories
+- For versioned collections (FBNeo, MAME): `reused` calculated by checking prior version directories. Also shown in scan results via `GET /api/collections/:id/build?scan=true`.
+- EmulatorJS CDN: `https://cdn.emulatorjs.org/nightly/data/` (nightly channel has more up-to-date cores)
 
 ## CLI Behavior
+
+### ROM Verification
+
+- **Zip-based ROMs (FBNeo, MAME, No-Intro)**: Use **CRC32** read from zip entry headers. No decompression needed — `zip::ZipArchive::by_index_raw().crc32()` reads the stored CRC directly from the zip's local file header.
+- **NPS (PKG files)**: Uses **SHA-256** for download verification (`downloader.js` compares downloaded file hash against `expected_sha256`).
+- `scanned_games` table was removed. CLI now outputs match results as JSON; server writes directly to `game_state.available`.
 
 ### Scan commands (`nps-cli scan`, `build-cli scan`)
 
 Both CLIs accept `--game-id <id>` to scan a single game instead of the entire collection.
 - `nps-cli scan` — extracts `title_id` from `.pkg` filename (pattern: `{prefix}-{title_id}_{num}-...`)
-- `build-cli scan` — matches by stem (filename without `.zip` extension)
-- Both update `scanned_games` table only. Server reads `scanned_games` and updates `game_state.available`.
+- `build-cli scan` — matches by stem (filename without `.zip` extension), then verifies CRC from zip entry headers against expected ROM entries. A zip is only considered matched if at least one expected CRC is found in its entry headers.
+- Both output JSON with `{ matches: [{name, filename}], missing_names: [...] }`. Server parses this and updates `game_state.available`.
 
 ### Reuse calculation (versioned collections)
 
-For versioned collections (FBNeo, MAME), `reused` is calculated server-side after scan:
-- Checks if matched `.zip` files also exist in prior version directories (`{collectionDir}/{priorVersion}/roms/`)
-- Only older versions (lower `sv.id`) are considered prior
+For versioned collections (FBNeo, MAME), `reused` is calculated by the builder:
+- Counts games in the current version that have matching `.zip` files in prior version output directories
+- Includes both `need_copy` games (new/changed) AND unchanged games
+- CRC from zip entry headers is compared against expected ROM entries via `verify_game_zip`
 - Unversioned collections (NPS, No-Intro): `reused` is always 0
+
+### Build matching (`ImportIndex::find_match`)
+
+The builder's import matcher compares CRC32 sets:
+1. Reads CRC32 of each zip entry from the zip's local file headers (no decompression)
+2. For each game, checks that ALL expected CRC values from `rom_entries` are present in the zip
+3. Only if all CRCs match does the zip count as a match for that game
 
 ### Unified build endpoint
 
