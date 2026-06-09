@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { getEmulatorCore } from '../platformEmulator.js'
 import { playUrl } from '../api.js'
 
-const EJS_CDN = 'https://cdn.emulatorjs.org/stable/data/'
+const EJS_CDN = 'https://cdn.emulatorjs.org/nightly/data/'
 
 let scriptEl = null
 
@@ -59,8 +59,25 @@ export default function EmulatorModal({ game, onClose }) {
 
     return () => {
       destroyed = true
+
+      // Stop the emulator: close audio context, clear main loop, remove DOM
+      try {
+        const emu = window.EJS_emulator
+        if (emu) {
+          // Close Web Audio context to stop sound
+          const al = emu.Module?.AL?.currentCtx
+          if (al?.audioCtx) al.audioCtx.close().catch(() => {})
+          // Stop the main loop via Emscripten
+          if (emu.Module?.pauseMainLoop) emu.Module.pauseMainLoop()
+        }
+      } catch {}
+
+      // Remove emulator DOM
       const el = document.getElementById('emulator-game')
       if (el) el.innerHTML = ''
+
+      // Clean up globals
+      try { delete window.EJS_emulator } catch {}
       try { delete window.EJS_player } catch {}
       try { delete window.EJS_core } catch {}
       try { delete window.EJS_gameName } catch {}

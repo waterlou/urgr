@@ -14,16 +14,20 @@
 ## `.version` File
 
 - Location: `data/roms/{collectionFolder}/.version`
-- Format: one version string per line, oldest first, newest last
+- Format: one version string per line, oldest first, nightly last
+- Created/updated by: `import-online` endpoint (FBNeo/MAME only)
+- **Not written by the builder** — only import-online manages this file
+- Sort logic: `server/versionSort.js` (`sortVersions()`) — shared between version list display and `.version` file write
 - Example (fbneo):
   ```
-  v1.0.0.02
+  0.2.97.44
+  v1.0.0.01
   nightly
   ```
 - Example (mame):
   ```
   0.139
-  0.163
+  0.260
   ```
 
 ## Fallback Rules
@@ -57,6 +61,14 @@ When looking for a ROM across versions:
 DAT builds **must** scan `collectionDir/{version}` (version-specific), never the collection root. Scanning the root causes cross-version ROM misassignment (e.g., nightly ROMs assigned to v1.0.0.02).
 
 References: `apps/rom-manager-ui/server/routes/collections.js` line ~347.
+
+## Version Sort Logic
+
+`server/versionSort.js` exports `sortVersions(versions)`:
+- Strips `v`/`V` prefix, splits by `.`, compares numerically (component by component)
+- `nightly` always sorts last (`u64::MAX` in Rust equivalent)
+- Used by: FBNeo version list, MAME version list, `.version` file write after import
+- Tests: `server/test-version-sort.mjs` (14 tests covering FBNeo, MAME, edge cases)
 
 ## Database Constraints
 

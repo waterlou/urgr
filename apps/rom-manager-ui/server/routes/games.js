@@ -147,7 +147,7 @@ router.get('/:id/play', async (req, res) => {
         WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
       const colFolder = col?.folder || col?.slug;
       if (colFolder) {
-        const versionFile = path.join(path.resolve(__dirname, '..', '..', '..', 'data', 'roms'), colFolder, '.version')
+        const versionFile = path.join(path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms'), colFolder, '.version')
         if (fs.existsSync(versionFile)) {
           const versions = fs.readFileSync(versionFile, 'utf-8').split('\n').map(s => s.trim()).filter(Boolean)
           const idx = versions.indexOf(game.version)
@@ -171,7 +171,7 @@ router.get('/:id/play', async (req, res) => {
           JOIN collection_versions cv ON cv.collection_id = c.id
           WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
         const colFolder = col?.folder || col?.slug || String(game.version_id);
-        const dataDir = path.resolve(__dirname, '..', '..', '..', 'data')
+        const dataDir = path.resolve(__dirname, '..', '..', '..', '..', 'data')
         const subDir = rom.subtype === 'dlc' ? 'DLCs' : rom.subtype === 'update' ? 'Updates' : 'Games'
         const candidate = path.join(dataDir, 'roms', colFolder, game.platform, subDir, rom.filename)
         if (fs.existsSync(candidate)) filePath = candidate
@@ -186,7 +186,7 @@ router.get('/:id/play', async (req, res) => {
           JOIN collection_versions cv ON cv.collection_id = c.id
           WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
         const colFolder = col?.folder || col?.slug || String(game.version_id);
-        const dataDir = path.resolve(__dirname, '..', '..', '..', 'data')
+        const dataDir = path.resolve(__dirname, '..', '..', '..', '..', 'data')
         const baseRomsDir = path.join(dataDir, 'roms', colFolder);
         const candidates = [
           path.join(baseRomsDir, rom.filename),

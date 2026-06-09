@@ -22,6 +22,7 @@ cd apps/rom-manager-ui && npx vite build
 # Run tests
 cd apps/rom-manager-ui && bash server/test-api.sh      # API tests (14)
 cd apps/rom-manager-ui && npm run test:nps              # NPS unit tests (21)
+cd apps/rom-manager-ui && node --test server/test-version-sort.mjs  # Version sort tests (14)
 cd apps/rom-manager-ui && npx playwright test           # UI tests
 
 # Build Rust CLI tools
