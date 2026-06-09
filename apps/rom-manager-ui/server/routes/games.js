@@ -140,21 +140,26 @@ router.get('/:id/play', async (req, res) => {
       filePath = scanned.filename
     }
 
-    // 1b. Fallback: look for the same game name in older versions of this collection
-    if (!filePath) {
-      const otherScanned = get(`SELECT sc.filename FROM scanned_games sc
-        JOIN set_versions sv ON sv.id = sc.version_id
-        JOIN collection_versions cv ON cv.version_id = sv.id
-        WHERE sc.name = ? AND sc.filename != '' AND sc.filename IS NOT NULL
-        AND cv.collection_id IN (
-          SELECT cv2.collection_id FROM collection_versions cv2
-          JOIN set_versions sv2 ON sv2.id = cv2.version_id
-          WHERE sv2.id = ?
-        ) AND sc.version_id < ?
-        ORDER BY sc.version_id DESC
-        LIMIT 1`, [game.name, game.version_id, game.version_id]);
-      if (otherScanned && otherScanned.filename && fs.existsSync(otherScanned.filename)) {
-        filePath = otherScanned.filename
+    // 1b. FBNeo/MAME only: fallback to older versions via .version
+    if (!filePath && (game.source === 'FBNeo' || game.source === 'MAME')) {
+      const col = get(`SELECT c.folder, c.slug FROM collections c
+        JOIN collection_versions cv ON cv.collection_id = c.id
+        WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
+      const colFolder = col?.folder || col?.slug;
+      if (colFolder) {
+        const versionFile = path.join(path.resolve(__dirname, '..', '..', '..', 'data', 'roms'), colFolder, '.version')
+        if (fs.existsSync(versionFile)) {
+          const versions = fs.readFileSync(versionFile, 'utf-8').split('\n').map(s => s.trim()).filter(Boolean)
+          const idx = versions.indexOf(game.version)
+          if (idx > 0) {
+            for (const v of versions.slice(0, idx).reverse()) {
+              const older = get('SELECT id FROM set_versions WHERE source = ? AND version = ?', [game.source, v])
+              if (!older) continue
+              const sc = get('SELECT filename FROM scanned_games WHERE name = ? AND version_id = ? AND filename != ""', [game.name, older.id])
+              if (sc?.filename && fs.existsSync(sc.filename)) { filePath = sc.filename; break }
+            }
+          }
+        }
       }
     }
 
@@ -184,12 +189,12 @@ router.get('/:id/play', async (req, res) => {
         const dataDir = path.resolve(__dirname, '..', '..', '..', 'data')
         const baseRomsDir = path.join(dataDir, 'roms', colFolder);
         const candidates = [
-          path.join(baseRomsDir, 'Games', rom.filename),
           path.join(baseRomsDir, rom.filename),
+          path.join(baseRomsDir, 'Games', rom.filename),
         ]
         if (!rom.filename.endsWith('.zip')) {
-          candidates.push(path.join(baseRomsDir, 'Games', rom.filename + '.zip'))
           candidates.push(path.join(baseRomsDir, rom.filename + '.zip'))
+          candidates.push(path.join(baseRomsDir, 'Games', rom.filename + '.zip'))
         }
         for (const c of candidates) {
           if (fs.existsSync(c)) { filePath = c; break }

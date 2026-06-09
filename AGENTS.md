@@ -38,6 +38,7 @@ cargo build -p db-cli --release
 - **API reference**: `docs/api-reference.md` — all API endpoints with request/response examples
 - **Developer notes**: `docs/developer-notes.md` — non-obvious constraints, download manager, CLI behavior
 - **CLI reference**: `docs/cli-reference.md` — CLI command details
+- **Version fallback**: `docs/version-fallback.md` — which sources support versioning and the direction of fallback (older only)
 - **Session logs**: `docs/agent-sessions/` — per-session summaries
 
 ## Chrome CDP Debug

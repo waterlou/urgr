@@ -344,7 +344,9 @@ router.post('/api/collections/:id/build', async (req, res) => {
           if (isNps) {
             execCli(['scan', String(version_id), collectionDir], { binary: 'nps' });
           } else {
-            execCli(['scan', String(version_id), collectionDir], { binary: 'build' });
+            // DAT builds: scan version-specific directory (e.g. fbneo/v1.0.0.02)
+            const scanDir = path.join(collectionDir, sv.version);
+            execCli(['scan', String(version_id), scanDir], { binary: 'build' });
           }
           reloadDb();
           // Reset all to unavailable, then set matched ones to available
