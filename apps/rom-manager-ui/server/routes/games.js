@@ -7,7 +7,6 @@ import { getDb } from '../db.js';
 import { execCli } from '../cli.js';
 import { createJob, updateProgress, doneJob, failJob } from '../jobs.js';
 import { all, get, run, runNow, dbReady } from '../helpers.js';
-import { fetchSonyScreenshots } from '../nps.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -419,13 +418,16 @@ export async function scrapeSingleGame(gameId) {
   if (typeof updated.screenshots === 'string') try { updated.screenshots = JSON.parse(updated.screenshots); } catch { updated.screenshots = []; }
   updated.roms = all('SELECT * FROM rom_entries WHERE game_entry_id = ?', [game.id]);
 
-  // For NPS/PlayStation games, try to get screenshots from Sony Store API if not already scraped
+  // For NPS/PlayStation games, try to get screenshots from Sony Store API via scraper-cli
   if (updated.source === 'NPS' && (!updated.screenshots || updated.screenshots.length === 0)) {
     try {
-      const sonyScreenshots = await fetchSonyScreenshots(updated.content_id, updated.title_id);
-      if (sonyScreenshots.length > 0) {
-        run('UPDATE game_entries SET screenshots = ? WHERE id = ?', [JSON.stringify(sonyScreenshots), game.id]);
-        updated.screenshots = sonyScreenshots;
+      const contentId = updated.content_id || updated.title_id;
+      if (contentId) {
+        const detailResult = execCli(['detail', contentId, '--source', 'sony-store'], { binary: 'scraper' });
+        if (detailResult && detailResult.screenshots?.length > 0) {
+          run('UPDATE game_entries SET screenshots = ? WHERE id = ?', [JSON.stringify(detailResult.screenshots), game.id]);
+          updated.screenshots = detailResult.screenshots;
+        }
       }
     } catch {}
   }

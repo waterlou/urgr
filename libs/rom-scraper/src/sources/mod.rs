@@ -1,6 +1,7 @@
 mod igdb;
 mod no_intro_pictures;
 mod screenscraper;
+mod sony_store;
 mod thegamesdb;
 
 use async_trait::async_trait;
@@ -13,6 +14,7 @@ use crate::models::{Game, HashType, ScrapeSource};
 pub use igdb::Igdb;
 pub use no_intro_pictures::NoIntroPictures;
 pub use screenscraper::ScreenScraper;
+pub use sony_store::SonyStore;
 pub use thegamesdb::TheGamesDb;
 
 #[async_trait]
@@ -56,6 +58,8 @@ impl ScraperRegistry {
         }
         // NoIntroPictures is always available (public GitHub repo, no auth needed)
         scrapers.push(Box::new(NoIntroPictures::new(config)));
+        // SonyStore is always available (public PSN API, no auth needed)
+        scrapers.push(Box::new(SonyStore::new(config)));
 
         let mut registry = Self { scrapers };
 
