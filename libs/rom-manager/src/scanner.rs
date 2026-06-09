@@ -10,8 +10,11 @@ pub struct ScanMatch {
     pub filename: Option<String>,
 }
 
+/// Scan a directory for .zip files, matching against expected game names and CRC32 values.
+/// `expected_crcs` maps game name → list of expected CRC32 strings (uppercase hex).
+/// If a game has no CRC list (empty or missing), filename-only matching is used.
 pub fn scan_directory(
-    expected_names: &HashSet<String>,
+    expected_crcs: &HashMap<String, Vec<String>>,
     dir: &Path,
 ) -> Result<Vec<ScanMatch>> {
     let mut matches = Vec::new();
@@ -23,11 +26,36 @@ pub fn scan_directory(
     for entry in walkdir(dir)? {
         if entry.extension().and_then(|e| e.to_str()) == Some("zip") {
             let stem = entry.file_stem().unwrap_or_default().to_string_lossy().to_string();
-            if expected_names.contains(&stem) {
+            if !expected_crcs.contains_key(&stem) {
+                continue;
+            }
+            let expected = &expected_crcs[&stem];
+            // If no expected CRCs, match by name only
+            if expected.is_empty() {
                 matches.push(ScanMatch {
                     name: stem,
                     filename: Some(entry.to_string_lossy().to_string()),
                 });
+                continue;
+            }
+            // Verify CRC from zip entry headers (no decompression)
+            if let Ok(file) = std::fs::File::open(&entry) {
+                if let Ok(mut archive) = zip::ZipArchive::new(file) {
+                    let mut zip_crcs = HashSet::new();
+                    for i in 0..archive.len() {
+                        if let Ok(e) = archive.by_index_raw(i) {
+                            if !e.is_dir() {
+                                zip_crcs.insert(format!("{:08X}", e.crc32()));
+                            }
+                        }
+                    }
+                    if expected.iter().any(|crc| zip_crcs.contains(crc)) {
+                        matches.push(ScanMatch {
+                            name: stem,
+                            filename: Some(entry.to_string_lossy().to_string()),
+                        });
+                    }
+                }
             }
         }
     }
@@ -109,26 +137,28 @@ mod tests {
         zip.finish().unwrap();
     }
 
+    fn make_crc_map(names: &[&str]) -> HashMap<String, Vec<String>> {
+        names.iter().map(|s| (s.to_string(), Vec::new())).collect()
+    }
+
     #[test]
     fn test_scanner_matches_all() {
         let tmp = TempDir::new().unwrap();
-        let names: HashSet<String> = ["game_a", "game_b"].iter().map(|s| s.to_string()).collect();
-
+        let crcs = make_crc_map(&["game_a", "game_b"]);
         create_test_zip(&tmp.path().join("game_a.zip"), b"data_a");
         create_test_zip(&tmp.path().join("game_b.zip"), b"data_b");
 
-        let result = scan_directory(&names, tmp.path()).unwrap();
+        let result = scan_directory(&crcs, tmp.path()).unwrap();
         assert_eq!(result.len(), 2);
     }
 
     #[test]
     fn test_scanner_partial_match() {
         let tmp = TempDir::new().unwrap();
-        let names: HashSet<String> = ["present", "missing"].iter().map(|s| s.to_string()).collect();
-
+        let crcs = make_crc_map(&["present", "missing"]);
         create_test_zip(&tmp.path().join("present.zip"), b"data");
 
-        let result = scan_directory(&names, tmp.path()).unwrap();
+        let result = scan_directory(&crcs, tmp.path()).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].name, "present");
     }
@@ -136,26 +166,25 @@ mod tests {
     #[test]
     fn test_scanner_empty_directory() {
         let tmp = TempDir::new().unwrap();
-        let names: HashSet<String> = ["game"].iter().map(|s| s.to_string()).collect();
-        let result = scan_directory(&names, tmp.path()).unwrap();
+        let crcs = make_crc_map(&["game"]);
+        let result = scan_directory(&crcs, tmp.path()).unwrap();
         assert_eq!(result.len(), 0);
     }
 
     #[test]
     fn test_scanner_nonexistent_dir() {
-        let names: HashSet<String> = ["game"].iter().map(|s| s.to_string()).collect();
-        let result = scan_directory(&names, std::path::Path::new("/nonexistent/path")).unwrap();
+        let crcs = make_crc_map(&["game"]);
+        let result = scan_directory(&crcs, std::path::Path::new("/nonexistent/path")).unwrap();
         assert_eq!(result.len(), 0);
     }
 
     #[test]
     fn test_scanner_ignores_non_zip() {
         let tmp = TempDir::new().unwrap();
-        let names: HashSet<String> = ["game"].iter().map(|s| s.to_string()).collect();
-
+        let crcs = make_crc_map(&["game"]);
         std::fs::write(tmp.path().join("game.txt"), b"text").unwrap();
 
-        let result = scan_directory(&names, tmp.path()).unwrap();
+        let result = scan_directory(&crcs, tmp.path()).unwrap();
         assert_eq!(result.len(), 0);
     }
 
@@ -164,11 +193,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let sub = tmp.path().join("subdir");
         std::fs::create_dir_all(&sub).unwrap();
-        let names: HashSet<String> = ["deep"].iter().map(|s| s.to_string()).collect();
-
+        let crcs = make_crc_map(&["deep"]);
         create_test_zip(&sub.join("deep.zip"), b"deep_data");
 
-        let result = scan_directory(&names, tmp.path()).unwrap();
+        let result = scan_directory(&crcs, tmp.path()).unwrap();
         assert_eq!(result.len(), 1);
     }
 }

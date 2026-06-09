@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -291,7 +291,21 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
     let games = match db.list_games(version_id) {
         Ok(g) => g, Err(e) => { eprintln!("Database error: {}", e); return ExitCode::FAILURE; }
     };
-    let expected_names: HashSet<String> = games.iter().map(|g| g.name.clone()).collect();
+
+    // Build CRC map: game name → list of expected CRC32 strings
+    let mut expected_crcs: HashMap<String, Vec<String>> = HashMap::new();
+    for game in &games {
+        if let Ok(roms) = db.list_roms_for_game(game.id) {
+            let crcs: Vec<String> = roms.iter()
+                .filter_map(|r| r.crc32.as_deref())
+                .filter(|c| !c.is_empty())
+                .map(|c| c.to_string())
+                .collect();
+            expected_crcs.insert(game.name.clone(), crcs);
+        } else {
+            expected_crcs.insert(game.name.clone(), Vec::new());
+        }
+    }
 
     if let Some(gid) = game_id {
         // Single game scan
@@ -299,8 +313,11 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
             Some(g) => g.clone(),
             None => { eprintln!("Game not found: {}", gid); return ExitCode::FAILURE; }
         };
-        let expected: HashSet<String> = [game.name.clone()].into();
-        let matches = match scan_directory(&expected, dir) {
+        let single_crcs: HashMap<String, Vec<String>> = {
+            let crcs = expected_crcs.get(&game.name).cloned().unwrap_or_default();
+            [(game.name.clone(), crcs)].into()
+        };
+        let matches = match scan_directory(&single_crcs, dir) {
             Ok(m) => m, Err(e) => { eprintln!("Scan error: {}", e); return ExitCode::FAILURE; }
         };
         let matched = matches.len();
@@ -310,10 +327,11 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
         else { println!("Scan complete: {} matched, {} missing", matched, 1 - matched); }
     } else {
         // Full scan
-        let matches = match scan_directory(&expected_names, dir) {
+        let matches = match scan_directory(&expected_crcs, dir) {
             Ok(m) => m, Err(e) => { eprintln!("Scan error: {}", e); return ExitCode::FAILURE; }
         };
         let matched_names: HashSet<String> = matches.iter().map(|m| m.name.clone()).collect();
+        let expected_names: HashSet<String> = games.iter().map(|g| g.name.clone()).collect();
         let missing: Vec<String> = expected_names.difference(&matched_names).cloned().collect();
         let matched = matches.len();
         let result = ScanOutput { total: expected_names.len(), matched, missing: missing.len(), matches, missing_names: missing.clone() };

@@ -203,10 +203,13 @@ fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
 }
 
 fn filter_prior_versions(all_versions: &[String], current_version: &str) -> Vec<String> {
-    all_versions.iter()
-        .filter(|v| !v.is_empty() && *v != current_version && version_cmp(v, current_version) == std::cmp::Ordering::Less)
-        .cloned()
-        .collect()
+    // .version file is already in correct order (oldest first).
+    // Prior versions are simply the versions before current_version in the list.
+    if let Some(pos) = all_versions.iter().position(|v| v == current_version) {
+        all_versions[..pos].iter().filter(|v| !v.is_empty()).cloned().collect()
+    } else {
+        Vec::new()
+    }
 }
 
 /// Check if a game's ROM exists in a prior version's output (identical file by SHA1).
@@ -617,6 +620,24 @@ pub fn build_version(
     check_cancelled(cancelled)?;
     progress(on_progress, "copying", 95, &format!("Copy complete ({}/{} added)", added, need_copy.len()), added, missing.len(), need_copy.len() + unchanged, &progress_path);
 
+    // Count unchanged games that exist in prior version output
+    if unchanged > 0 && !prior_versions.is_empty() {
+        if let Some(cd) = collection_dir {
+            let pv = &prior_versions[0];
+            let pv_roms = cd.join(pv).join(ROMS_DIR_NAME);
+            if pv_roms.exists() {
+                let prior_zips: std::collections::HashSet<String> = walk_files(&pv_roms)?
+                    .iter()
+                    .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("zip"))
+                    .map(|p| p.file_stem().unwrap_or_default().to_string_lossy().to_string())
+                    .collect();
+                let current_names: std::collections::HashSet<String> =
+                    all_games.iter().map(|g| g.name.clone()).collect();
+                reused += prior_zips.iter().filter(|z| current_names.contains(*z)).count();
+            }
+        }
+    }
+
     // ── Phase 6: Version dedup (collection mode only) ──
     let mut deduped = 0usize;
     if !dry_run {
@@ -856,32 +877,20 @@ fn verify_zip_contains(zip_path: &Path, expected_roms: &[RomEntry]) -> bool {
         Err(_) => return false,
     };
 
-    let mut found_hashes: HashMap<String, String> = HashMap::new();
-    let mut found_crcs: HashMap<String, String> = HashMap::new();
+    // Read CRC32 from zip entry headers (no decompression)
+    let mut zip_crcs = std::collections::HashSet::new();
     for i in 0..archive.len() {
-        let Ok(mut entry) = archive.by_index(i) else { continue };
-        if entry.is_dir() {
-            continue;
+        if let Ok(entry) = archive.by_index_raw(i) {
+            if !entry.is_dir() {
+                zip_crcs.insert(format!("{:08X}", entry.crc32()));
+            }
         }
-        let mut bytes = Vec::new();
-        if std::io::copy(&mut entry, &mut bytes).is_err() {
-            continue;
-        }
-        let hashes = rom_scraper::compute_hashes_from_bytes(&bytes);
-        let name = entry.name().to_string();
-        found_hashes.insert(name.clone(), hashes.sha1);
-        found_crcs.insert(name, hashes.crc32);
     }
 
+    // Check that every expected ROM entry with a CRC has a match in the zip
     for rom in expected_roms {
-        // Check SHA1 first
-        if let Some(ref expected_sha1) = rom.sha1 {
-            if !found_hashes.values().any(|h| h == expected_sha1) {
-                return false;
-            }
-        // Fallback to CRC32 if SHA1 not available
-        } else if let Some(ref expected_crc) = rom.crc32 {
-            if !found_crcs.values().any(|c| c == expected_crc) {
+        if let Some(ref expected_crc) = rom.crc32 {
+            if !expected_crc.is_empty() && !zip_crcs.contains(expected_crc) {
                 return false;
             }
         }
