@@ -75,6 +75,31 @@ impl Database {
         Ok(versions)
     }
 
+    pub fn get_version_by_source_and_version(&self, source: &str, version: &str) -> Result<Option<SetVersion>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT sv.id, sv.source, sv.version, sv.dir,
+                    (SELECT COUNT(*) FROM game_entries WHERE version_id = sv.id) as total_games,
+                    (SELECT COUNT(*) FROM rom_entries re
+                     JOIN game_entries ge ON re.game_entry_id = ge.id
+                     WHERE ge.version_id = sv.id) as total_roms
+             FROM set_versions sv WHERE sv.source = ?1 AND sv.version = ?2",
+        )?;
+        let mut rows = stmt.query_map(params![source, version], |r| {
+            Ok(SetVersion {
+                id: r.get(0)?,
+                source: r.get(1)?,
+                version: r.get(2)?,
+                dir: r.get(3)?,
+                total_games: r.get(4)?,
+                total_roms: r.get(5)?,
+            })
+        })?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
     pub fn get_version(&self, id: i64) -> Result<Option<SetVersion>> {
         let mut stmt = self.conn.prepare(
             "SELECT sv.id, sv.source, sv.version, sv.dir,
@@ -322,30 +347,6 @@ impl Database {
             |r| r.get(0),
         )?;
         Ok((total, total))
-    }
-
-    pub fn find_older_versions(&self, source: &str, version: &str) -> Result<Vec<SetVersion>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, source, version, dir, 0 as tg, 0 as tr
-             FROM set_versions
-             WHERE source = ?1 AND version < ?2
-             ORDER BY version DESC",
-        )?;
-        let rows = stmt.query_map(params![source, version], |r| {
-            Ok(SetVersion {
-                id: r.get(0)?,
-                source: r.get(1)?,
-                version: r.get(2)?,
-                dir: r.get(3)?,
-                total_games: 0,
-                total_roms: 0,
-            })
-        })?;
-        let mut versions = Vec::new();
-        for row in rows {
-            versions.push(row?);
-        }
-        Ok(versions)
     }
 
     pub fn diff_versions(
@@ -695,19 +696,6 @@ mod tests {
         db.insert_game(vid, &sample_game("sf3")).unwrap();
         let (total, _) = db.get_version_game_count(vid).unwrap();
         assert_eq!(total, 2);
-    }
-
-    #[test]
-    fn test_find_older_versions() {
-        let db = make_db();
-        db.import_version("mame", "0.250", None).unwrap();
-        db.import_version("mame", "0.260", None).unwrap();
-        db.import_version("mame", "0.261", None).unwrap();
-
-        let older = db.find_older_versions("mame", "0.261").unwrap();
-        assert_eq!(older.len(), 2);
-        assert_eq!(older[0].version, "0.260");
-        assert_eq!(older[1].version, "0.250");
     }
 
     #[test]

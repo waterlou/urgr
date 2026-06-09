@@ -286,8 +286,21 @@ pub fn build_version(
         })?
     };
 
-    let older = db.find_older_versions(source, &latest.version)?;
-    let prev = older.first();
+    // Determine prior version using .version file ordering (the source of truth)
+    // .version file has versions oldest-first, so the version before current is the prior
+    let prev: Option<SetVersion> = collection_dir
+        .map(|cd| cd.join(VERSION_FILE))
+        .filter(|vf| vf.exists())
+        .and_then(|vf| std::fs::read_to_string(vf).ok())
+        .and_then(|content| {
+            let versions: Vec<&str> = content.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+            let pos = versions.iter().position(|v| *v == latest.version)?;
+            if pos > 0 {
+                db.get_version_by_source_and_version(source, versions[pos - 1]).ok().flatten()
+            } else {
+                None // first version in .version file — no prior
+            }
+        });
 
     check_cancelled(cancelled)?;
     progress(on_progress, "loading", 5, &format!("Version {} loaded", latest.version), 0, 0, latest.total_games as usize, &progress_path);
@@ -327,7 +340,7 @@ pub fn build_version(
             source: source.to_string(),
             version: latest.version.clone(),
             mode: if force_update { "update" } else { "collect" }.to_string(),
-            prev_version: prev.map(|p| p.version.clone()),
+            prev_version: prev.as_ref().map(|p| p.version.clone()),
             total_games: latest.total_games as usize,
             matched: 0,
             unchanged: 0,
@@ -339,7 +352,7 @@ pub fn build_version(
     };
 
     // ── Phase 1: Compute diff ──
-    let (need_copy, unchanged, _removed) = if let Some(p) = prev {
+    let (need_copy, unchanged, _removed) = if let Some(ref p) = prev {
         let diff = db.diff_versions(p.id, latest.id)?;
         let unchanged = diff.unchanged as usize;
         let need_copy: Vec<String> = diff.added.iter().chain(diff.changed.iter()).cloned().collect();
@@ -411,7 +424,7 @@ pub fn build_version(
                     continue;
                 }
                 if !keep.contains(&stem) {
-                    move_to_deleted(&entry, &deleted_dir, &latest, prev)?;
+                    move_to_deleted(&entry, &deleted_dir, &latest, prev.as_ref())?;
                     status.cleaned += 1;
                 }
             }
@@ -438,7 +451,7 @@ pub fn build_version(
 
         // For update mode: remove old versions of changed games from collection
         if force_update && prev.is_some() {
-            let prev_version = prev.unwrap();
+            let prev_version = prev.as_ref().unwrap();
             let changed: std::collections::HashSet<String> = db.diff_versions(prev_version.id, latest.id)?
                 .changed.into_iter().collect();
             for game_name in &changed {
@@ -449,7 +462,7 @@ pub fn build_version(
                     roms_dir.join(pf).join(format!("{}.zip", game_name))
                 };
                 if zip_path.exists() && !verify_game_zip(db, latest.id, game_name, &zip_path)? {
-                    move_to_deleted(&zip_path, &deleted_dir, &latest, Some(prev_version))?;
+                    move_to_deleted(&zip_path, &deleted_dir, &latest, Some(&prev_version))?;
                     status.cleaned += 1;
                 }
             }
@@ -639,7 +652,7 @@ pub fn build_version(
 
         // ── Phase 7: Replace old version (update mode) ──
         if force_update {
-            if let Some(p) = prev {
+            if let Some(ref p) = prev {
                 info!("Removing old version: {} {}", source, p.version);
                 db.delete_version(p.id)?;
             }
