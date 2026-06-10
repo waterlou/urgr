@@ -1933,6 +1933,8 @@ html, body, #root {
 .ia-result-size { font-size: 11px; color: var(--text-secondary); width: 60px; text-align: right; }
 
 .btn-sm { padding: 5px 12px; font-size: 11px; }
+.btn-xs { padding: 3px 8px; font-size: 10px; }
+.btn-xs .icon { font-size: 12px; }
 
 /* Responsive */
 /* Sidebar Settings Button */

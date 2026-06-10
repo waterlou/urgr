@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { getGame, coverUrl, scrapeGameMetadata, enqueueDownload, downloadGameFromIA, subscribeJobSSE } from '../api.js'
+import { getGame, coverUrl, scrapeGameMetadata, enqueueDownload, downloadGameFromIA, subscribeJobSSE, getIaAuthStatus } from '../api.js'
 import { isEmulatorSupported } from '../platformEmulator.js'
 import EmulatorModal from './EmulatorModal.jsx'
 
@@ -15,6 +15,41 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
   const [iaDownloading, setIaDownloading] = useState(false)
   const [iaDownloadMsg, setIaDownloadMsg] = useState(null)
   const [showEmulator, setShowEmulator] = useState(false)
+  const [iaAuth, setIaAuth] = useState(null)
+  const [iaAuthEditing, setIaAuthEditing] = useState(false)
+  const [iaAuthUser, setIaAuthUser] = useState('')
+  const [iaAuthPass, setIaAuthPass] = useState('')
+  const [iaAuthError, setIaAuthError] = useState(null)
+  const [iaAuthMsg, setIaAuthMsg] = useState(null)
+
+  useEffect(() => {
+    getIaAuthStatus().then(s => setIaAuth(s)).catch(() => {})
+  }, [gameId])
+
+  async function handleIaAuthLogin() {
+    if (!iaAuthUser || !iaAuthPass) return
+    setIaAuthError(null); setIaAuthMsg(null)
+    try {
+      const { setIaAuth } = await import('../api.js')
+      const res = await setIaAuth(iaAuthUser, iaAuthPass)
+      if (res.ok) {
+        setIaAuth({ authenticated: true, screenname: res.screenname })
+        setIaAuthEditing(false)
+        setIaAuthMsg('IA account linked')
+        setTimeout(() => setIaAuthMsg(null), 3000)
+      }
+    } catch (e) {
+      setIaAuthError(e.message)
+    }
+  }
+
+  async function handleIaAuthLogout() {
+    const { clearIaAuth } = await import('../api.js')
+    await clearIaAuth()
+    setIaAuth({ authenticated: false })
+    setIaAuthUser('')
+    setIaAuthPass('')
+  }
 
   useEffect(() => {
     getGame(gameId).then(g => {
@@ -315,6 +350,48 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                 </button>
             }
             {iaDownloadMsg && !iaDownloading && <p className="scrape-success" style={{marginTop:4}}>{iaDownloadMsg}</p>}
+          </section>
+        )}
+
+        {game.source !== 'NPS' && (
+          <section style={{borderTop:'1px solid var(--border)', paddingTop:8, marginTop:8}}>
+            <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:4}}>
+              <span className="icon" style={{opacity:0.5}}>cloud</span>
+              <span style={{fontSize:12, fontWeight:600, opacity:0.6, textTransform:'uppercase', letterSpacing:0.5}}>Internet Archive</span>
+              {iaAuth?.authenticated
+                ? <span className="badge" style={{background:'#2a6', color:'#fff', fontSize:10}}>Connected as {iaAuth.screenname}</span>
+                : <span className="badge" style={{background:'#666', color:'#fff', fontSize:10}}>Anonymous</span>
+              }
+              <button className="btn btn-xs" style={{marginLeft:'auto'}} onClick={() => { setIaAuthEditing(!iaAuthEditing); setIaAuthError(null) }}>
+                <span className="icon">{iaAuthEditing ? 'close' : 'settings'}</span>
+              </button>
+            </div>
+            {iaAuthEditing && (
+              <div style={{display:'flex', gap:6, alignItems:'center', flexWrap:'wrap', marginTop:4}}>
+                <input type="text" className="build-select"
+                  placeholder="IA email" value={iaAuthUser}
+                  onChange={e => setIaAuthUser(e.target.value)}
+                  style={{flex:1, minWidth:120, fontSize:12}}
+                  onKeyDown={e => e.key === 'Enter' && document.activeElement?.nextElementSibling?.focus()}
+                />
+                <input type="password" className="build-select"
+                  placeholder="Password" value={iaAuthPass}
+                  onChange={e => setIaAuthPass(e.target.value)}
+                  style={{flex:1, minWidth:120, fontSize:12}}
+                  onKeyDown={e => e.key === 'Enter' && handleIaAuthLogin()}
+                />
+                {iaAuth?.authenticated
+                  ? <button className="btn btn-xs" onClick={handleIaAuthLogout}>Logout</button>
+                  : <button className="btn btn-xs btn-primary" onClick={handleIaAuthLogin}
+                      disabled={!iaAuthUser || !iaAuthPass}>Login</button>
+                }
+              </div>
+            )}
+            {iaAuthError && <p className="error-text" style={{fontSize:12, marginTop:4}}>{iaAuthError}</p>}
+            {iaAuthMsg && <p className="scrape-success" style={{fontSize:12, marginTop:4}}>{iaAuthMsg}</p>}
+            {!iaAuth?.authenticated && !iaAuthEditing && (
+              <p style={{fontSize:11, opacity:0.5, marginTop:2}}>Only public files will be shown. <a href="#" onClick={e => { e.preventDefault(); setIaAuthEditing(true) }}>Log in</a> to access private IA files.</p>
+            )}
           </section>
         )}
       </div>

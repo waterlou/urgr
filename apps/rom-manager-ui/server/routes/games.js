@@ -7,6 +7,7 @@ import { getDb } from '../db.js';
 import { execCli } from '../cli.js';
 import { createJob, updateProgress, doneJob, failJob } from '../jobs.js';
 import { all, get, run, runNow, dbReady } from '../helpers.js';
+import { getAuth } from '../ia-auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -635,8 +636,12 @@ router.post('/:id/download-ia', async (req, res) => {
 
         const args = ['find', romset, game.name, '--output', outputDir];
         if (game.version) {
-          // Use the import dir as a fallback version hint (ia-cli uses it for search)
           args.push('--version', game.version);
+        }
+        const iaAuth = getAuth();
+        if (iaAuth) {
+          args.push('--username', iaAuth.username);
+          args.push('--password', iaAuth.password);
         }
 
         updateProgress(jobId, 0, `Searching for ${game.name} on Internet Archive...`);
