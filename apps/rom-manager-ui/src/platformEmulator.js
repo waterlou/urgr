@@ -79,20 +79,28 @@ const PLATFORM_TO_CORE = {
   'dos': 'dos',
 }
 
+// Fallback when platform is unknown — use the game's source
+const SOURCE_TO_CORE = {
+  'MAME': 'fbneo',
+  'FBNeo': 'fbneo',
+  'NPS': 'psx',
+}
+
 // Normalize platform name for lookup (lowercase, trim)
 function normalizePlatform(p) {
   return (p || '').toLowerCase().trim()
 }
 
-// Get EmulatorJS core name for a platform, or null if unsupported
-export function getEmulatorCore(platform) {
+// Get EmulatorJS core name for a platform, or null if unsupported.
+// Falls back to source-based lookup when platform is empty/unknown.
+export function getEmulatorCore(platform, source) {
   const key = normalizePlatform(platform)
-  return PLATFORM_TO_CORE[key] || null
+  return PLATFORM_TO_CORE[key] || (source ? SOURCE_TO_CORE[source] : null)
 }
 
-// Check if a platform is supported by EmulatorJS
-export function isEmulatorSupported(platform) {
-  return getEmulatorCore(platform) !== null
+// Check if a game is supported by EmulatorJS
+export function isEmulatorSupported(platform, source) {
+  return getEmulatorCore(platform, source) !== null
 }
 
 // Get all supported platforms (for reference)

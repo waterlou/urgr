@@ -28,7 +28,7 @@ export default function EmulatorModal({ game, onClose }) {
 
     async function init() {
       try {
-        const core = getEmulatorCore(game.platform)
+        const core = getEmulatorCore(game.platform, game.source)
         if (!core) {
           setError(`Platform "${game.platform}" is not supported by EmulatorJS`)
           setLoading(false)

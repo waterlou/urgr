@@ -189,7 +189,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                 </button>
               )}
               {game.roms && game.roms.length > 0 && (() => {
-                const supported = isEmulatorSupported(game.platform)
+                const supported = isEmulatorSupported(game.platform, game.source)
                 const canPlay = game.available === 1
                 return (
                   <button
