@@ -10,6 +10,11 @@ Five CLI tools operate on the `data/roms.db` SQLite database (plus `ia-cli` for 
 | [`db-cli`](#db-cli) | Inspect database | — | All tables |
 | [`ia-cli`](#ia-cli) | Search/download from Internet Archive | — (outputs JSON) | — |
 
+**Global flags** (all CLIs):
+| Flag | Description |
+|------|-------------|
+| `--version` | Print version and exit (e.g. `parse-cli 0.1.0`) |
+
 ---
 
 ## Database Schema
