@@ -171,13 +171,14 @@ impl Database {
     pub fn insert_game(&self, version_id: i64, game: &GameEntry) -> Result<i64> {
         let region = game.region.as_deref().unwrap_or("");
         self.conn.execute(
-            "INSERT INTO game_entries (version_id, name, description, year, manufacturer, cloneof, platform, region)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            "INSERT INTO game_entries (version_id, name, description, year, manufacturer, cloneof, romof, platform, region)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(version_id, name, region) DO UPDATE SET
                description = excluded.description,
                year = excluded.year,
                manufacturer = excluded.manufacturer,
                cloneof = excluded.cloneof,
+               romof = excluded.romof,
                platform = excluded.platform",
             params![
                 version_id,
@@ -186,6 +187,7 @@ impl Database {
                 game.year,
                 game.manufacturer,
                 game.cloneof,
+                game.romof,
                 game.platform,
                 region,
             ],
@@ -206,14 +208,15 @@ impl Database {
         for game in games {
             let region = game.region.as_deref().unwrap_or("");
             tx.execute(
-                "INSERT INTO game_entries (version_id, name, description, year, manufacturer, cloneof, platform, region)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                "INSERT INTO game_entries (version_id, name, description, year, manufacturer, cloneof, romof, platform, region)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(version_id, name, region) DO UPDATE SET
                    description = excluded.description,
                    year = excluded.year,
                    manufacturer = excluded.manufacturer,
                    cloneof = excluded.cloneof,
-                    platform = excluded.platform",
+                   romof = excluded.romof,
+                   platform = excluded.platform",
                 params![
                     version_id,
                     game.name,
@@ -221,6 +224,7 @@ impl Database {
                     game.year,
                     game.manufacturer,
                     game.cloneof,
+                    game.romof,
                     game.platform,
                     region,
                 ],
@@ -232,7 +236,7 @@ impl Database {
 
     pub fn list_games(&self, version_id: i64) -> Result<Vec<GameEntry>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, version_id, name, description, year, manufacturer, cloneof, platform, region
+            "SELECT id, version_id, name, description, year, manufacturer, cloneof, romof, platform, region
              FROM game_entries WHERE version_id = ?1 ORDER BY name",
         )?;
         let rows = stmt.query_map(params![version_id], |r| {
@@ -244,8 +248,9 @@ impl Database {
                 year: r.get(4)?,
                 manufacturer: r.get(5)?,
                 cloneof: r.get(6)?,
-                platform: r.get(7)?,
-                region: r.get(8)?,
+                romof: r.get(7)?,
+                platform: r.get(8)?,
+                region: r.get(9)?,
             })
         })?;
         let mut games = Vec::new();
@@ -578,6 +583,7 @@ mod tests {
             year: Some("1990".to_string()),
             manufacturer: Some("Capcom".to_string()),
             cloneof: None,
+            romof: None,
             platform: String::new(),
             region: None,
         }
@@ -744,6 +750,7 @@ mod tests {
             year: Some("1991".into()),
             manufacturer: Some("TestCorp".into()),
             cloneof: None,
+            romof: None,
             platform: String::new(),
             region: None,
         }).collect()

@@ -278,6 +278,9 @@ export function initDb(dbPath) {
   // Migration: set default platform for MAME/FBNeo games (reverted — see BUGS.md)
   try { db.run("UPDATE game_entries SET platform = '' WHERE platform = 'Arcade' AND EXISTS (SELECT 1 FROM set_versions sv WHERE sv.id = game_entries.version_id AND sv.source = 'MAME')"); } catch (_) {}
 
+  // Migration: add romof column to game_entries
+  try { db.run("ALTER TABLE game_entries ADD COLUMN romof TEXT"); } catch (_) {}
+
   // Drop scanned_games table (CLI now returns JSON directly)
   try { db.run("DROP TABLE IF EXISTS scanned_games"); } catch (_) {}
 

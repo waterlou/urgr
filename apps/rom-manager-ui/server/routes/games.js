@@ -241,8 +241,9 @@ router.get('/:id/play', async (req, res) => {
 
     if (!filePath) return res.status(404).json({ error: 'ROM file not found on disk' })
 
-    // For split-format zips: merge parent (cloneof) ROMs into the game zip
-    if (game.cloneof && colFolder1) {
+    // For split-format zips: merge parent ROMs into the game zip (use romof, fallback to cloneof)
+    const parentRef = game.romof || game.cloneof;
+    if (parentRef && colFolder1) {
       const vers = get('SELECT version FROM set_versions WHERE id = ?', [game.version_id]);
       if (vers) {
         const romsDir = path.join(dataDir, 'roms', colFolder1, vers.version, 'roms');
@@ -253,7 +254,7 @@ router.get('/:id/play', async (req, res) => {
         let parentPath = null;
         for (const d of parentDirs) {
           parentPath = findInDir(d)
-          if (parentPath && path.basename(parentPath, '.zip') === game.cloneof) break;
+          if (parentPath && path.basename(parentPath, '.zip') === parentRef) break;
           parentPath = null;
         }
         if (parentPath) {
@@ -680,20 +681,9 @@ router.post('/:id/download-ia', async (req, res) => {
         const outputDir = game.platform ? path.join(baseRomDir, game.platform) : baseRomDir;
         fs.mkdirSync(outputDir, { recursive: true });
 
-        // Build CRC string from rom_entries (subtract parent ROMs for split sets)
-        const gameData = get('SELECT g.*, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [game.id]);
-        const roms = all('SELECT filename, crc32 FROM rom_entries WHERE game_entry_id = ? AND crc32 IS NOT NULL AND crc32 != ?', [game.id, '']);
-        let crcMap = new Map(roms.map(r => [r.filename.toLowerCase(), r.crc32.toUpperCase()]));
-        if (gameData.cloneof) {
-          const parent = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ?', [gameData.version_id, gameData.cloneof]);
-          if (parent) {
-            const parentRoms = all('SELECT filename, crc32 FROM rom_entries WHERE game_entry_id = ? AND crc32 IS NOT NULL AND crc32 != ?', [parent.id, '']);
-            for (const pr of parentRoms) {
-              crcMap.delete(pr.filename.toLowerCase());
-            }
-          }
-        }
-        const crcStr = [...crcMap.entries()].map(([k, v]) => `${k}:${v}`).join(',');
+        // Build CRC string from rom_entries (exclude merge_target ROMs — split format)
+        const roms = all('SELECT filename, crc32 FROM rom_entries WHERE game_entry_id = ? AND crc32 IS NOT NULL AND crc32 != ? AND merge_target IS NULL', [game.id, '']);
+        const crcStr = roms.map(r => `${r.filename}:${r.crc32.toUpperCase()}`).join(',');
 
         // Check cache for a known IA item identifier
         const cachedId = getCachedId(romset, game.version || '');

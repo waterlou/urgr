@@ -140,6 +140,7 @@ fn print_usage() {
     eprintln!("  --json                 Output in JSON format");
     eprintln!("  --db <path>            Database path (required, or $ROM_DB)");
     eprintln!("  --verbose              Verbose per-game decision logging on stderr");
+}
 
 fn main() -> ExitCode {
     tracing_subscriber::fmt()

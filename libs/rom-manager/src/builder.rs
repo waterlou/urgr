@@ -915,6 +915,14 @@ fn verify_game_zip(db: &Database, version_id: i64, game_name: &str, zip_path: &P
         return Ok(false);
     }
 
+    // Split-format support: skip ROMs with merge_target (they live in a parent zip)
+    expected.retain(|r| r.merge_target.is_none());
+
+    // If after skipping merge ROMs there's nothing left, no zip needed
+    if expected.is_empty() {
+        return Ok(true);
+    }
+
     // Split-format support: subtract ROMs inherited from parent (cloneof)
     if let Some(ref parent_name) = game.cloneof {
         if let Some(parent) = games.iter().find(|g| g.name == *parent_name) {
@@ -929,7 +937,8 @@ fn verify_game_zip(db: &Database, version_id: i64, game_name: &str, zip_path: &P
     // If after subtraction we have nothing left, check all (game is its own parent)
     if expected.is_empty() {
         let all = db.list_roms_for_game(game.id)?;
-        return Ok(verify_zip_contains(zip_path, &all));
+        let non_merge: Vec<_> = all.iter().filter(|r| r.merge_target.is_none()).cloned().collect();
+        return Ok(verify_zip_contains(zip_path, &non_merge));
     }
     Ok(verify_zip_contains(zip_path, &expected))
 }
@@ -957,6 +966,7 @@ mod tests {
                 year: None,
                 manufacturer: None,
                 cloneof: None,
+                romof: None,
                 platform: String::new(),
                 region: None,
             },

@@ -48,6 +48,7 @@ pub fn parse_clrmamepro_str(text: &str) -> (Vec<GameEntry>, Vec<RomEntry>, Parse
             year: kv.get("year").cloned(),
             manufacturer: kv.get("manufacturer").cloned(),
             cloneof: kv.get("cloneof").cloned(),
+            romof: None,
             platform: String::new(),
             region: None,
         });
