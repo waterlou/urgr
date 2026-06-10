@@ -349,7 +349,7 @@ export default function App() {
 
       <main className="main-pane">
         {activeView === 'home' ? (
-          <Dashboard onSelectCollection={(id) => handleSelect('collection', id)} />
+          <Dashboard onSelectCollection={(id) => handleSelect('collection', id)} onSelectGame={handleSelectGame} />
         ) : activeView === 'downloads' ? (
           <DownloadManager onBack={() => handleSelect('home', null)} />
         ) : activeView === 'operations' ? (

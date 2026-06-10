@@ -284,6 +284,9 @@ export function initDb(dbPath) {
   // Drop scanned_games table (CLI now returns JSON directly)
   try { db.run("DROP TABLE IF EXISTS scanned_games"); } catch (_) {}
 
+  // Migration: add last_played column to game_state
+  try { db.run("ALTER TABLE game_state ADD COLUMN last_played TEXT"); } catch (_) {}
+
   // Migration: normalize NULL regions and deduplicate game_entries
   try {
     db.run("PRAGMA foreign_keys=OFF");

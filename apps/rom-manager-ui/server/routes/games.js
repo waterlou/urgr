@@ -20,7 +20,7 @@ router.get('/', async (req, res) => {
   await dbReady;
   try {
     const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, collection_id, version_id, parents_only, favourites_only, roms_only } = req.query;
-    const sortCol = sort === 'rating' ? 'COALESCE(r.rating, 0)' : sort === 'play_count' ? 'COALESCE(r.play_count, 0)' : 'g.name';
+    const sortCol = sort === 'rating' ? 'COALESCE(r.rating, 0)' : sort === 'play_count' ? 'COALESCE(r.play_count, 0)' : sort === 'last_played' ? 'r.last_played' : 'g.name';
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
 
     let where = [];
@@ -56,7 +56,7 @@ router.get('/', async (req, res) => {
     const countSql = `SELECT COUNT(DISTINCT g.name) as c FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id ${joinClause} ${whereClause}`;
     const total = params.length ? get(countSql, params).c : get(countSql).c;
 
-    const sortCol2 = sort === 'rating' ? 'MAX(COALESCE(r.rating, 0))' : sort === 'play_count' ? 'MAX(COALESCE(r.play_count, 0))' : 'g.name';
+    const sortCol2 = sort === 'rating' ? 'MAX(COALESCE(r.rating, 0))' : sort === 'play_count' ? 'MAX(COALESCE(r.play_count, 0))' : sort === 'last_played' ? 'MAX(r.last_played)' : 'g.name';
     const pageParams = params.slice();
     pageParams.push(Number(limit), Number(offset));
     let games = all(`
@@ -66,6 +66,7 @@ router.get('/', async (req, res) => {
         MAX(COALESCE(r.rating, 0)) as rating,
         MAX(COALESCE(r.favourite, 0)) as favourite,
         MAX(COALESCE(r.play_count, 0)) as play_count,
+        MAX(r.last_played) as last_played,
         MAX(CASE WHEN g.covers != '[]' THEN g.covers ELSE NULL END) as covers_json,
         MAX(CASE WHEN g.screenshots != '[]' THEN g.screenshots ELSE NULL END) as screenshots_json
       FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id
@@ -727,6 +728,21 @@ router.put('/:id/rating', async (req, res) => {
       if (favourite != null) run("UPDATE game_state SET favourite = ?, updated_at = datetime('now') WHERE game_entry_id = ?", [favourite ? 1 : 0, req.params.id]);
     } else {
       run('INSERT INTO game_state (game_entry_id, rating, favourite) VALUES (?, ?, ?)', [req.params.id, rating ?? 0, favourite ? 1 : 0]);
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/:id/play', async (req, res) => {
+  await dbReady;
+  try {
+    const game = get('SELECT id FROM game_entries WHERE id = ?', [req.params.id]);
+    if (!game) return res.status(404).json({ error: 'Game not found' });
+    const existing = get('SELECT game_entry_id FROM game_state WHERE game_entry_id = ?', [req.params.id]);
+    if (existing) {
+      run("UPDATE game_state SET play_count = play_count + 1, last_played = datetime('now'), updated_at = datetime('now') WHERE game_entry_id = ?", [req.params.id]);
+    } else {
+      run("INSERT INTO game_state (game_entry_id, play_count, last_played) VALUES (?, 1, datetime('now'))", [req.params.id]);
     }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }

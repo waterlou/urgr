@@ -1,17 +1,34 @@
 import { useState, useEffect } from 'react'
-import { getCollections, getCollectionGames } from '../api.js'
+import { getCollections, getGames, recordPlay, coverUrl } from '../api.js'
+import { isEmulatorSupported } from '../platformEmulator.js'
 import IconDisplay from './IconDisplay.jsx'
+import EmulatorModal from './EmulatorModal.jsx'
 
-export default function Dashboard({ onSelectCollection }) {
+export default function Dashboard({ onSelectCollection, onSelectGame }) {
   const [collections, setCollections] = useState([])
+  const [recentGames, setRecentGames] = useState([])
   const [loading, setLoading] = useState(true)
+  const [emulatorGame, setEmulatorGame] = useState(null)
+  const [emuKey, setEmuKey] = useState(0)
 
   useEffect(() => {
-    getCollections().then(data => {
-      setCollections(data || [])
+    Promise.all([
+      getCollections().catch(() => []),
+      getGames({ sort: 'last_played', order: 'desc', roms_only: 'true', limit: 6 }).catch(() => ({ games: [] }))
+    ]).then(([cols, gamesData]) => {
+      setCollections(cols || [])
+      setRecentGames(gamesData.games || [])
       setLoading(false)
-    }).catch(() => setLoading(false))
+    })
   }, [])
+
+  function handlePlayGame(e, game) {
+    e.stopPropagation()
+    if (!isEmulatorSupported(game.platform, game.source)) return
+    recordPlay(game.id).catch(() => {})
+    setEmulatorGame(game)
+    setEmuKey(k => k + 1)
+  }
 
   if (loading) {
     return <div className="loading-screen"><div className="loading-spinner" /></div>
@@ -31,6 +48,34 @@ export default function Dashboard({ onSelectCollection }) {
       </div>
 
       <div className="browser-content">
+        {recentGames.length > 0 && (
+          <section className="recently-played">
+            <h2 className="section-title">Recently Played</h2>
+            <div className="recently-played-grid">
+              {recentGames.map(game => {
+                const img = game.covers?.length > 0 ? coverUrl(game.id) : null
+                const supported = isEmulatorSupported(game.platform, game.source)
+                return (
+                  <div key={game.id} className="recently-played-card" onClick={() => onSelectGame(game)}>
+                    <div className="recently-played-img">
+                      {img ? <img src={img} alt={game.name} loading="lazy" /> : <div className="recently-played-placeholder"><span className="icon">image_not_supported</span></div>}
+                      {supported && (
+                        <button className="recently-played-play" onClick={e => handlePlayGame(e, game)} title={`Play ${game.name}`}>
+                          <span className="icon">play_arrow</span>
+                        </button>
+                      )}
+                    </div>
+                    <div className="recently-played-info">
+                      <div className="recently-played-name">{game.name}</div>
+                      {game.description && <div className="recently-played-desc">{game.description}</div>}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )}
+
         {collections.length === 0 ? (
           <p className="modal-description">No collections yet. Create one to get started.</p>
         ) : (
@@ -58,6 +103,8 @@ export default function Dashboard({ onSelectCollection }) {
           </div>
         )}
       </div>
+
+      {emulatorGame && <EmulatorModal key={emuKey} game={emulatorGame} onClose={() => setEmulatorGame(null)} />}
     </div>
   )
 }

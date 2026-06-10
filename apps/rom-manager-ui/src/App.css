@@ -1532,6 +1532,115 @@ html, body, #root {
   transition: width 0.3s;
 }
 
+/* Recently Played */
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text);
+}
+
+.recently-played {
+  margin-bottom: 28px;
+}
+
+.recently-played-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.recently-played-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.recently-played-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.recently-played-img {
+  position: relative;
+  aspect-ratio: 1;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.recently-played-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.recently-played-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 28px;
+}
+
+.recently-played-play {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all 0.15s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
+.recently-played-card:hover .recently-played-play {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.recently-played-play:hover {
+  background: #c40812;
+}
+
+.recently-played-play .icon {
+  font-size: 18px;
+}
+
+.recently-played-info {
+  padding: 8px 10px;
+}
+
+.recently-played-name {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recently-played-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
 .modal-body { padding: 24px 40px 40px; }
 
 .modal-description {

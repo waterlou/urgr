@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { getGame, coverUrl, scrapeGameMetadata, enqueueDownload, downloadGameFromIA, subscribeJobSSE, getIaAuthStatus } from '../api.js'
+import { getGame, coverUrl, scrapeGameMetadata, enqueueDownload, downloadGameFromIA, subscribeJobSSE, getIaAuthStatus, recordPlay } from '../api.js'
 import { isEmulatorSupported } from '../platformEmulator.js'
 import EmulatorModal from './EmulatorModal.jsx'
 
@@ -194,7 +194,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                 return (
                   <button
                     className={`btn btn-sm play-btn ${!supported ? 'play-btn-unsupported' : ''}`}
-                    onClick={() => canPlay && supported && (setShowEmulator(true), setEmuKey(n => n + 1))}
+                    onClick={() => canPlay && supported && (recordPlay(game.id).catch(() => {}), setShowEmulator(true), setEmuKey(n => n + 1))}
                     disabled={!canPlay || !supported}
                     title={!supported
                       ? `EmulatorJS does not support ${game.platform || 'this platform'}`
