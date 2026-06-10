@@ -16,7 +16,6 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
   const [iaDownloadMsg, setIaDownloadMsg] = useState(null)
   const [showEmulator, setShowEmulator] = useState(false)
   const [iaAuth, setIaAuth] = useState(null)
-  const [emuKey, setEmuKey] = useState(0)
 
   useEffect(() => {
     getGame(gameId).then(g => {
@@ -343,7 +342,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
       </div>
 
       {showEmulator && (
-        <EmulatorModal key={emuKey} game={game} onClose={() => setShowEmulator(false)} />
+        <EmulatorModal game={game} onClose={() => { setShowEmulator(false); setTimeout(() => location.reload(), 100) }} />
       )}
     </div>
   )
