@@ -839,7 +839,7 @@ router.post('/api/versions/import-online', async (req, res) => {
           else if (isMame) score = 2;
 
           if (isQualified) score -= 1;
-          if (isXml) score += 1;
+          if (isXml) score += 2;  // prefer XML over DAT (has romof)
 
           if (score > 0) {
             candidateFiles.push({ fp, score });
