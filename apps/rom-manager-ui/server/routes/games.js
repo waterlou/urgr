@@ -617,7 +617,7 @@ router.post('/:id/download-ia', async (req, res) => {
     const game = get('SELECT g.id, g.name, g.version_id, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [req.params.id]);
     if (!game) return res.status(404).json({ error: 'Game not found' });
 
-    const col = get(`SELECT c.id, c.folder, c.slug FROM collections c
+    const col = get(`SELECT c.id, c.folder, c.slug, c.name FROM collections c
       JOIN collection_versions cv ON cv.collection_id = c.id
       WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
     if (!col) return res.status(404).json({ error: 'Collection not found' });
@@ -637,6 +637,10 @@ router.post('/:id/download-ia', async (req, res) => {
         const args = ['find', romset, game.name, '--output', outputDir];
         if (game.version) {
           args.push('--version', game.version);
+        }
+        // Use collection name as a search hint for better IA results
+        if (col.name) {
+          args.push('--collection', col.name);
         }
         const iaAuth = getAuth();
         if (iaAuth) {

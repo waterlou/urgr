@@ -38,7 +38,7 @@ async fn cmd_search(args: &[String]) -> Result<(), String> {
     let romset = &args[1];
     let version = args.get(2).map(|s| s.as_str());
 
-    let docs = ia_archive::search_items(romset, version, 10).await?;
+    let docs = ia_archive::search_items(romset, version, None, 10).await?;
 
     if docs.is_empty() {
         println!("No matching items found on Internet Archive.");
@@ -184,7 +184,7 @@ async fn cmd_download(args: &[String]) -> Result<(), String> {
 
 async fn cmd_find(args: &[String]) -> Result<(), String> {
     if args.len() < 3 {
-        return Err("Usage: ia-cli find <romset> <game> [--version <v>] [--crc <crc>] [--output <dir>] [--username <u>] [--password <p>]"
+        return Err("Usage: ia-cli find <romset> <game> [--version <v>] [--crc <crc>] [--output <dir>] [--username <u>] [--password <p>] [--collection <name>]"
             .into());
     }
     let romset = &args[1];
@@ -196,6 +196,10 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
     let _crc = args
         .iter()
         .position(|a| a == "--crc")
+        .and_then(|p| args.get(p + 1));
+    let collection_name = args
+        .iter()
+        .position(|a| a == "--collection")
         .and_then(|p| args.get(p + 1));
     let username = args
         .iter()
@@ -230,80 +234,37 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
     };
     let is_authenticated = auth_session.is_some();
 
-    // Step 1: Search for the ROM set
-    eprintln!("Searching for {} rom set...", romset);
-    let docs = ia_archive::search_items(romset, version.map(|s| s.as_str()), 20).await?;
-
-    if docs.is_empty() {
-        return Err(format!(
-            "No '{}' ROM set found on Internet Archive.",
-            romset
-        ));
-    }
-
     let game_lower = game.to_lowercase();
     let mut found_match: Option<(String, String, u64)> = None;
-    let mut tried_items = Vec::new();
+    let mut tried_items: Vec<String> = Vec::new();
+
+    // Step 1: Search for the ROM set
+    let search_term = collection_name.unwrap_or(romset);
+    eprintln!("Searching for {} on Internet Archive...", search_term);
+    let docs = ia_archive::search_items(romset, version.map(|s| s.as_str()), collection_name.map(|s| s.as_str()), 20).await?;
+
+    if docs.is_empty() {
+        return Err(format!("No '{}' ROM set found on Internet Archive.", romset));
+    }
 
     for doc in &docs {
+        if tried_items.contains(&doc.identifier) { continue; }
         tried_items.push(doc.identifier.clone());
         eprintln!("  Checking: {}...", doc.identifier);
-        let meta = match ia_archive::get_metadata(&doc.identifier).await {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-
-        let matches: Vec<_> = meta
-            .files
-            .iter()
-            .filter(|f| {
-                let name_lower = f.name.to_lowercase();
-                name_lower.contains(&game_lower)
-                    && (name_lower.ends_with(".zip") || name_lower.ends_with(".7z"))
-                    && f.size.parse::<u64>().unwrap_or(0) > 0
-                    && (is_authenticated || f.private.as_deref() != Some("true"))
-            })
-            .collect();
-
-        if let Some(best) = matches.first() {
-            let file_path = best.name.trim_start_matches('/').to_string();
-            let size = best.size.parse::<u64>().unwrap_or(0);
-            found_match = Some((doc.identifier.clone(), file_path, size));
-            break;
-        }
+        found_match = find_game_in_item(&doc.identifier, &game_lower, is_authenticated).await?;
+        if found_match.is_some() { break; }
     }
 
     // Fallback: search directly for the game name on IA
     if found_match.is_none() {
         eprintln!("  Not found in ROM sets. Searching for game name directly...");
-        let game_docs = ia_archive::search_items(game, version.map(|s| s.as_str()), 10).await.unwrap_or_default();
+        let game_docs = ia_archive::search_items(game, version.map(|s| s.as_str()), None, 10).await.unwrap_or_default();
         for doc in &game_docs {
             if tried_items.contains(&doc.identifier) { continue; }
             tried_items.push(doc.identifier.clone());
             eprintln!("  Checking: {}...", doc.identifier);
-            let meta = match ia_archive::get_metadata(&doc.identifier).await {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            let matches: Vec<_> = meta
-                .files
-                .iter()
-                .filter(|f| {
-                    let name_lower = f.name.to_lowercase();
-                    let zip_name = format!("{}.zip", game_lower);
-                    let z7_name = format!("{}.7z", game_lower);
-                    name_lower == zip_name || name_lower == z7_name
-                        || name_lower.contains(&game_lower) && (name_lower.ends_with(".zip") || name_lower.ends_with(".7z"))
-                        && f.size.parse::<u64>().unwrap_or(0) > 0
-                        && (is_authenticated || f.private.as_deref() != Some("true"))
-                })
-                .collect();
-            if let Some(best) = matches.first() {
-                let file_path = best.name.trim_start_matches('/').to_string();
-                let size = best.size.parse::<u64>().unwrap_or(0);
-                found_match = Some((doc.identifier.clone(), file_path, size));
-                break;
-            }
+            found_match = find_game_in_item(&doc.identifier, &game_lower, is_authenticated).await?;
+            if found_match.is_some() { break; }
         }
     }
 
@@ -345,4 +306,27 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
     println!("\nDone! Saved to: {}", saved_path);
     println!("Size: {:.1} MB", size as f64 / 1_048_576.0);
     Ok(())
+}
+
+/// Check a single IA item for a game file matching the given name.
+async fn find_game_in_item(ident: &str, game_lower: &str, is_authenticated: bool) -> Result<Option<(String, String, u64)>, String> {
+    let meta = ia_archive::get_metadata(ident).await?;
+    let matches: Vec<_> = meta
+        .files
+        .iter()
+        .filter(|f| {
+            let nl = f.name.to_lowercase();
+            nl.contains(game_lower)
+                && (nl.ends_with(".zip") || nl.ends_with(".7z"))
+                && f.size.parse::<u64>().unwrap_or(0) > 0
+                && (is_authenticated || f.private.as_deref() != Some("true"))
+        })
+        .collect();
+    if let Some(best) = matches.first() {
+        let file_path = best.name.trim_start_matches('/').to_string();
+        let size = best.size.parse::<u64>().unwrap_or(0);
+        Ok(Some((ident.to_string(), file_path, size)))
+    } else {
+        Ok(None)
+    }
 }

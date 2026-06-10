@@ -21,13 +21,16 @@ pub struct SearchDoc {
     pub downloads: Option<i64>,
 }
 
-/// Search Internet Archive for items matching romset name and optional version.
+/// Search Internet Archive for items matching a romset and optional collection name/version.
+/// `collection_name` is preferred — when set the search uses it as the primary term.
 pub async fn search_items(
     romset: &str,
     version: Option<&str>,
+    collection_name: Option<&str>,
     rows: u32,
 ) -> Result<Vec<SearchDoc>, String> {
-    let mut query = format!("title:({} roms) OR description:({} roms)", romset, romset);
+    let primary = collection_name.unwrap_or(romset);
+    let mut query = format!("title:({} roms) OR description:({} roms)", primary, primary);
     if let Some(ver) = version {
         query.push_str(&format!(" AND (title:{} OR description:{})", ver, ver));
     }
