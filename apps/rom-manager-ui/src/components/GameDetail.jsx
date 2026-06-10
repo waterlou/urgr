@@ -276,10 +276,10 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                       })()}</td>
                       <td><span className="badge">{rom.subtype || 'game'}</span></td>
                       <td>{rom.size != null ? formatSize(rom.size) : '-'}</td>
-                      <td>{rom.downloaded ? <span className="icon" style={{color:'var(--accent)',fontSize:16}}>check</span> : <span className="icon" style={{color:'#888',fontSize:16}}>close</span>}</td>
                       {game.source !== 'NPS' && (
                         <td><span className={`rom-status rom-status-${rom.status}`}>{rom.status}</span></td>
                       )}
+                      <td>{rom.downloaded ? <span className="icon" style={{color:'var(--accent)',fontSize:16}}>check</span> : <span className="icon" style={{color:'#888',fontSize:16}}>close</span>}</td>
                       <td className="rom-hash">{rom.crc32 || rom.sha1 ? (rom.crc32 || rom.sha1).slice(0, 12) + '...' : '-'}</td>
                     </tr>
                   ))}
