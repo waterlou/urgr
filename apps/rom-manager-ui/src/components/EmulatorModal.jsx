@@ -5,23 +5,28 @@ import { playUrl } from '../api.js'
 
 const EJS_CDN = 'https://cdn.emulatorjs.org/nightly/data/'
 
-let scriptEl = null
+let scriptLoaded = false
 
 function loadScript() {
+  // Remove any previous loader script
+  document.querySelectorAll('script[src*="loader.js"]').forEach(s => s.remove())
+  scriptLoaded = false
+  // Always load fresh — no caching (EmulatorJS doesn't support re-init)
   return new Promise((resolve, reject) => {
-    if (scriptEl) { resolve(); return }
     const s = document.createElement('script')
-    s.src = EJS_CDN + 'loader.js'
-    s.onload = () => resolve()
+    s.src = EJS_CDN + 'loader.js?_=' + Date.now()
+    s.onload = () => { scriptLoaded = true; resolve() }
     s.onerror = () => reject(new Error('Failed to load EmulatorJS'))
     document.head.appendChild(s)
-    scriptEl = s
   })
 }
 
 export default function EmulatorModal({ game, onClose }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  // Force fresh container on each mount (cache-bust timestamp)
+  const containerKey = `ejs-${Date.now()}`
 
   useEffect(() => {
     let destroyed = false
@@ -60,7 +65,6 @@ export default function EmulatorModal({ game, onClose }) {
     return () => {
       destroyed = true
 
-      // Stop the emulator: close audio context, clear main loop, remove DOM
       try {
         const emu = window.EJS_emulator
         if (emu) {
@@ -70,22 +74,15 @@ export default function EmulatorModal({ game, onClose }) {
         }
       } catch {}
 
-      // Remove emulator DOM and script element
+      document.querySelectorAll('canvas').forEach(c => c.remove())
+      document.querySelectorAll('iframe').forEach(c => c.remove())
       const el = document.getElementById('emulator-game')
       if (el) el.innerHTML = ''
-      if (scriptEl) {
-        scriptEl.remove()
-        scriptEl = null
-      }
+      document.querySelectorAll('script[src*="loader.js"]').forEach(s => s.remove())
 
-      // Clean up globals
-      try { delete window.EJS_emulator } catch {}
-      try { delete window.EJS_player } catch {}
-      try { delete window.EJS_core } catch {}
-      try { delete window.EJS_gameName } catch {}
       try { delete window.EJS_gameUrl } catch {}
-      try { delete window.EJS_color } catch {}
-      try { delete window.EJS_pathtodata } catch {}
+      try { delete window.EJS_emulator } catch {}
+      try { delete window.EJS_core } catch {}
     }
   }, [game])
 
@@ -119,7 +116,7 @@ export default function EmulatorModal({ game, onClose }) {
               <p>{error}</p>
             </div>
           )}
-          <div id="emulator-game" className="emulator-game-container" />
+          <div id="emulator-game" key={containerKey} className="emulator-game-container" />
         </div>
       </div>
     </div>,
