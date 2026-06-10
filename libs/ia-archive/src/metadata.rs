@@ -21,7 +21,11 @@ pub struct IAFile {
 /// Get the file listing for an IA item.
 pub async fn get_metadata(identifier: &str) -> Result<MetadataResponse, String> {
     let url = format!("{}/{}", METADATA_URL, identifier);
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+        .cookie_store(true)
+        .build()
+        .map_err(|e| format!("Failed to build client: {}", e))?;
     let resp = client
         .get(&url)
         .header("User-Agent", "GameManager/0.1")

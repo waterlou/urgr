@@ -2,7 +2,21 @@ use std::path::Path;
 use tokio::io::AsyncWriteExt;
 use futures_util::StreamExt;
 
-const DOWNLOAD_URL: &str = "https://archive.org/download";
+/// URL-encode special characters in a path segment for IA downloads
+fn encode_ia_path(path: &str) -> String {
+    path.chars()
+        .map(|c| match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '/' | '.' | '-' | '_' | ' ' => c.to_string(),
+            _ => {
+                let mut out = String::new();
+                for b in c.to_string().bytes() {
+                    out.push_str(&format!("%{:02X}", b));
+                }
+                out
+            }
+        })
+        .collect()
+}
 
 /// Download a file from an IA item.
 /// Returns the number of bytes downloaded.
@@ -12,18 +26,23 @@ pub async fn download_file(
     out_dir: &Path,
     on_progress: Option<&dyn Fn(u64, u64)>,
 ) -> Result<(String, u64), String> {
-    let url = format!("{}/{}/{}", DOWNLOAD_URL, identifier, path);
-    let client = reqwest::Client::new();
+    let encoded_path = encode_ia_path(path);
+    let url = format!("https://archive.org/download/{}/{}", identifier, encoded_path);
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+        .cookie_store(true)
+        .build()
+        .map_err(|e| format!("Failed to build client: {}", e))?;
 
     let resp = client
         .get(&url)
-        .header("User-Agent", "GameManager/0.1")
+        .header("Referer", "https://archive.org/")
         .send()
         .await
         .map_err(|e| format!("HTTP error: {}", e))?;
 
     if !resp.status().is_success() {
-        return Err(format!("Download returned HTTP {}", resp.status()));
+        return Err(format!("Download returned HTTP {} for {}", resp.status(), url));
     }
 
     let total_size = resp.content_length().unwrap_or(0);
@@ -45,7 +64,6 @@ pub async fn download_file(
     let mut downloaded: u64 = 0;
     let mut stream = resp.bytes_stream();
 
-    use futures_util::StreamExt;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("Download error: {}", e))?;
         file.write_all(&chunk)

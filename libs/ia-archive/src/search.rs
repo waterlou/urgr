@@ -32,7 +32,11 @@ pub async fn search_items(
         query.push_str(&format!(" AND (title:{} OR description:{})", ver, ver));
     }
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+        .cookie_store(true)
+        .build()
+        .map_err(|e| format!("Failed to build client: {}", e))?;
     let url = format!(
         "{}?q={}&fl[]=identifier&fl[]=title&fl[]=downloads&sort[]=downloads+desc&output=json&rows={}",
         SEARCH_URL, urlencoding(&query), rows
