@@ -107,7 +107,6 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
         onError: (err) => {
           setIaDownloadMsg(`Error: ${err}`)
           setIaDownloading(false)
-          setTimeout(() => setIaDownloadMsg(null), 4000)
         },
       })
     } catch (err) {
