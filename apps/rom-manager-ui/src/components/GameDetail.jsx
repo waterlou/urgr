@@ -326,7 +326,15 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                   </span>
                 </div>
             }
-            {iaDownloadMsg && !iaDownloading && <p className="scrape-success" style={{marginTop:4}}>{iaDownloadMsg}</p>}
+            {iaDownloadMsg && !iaDownloading && (
+              <p className="scrape-success" style={{marginTop:4}}>
+                {iaDownloadMsg.split(/(https?:\/\/[^\s]+)/g).map((part, i) =>
+                  part.match(/^https?:\/\//)
+                    ? <a key={i} href={part} target="_blank" rel="noopener noreferrer" style={{wordBreak:'break-all'}}>{part}</a>
+                    : part
+                )}
+              </p>
+            )}
           </section>
         )}
 
