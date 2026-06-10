@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { getGame, coverUrl, scrapeGameMetadata, enqueueDownload, downloadGameFromIA, subscribeJobSSE } from '../api.js'
+import { getGame, coverUrl, scrapeGameMetadata, enqueueDownload, downloadGameFromIA, subscribeJobSSE, getIaAuthStatus } from '../api.js'
 import { isEmulatorSupported } from '../platformEmulator.js'
 import EmulatorModal from './EmulatorModal.jsx'
 
@@ -15,6 +15,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
   const [iaDownloading, setIaDownloading] = useState(false)
   const [iaDownloadMsg, setIaDownloadMsg] = useState(null)
   const [showEmulator, setShowEmulator] = useState(false)
+  const [iaAuth, setIaAuth] = useState(null)
 
   useEffect(() => {
     getGame(gameId).then(g => {
@@ -35,6 +36,10 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
           .finally(() => setScraping(false))
       }
     }).catch(console.error)
+  }, [gameId])
+
+  useEffect(() => {
+    getIaAuthStatus().then(s => setIaAuth(s)).catch(() => {})
   }, [gameId])
 
   // Refresh game data when tab becomes visible (download state may have changed)
@@ -310,9 +315,17 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
           <section>
             {iaDownloading
               ? <div className="loading-inline"><div className="loading-spinner-sm" /> {iaDownloadMsg}</div>
-              : <button className="btn btn-sm" onClick={handleIaDownload} disabled={iaDownloading}>
-                  <span className="icon">download</span> Download from Internet Archive
-                </button>
+              : <div style={{display:'flex', alignItems:'center', gap:8}}>
+                  <button className="btn btn-sm" onClick={handleIaDownload} disabled={iaDownloading}>
+                    <span className="icon">download</span> Download from Internet Archive
+                  </button>
+                  <span className="badge" style={{
+                    background: iaAuth?.authenticated ? 'var(--accent)' : '#555',
+                    color: '#fff', fontSize: 10, opacity: 0.8
+                  }}>
+                    {iaAuth?.authenticated ? `IA: ${iaAuth.screenname}` : 'IA: Anonymous'}
+                  </span>
+                </div>
             }
             {iaDownloadMsg && !iaDownloading && <p className="scrape-success" style={{marginTop:4}}>{iaDownloadMsg}</p>}
           </section>
