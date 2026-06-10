@@ -823,7 +823,7 @@ router.post('/api/versions/import-online', async (req, res) => {
         const dats = allFiles.map(fp => ({ fp, base: path.basename(fp).toLowerCase() }))
           .filter(({ base }) => {
             if (!base.endsWith('.xml') && !(base.endsWith('.dat') && !/without.?crc|nocrc/i.test(base))) return false;
-            if (/\(arcade\)|\(mess\)/.test(base)) return false; // skip partial sets
+            if (/\(?arcade\)?|\(?mess\)?|\bchd\b/i.test(base)) return false; // skip partial/subset files
             return mameDatMatches(base, version) || /^mame(\s|\b|_)/.test(base);
           })
           .sort((a, b) => {
@@ -871,6 +871,8 @@ router.post('/api/versions/import-online', async (req, res) => {
         }
 
         if (!foundDat) throw new Error(`No DAT/XML file found for version "${version}" in the archive`);
+
+        console.log(`[mame-import] Selected: ${foundDat} (${(fs.statSync(foundDat).size / 1024 / 1024).toFixed(1)} MB)`);
 
         const result = execCli(['import', foundDat, 'MAME', version], { binary: 'parse' });
         if (!result) throw new Error('CLI returned null');
