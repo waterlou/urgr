@@ -4,6 +4,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { getJob, cancelJob } from '../jobs.js';
 import { get, dbReady } from '../helpers.js';
+import { setAuth, clearAuth } from '../ia-auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = Router();
@@ -121,6 +122,22 @@ router.put('/api/settings', async (req, res) => {
       }
     }
     fs.writeFileSync(SETTINGS_PATH, serializeEnv(current), 'utf-8');
+
+    // Live-reload IA auth if credentials changed
+    if ('IA_USERNAME' in updates || 'IA_PASSWORD' in updates) {
+      const user = current.IA_USERNAME || '';
+      const pass = current.IA_PASSWORD || '';
+      if (user && pass) {
+        setAuth(user, pass).then(() => {
+          console.log('[settings] IA login successful');
+        }).catch(e => {
+          console.error('[settings] IA login failed:', e.message);
+        });
+      } else {
+        clearAuth();
+      }
+    }
+
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
