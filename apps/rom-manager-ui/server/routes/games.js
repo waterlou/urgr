@@ -112,20 +112,23 @@ router.get('/:id', async (req, res) => {
     const roms = all('SELECT * FROM rom_entries WHERE game_entry_id = ?', [game.id]);
     const state = get('SELECT * FROM game_state WHERE game_entry_id = ?', [game.id]);
 
-    // Helper: check if a specific zip contains an entry with matching CRC
-    function checkRomInZip(zipPath, expectedCrc) {
+    // Cache: read all CRC32 values from a zip once (runs unzip -v once per zip)
+    const zipCrcCache = new Map();
+    function getZipCrcs(zipPath) {
+      if (!zipPath || !fs.existsSync(zipPath)) return null;
+      if (zipCrcCache.has(zipPath)) return zipCrcCache.get(zipPath);
+      const crcs = new Set();
       try {
-        if (!fs.existsSync(zipPath) || !expectedCrc) return false;
         const output = execSync(`unzip -v "${zipPath}"`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
         for (const line of output.split('\n')) {
           const parts = line.trim().split(/\s+/);
-          // Format: Length Method Size Ratio Date Time CRC-32 Name
           if (parts.length >= 7 && parts[6].length === 8 && /^[0-9a-f]{8}$/i.test(parts[6])) {
-            if (parts[6].toUpperCase() === expectedCrc.toUpperCase()) return true;
+            crcs.add(parts[6].toUpperCase());
           }
         }
-        return false;
-      } catch { return false; }
+      } catch {}
+      zipCrcCache.set(zipPath, crcs);
+      return crcs;
     }
 
     // Find the game's zip file
@@ -148,37 +151,51 @@ router.get('/:id', async (req, res) => {
       }
     }
 
-    // Helper: find a zip by game name following romof chain
-    function findParentZip(gameName, vers) {
-      const romsDir = path.join(dataDir, 'roms', colFolder, vers, 'roms');
-      const dirs = game.platform ? [path.join(romsDir, game.platform), romsDir] : [romsDir];
-      for (const d of dirs) {
-        if (!fs.existsSync(d)) continue;
-        for (const entry of fs.readdirSync(d)) {
-          if (entry.endsWith('.zip') && path.basename(entry, '.zip') === gameName) {
-            return path.join(d, entry);
+    // Collect all needed zips for CRC checking
+    const neededZips = new Map(); // zipPath → Set of expected CRCs to check
+    if (gameZipPath) {
+      for (const rom of roms) {
+        if (!rom.crc32) continue;
+        if (rom.merge_target) {
+          // Merge ROM — find parent zip via romof chain
+          if (!neededZips.has('_parent')) {
+            let parentZip = null;
+            let currentName = game.romof || game.cloneof;
+            while (currentName && !parentZip) {
+              const pDir = path.join(dataDir, 'roms', colFolder, game.version, 'roms');
+              const pDirs = game.platform ? [path.join(pDir, game.platform), pDir] : [pDir];
+              for (const d of pDirs) {
+                if (!fs.existsSync(d)) continue;
+                for (const entry of fs.readdirSync(d)) {
+                  if (entry.endsWith('.zip') && path.basename(entry, '.zip') === currentName) {
+                    parentZip = path.join(d, entry);
+                    break;
+                  }
+                }
+                if (parentZip) break;
+              }
+              if (!parentZip) {
+                const parentGame = get('SELECT romof, cloneof FROM game_entries WHERE version_id = ? AND name = ?', [game.version_id, currentName]);
+                currentName = parentGame ? (parentGame.romof || parentGame.cloneof) : null;
+              }
+            }
+            neededZips.set('_parent', parentZip);
           }
         }
       }
-      return null;
     }
 
+    // Read cached CRC sets
+    const gameCrcs = gameZipPath ? getZipCrcs(gameZipPath) : null;
+    const parentPath = neededZips.get('_parent');
+    const parentCrcs = parentPath ? getZipCrcs(parentPath) : null;
+
     for (const rom of roms) {
+      if (!rom.crc32) { rom.downloaded = false; continue; }
       if (rom.merge_target) {
-        // Merge ROM — follow romof chain to find parent zip
-        let parentZip = null;
-        let currentName = game.romof || game.cloneof;
-        while (currentName && !parentZip) {
-          parentZip = findParentZip(currentName, game.version);
-          if (!parentZip) {
-            const parentGame = get('SELECT romof, cloneof FROM game_entries WHERE version_id = ? AND name = ?', [game.version_id, currentName]);
-            currentName = parentGame ? (parentGame.romof || parentGame.cloneof) : null;
-          }
-        }
-        rom.downloaded = parentZip ? checkRomInZip(parentZip, rom.crc32) : false;
+        rom.downloaded = gameZipPath && parentCrcs ? parentCrcs.has(rom.crc32.toUpperCase()) : false;
       } else {
-        // Non-merge ROM — check in game's own zip
-        rom.downloaded = gameZipPath ? checkRomInZip(gameZipPath, rom.crc32) : false;
+        rom.downloaded = gameCrcs ? gameCrcs.has(rom.crc32.toUpperCase()) : false;
       }
     }
     const clones = all(`SELECT id, name, description, cloneof, region FROM game_entries WHERE name = ? AND version_id = ? AND id != ?${game.cloneof ? ' AND cloneof IS NOT NULL' : ''} ORDER BY name`, [game.cloneof || game.name, game.version_id, game.id]);
