@@ -645,6 +645,17 @@ router.post('/:id/download-ia', async (req, res) => {
 
         updateProgress(jobId, 90, 'Updating availability...');
 
+        // Verify the file was actually downloaded
+        const downloadedFile = ['.zip', '.7z'].map(ext => path.join(outputDir, game.name + ext)).find(f => fs.existsSync(f));
+
+        if (!downloadedFile) {
+          // Check if any file matching the game name exists in outputDir
+          const files = fs.readdirSync(outputDir).filter(f => f.toLowerCase().includes(game.name.toLowerCase()));
+          if (files.length === 0) {
+            throw new Error(`Download completed but file not found for ${game.name}`);
+          }
+        }
+
         // Update game_state.available after download
         run(`INSERT INTO game_state (game_entry_id, available, updated_at)
           SELECT ge.id, 1, datetime('now') FROM game_entries ge WHERE ge.id = ?

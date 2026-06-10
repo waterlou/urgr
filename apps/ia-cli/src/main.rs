@@ -205,13 +205,14 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
         .iter()
         .filter(|f| {
             let name_lower = f.name.to_lowercase();
-            name_lower.contains(&game_lower) && name_lower.ends_with(".zip")
+            name_lower.contains(&game_lower)
+                && (name_lower.ends_with(".zip") || name_lower.ends_with(".7z"))
+                && f.size.parse::<u64>().unwrap_or(0) > 0
         })
         .collect();
 
     if matches.is_empty() {
-        println!("  Game '{}' not found in item '{}'.", game, identifier);
-        // Show some example files
+        eprintln!("  Game '{}' not found in item '{}'.", game, identifier);
         let zips: Vec<_> = meta
             .files
             .iter()
@@ -219,12 +220,12 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
             .take(10)
             .collect();
         if !zips.is_empty() {
-            println!("  Example files available:");
+            eprintln!("  Example files available:");
             for z in &zips {
-                println!("    {}", z.name);
+                eprintln!("    {}", z.name);
             }
         }
-        return Ok(());
+        return Err(format!("Game '{}' not found on Internet Archive", game));
     }
 
     let target = &matches[0];
