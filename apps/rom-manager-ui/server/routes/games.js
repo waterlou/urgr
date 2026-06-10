@@ -632,7 +632,8 @@ router.post('/:id/download-ia', async (req, res) => {
 
     setTimeout(async () => {
       try {
-        const outputDir = path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms', colFolder);
+        const outputDir = path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms', colFolder, game.version || '', 'roms');
+        fs.mkdirSync(outputDir, { recursive: true });
 
         // Build CRC string from rom_entries
         const roms = all('SELECT filename, crc32 FROM rom_entries WHERE game_entry_id = ? AND crc32 IS NOT NULL AND crc32 != ?', [game.id, '']);
