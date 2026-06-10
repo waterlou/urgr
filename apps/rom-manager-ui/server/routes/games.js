@@ -8,6 +8,7 @@ import { execCli } from '../cli.js';
 import { createJob, updateProgress, doneJob, failJob } from '../jobs.js';
 import { all, get, run, runNow, dbReady } from '../helpers.js';
 import { getAuth } from '../ia-auth.js';
+import { getCachedId, setCachedId } from '../ia-cache.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -622,7 +623,6 @@ router.post('/:id/download-ia', async (req, res) => {
       WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
     if (!col) return res.status(404).json({ error: 'Collection not found' });
 
-    // Determine romset name from source
     const romset = game.source.toLowerCase();
     const colFolder = col.folder || col.slug;
 
@@ -634,14 +634,18 @@ router.post('/:id/download-ia', async (req, res) => {
       try {
         const outputDir = path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms', colFolder);
 
+        // Build CRC string from rom_entries
+        const roms = all('SELECT filename, crc32 FROM rom_entries WHERE game_entry_id = ? AND crc32 IS NOT NULL AND crc32 != ?', [game.id, '']);
+        const crcStr = roms.map(r => `${r.filename}:${r.crc32.toUpperCase()}`).join(',');
+
+        // Check cache for a known IA item identifier
+        const cachedId = getCachedId(romset, game.version || '');
+
         const args = ['find', romset, game.name, '--output', outputDir];
-        if (game.version) {
-          args.push('--version', game.version);
-        }
-        // Use collection name as a search hint for better IA results
-        if (col.name) {
-          args.push('--collection', col.name);
-        }
+        if (game.version) args.push('--version', game.version);
+        if (cachedId) args.push('--cached-id', cachedId);
+        if (crcStr) args.push('--crc', crcStr);
+
         const iaAuth = getAuth();
         if (iaAuth) {
           args.push('--username', iaAuth.username);
@@ -652,25 +656,37 @@ router.post('/:id/download-ia', async (req, res) => {
 
         const result = execCli(args, { binary: 'ia' });
 
-        updateProgress(jobId, 90, 'Updating availability...');
+        // Parse JSON result from CLI
+        if (!result.ok) {
+          const errMsg = result.error || 'Unknown error';
+          const dlUrl = result.download_url || '';
+          const msg = dlUrl ? `${errMsg}. Download URL: ${dlUrl}` : errMsg;
+          throw new Error(msg);
+        }
+
+        // Update cache with the found identifier
+        if (result.cached_id) {
+          setCachedId(romset, game.version || '', result.cached_id);
+        }
 
         // Verify the file was actually downloaded
-        const downloadedFile = ['.zip', '.7z'].map(ext => path.join(outputDir, game.name + ext)).find(f => fs.existsSync(f));
+        const filename = result.file || game.name;
+        const downloadedFile = [path.join(outputDir, filename), ...['.zip', '.7z'].map(ext => path.join(outputDir, game.name + ext))]
+          .find(f => fs.existsSync(f));
 
         if (!downloadedFile) {
-          // Check if any file matching the game name exists in outputDir
           const files = fs.readdirSync(outputDir).filter(f => f.toLowerCase().includes(game.name.toLowerCase()));
           if (files.length === 0) {
             throw new Error(`Download completed but file not found for ${game.name}`);
           }
         }
 
-        // Update game_state.available after download
+        // Update game_state.available after successful download
         run(`INSERT INTO game_state (game_entry_id, available, updated_at)
           SELECT ge.id, 1, datetime('now') FROM game_entries ge WHERE ge.id = ?
           ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [game.id]);
 
-        doneJob(jobId, { ok: true, details: result });
+        doneJob(jobId, { ok: true, crc_match: result.crc_match, details: result });
       } catch (e) {
         if (job._abort.signal.aborted) return;
         failJob(jobId, e.message);
