@@ -1552,13 +1552,25 @@ html, body, #root {
 }
 
 .recently-played-card {
+  position: relative;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 14px;
   overflow: hidden;
   cursor: pointer;
   transition: border-color 0.15s, transform 0.15s;
   min-height: 120px;
+  box-shadow: inset 0 0 20px rgba(0,0,0,0.4), inset 0 0 60px rgba(0,0,0,0.15);
+}
+
+.recently-played-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.35) 100%);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .recently-played-card.landscape {
@@ -1615,6 +1627,7 @@ html, body, #root {
   justify-content: center;
   box-shadow: 0 2px 8px rgba(0,0,0,0.4);
   pointer-events: none;
+  z-index: 2;
 }
 
 .recently-played-play .icon {
