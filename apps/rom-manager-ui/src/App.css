@@ -1555,7 +1555,7 @@ html, body, #root {
   position: relative;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 50% / 10%;
   overflow: hidden;
   cursor: pointer;
   transition: border-color 0.15s, transform 0.15s;
@@ -1566,8 +1566,11 @@ html, body, #root {
 .recently-played-card::after {
   content: '';
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
+  top: 8%;
+  bottom: 8%;
+  right: -4%;
+  left: -4%;
+  border-radius: 5% / 50%;
   background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.35) 100%);
   pointer-events: none;
   z-index: 1;
