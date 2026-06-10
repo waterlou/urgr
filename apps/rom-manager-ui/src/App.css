@@ -1613,20 +1613,8 @@ html, body, #root {
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transform: scale(0.8);
-  transition: all 0.15s;
   box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-}
-
-.recently-played-card:hover .recently-played-play {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.recently-played-play:hover {
-  background: #c40812;
+  pointer-events: none;
 }
 
 .recently-played-play .icon {

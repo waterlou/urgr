@@ -65,13 +65,13 @@ export default function Dashboard({ onSelectCollection, onSelectGame }) {
                 const supported = isEmulatorSupported(game.platform, game.source)
                 const orient = orientations[game.id]
                 return (
-                  <div key={game.id} className={`recently-played-card${orient ? ' ' + orient : ''}`} onClick={() => onSelectGame(game)}>
+                  <div key={game.id} className={`recently-played-card${orient ? ' ' + orient : ''}`} onClick={e => handlePlayGame(e, game)}>
                     <div className="recently-played-img">
                       {img ? <img src={img} alt="" loading="lazy" onLoad={e => handleImgLoad(e, game.id)} /> : <div className="recently-played-placeholder"><span className="icon">image_not_supported</span></div>}
                       {supported && (
-                        <button className="recently-played-play" onClick={e => handlePlayGame(e, game)} title={`Play ${game.name}`}>
+                        <div className="recently-played-play">
                           <span className="icon">play_arrow</span>
-                        </button>
+                        </div>
                       )}
                     </div>
                   </div>
