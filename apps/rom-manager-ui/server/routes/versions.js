@@ -873,11 +873,7 @@ router.post('/api/versions/import-online', async (req, res) => {
         if (!foundDat) throw new Error(`No DAT/XML file found for version "${version}" in the archive`);
 
         console.log(`[mame-import] Selected: ${foundDat} (${(fs.statSync(foundDat).size / 1024 / 1024).toFixed(1)} MB)`);
-        try {
-          const sample = fs.readFileSync(foundDat, { encoding: 'utf-8', flag: 'r' }).slice(0, 500);
-          console.log(`[mame-import] Head: ${sample.replace(/\n/g, '\\n')}`);
-          fs.writeFileSync('/tmp/mame_debug_sample.txt', sample);
-        } catch {}
+        try { fs.writeFileSync('/tmp/mame_debug_sample.txt', fs.readFileSync(foundDat, { encoding: 'utf-8', flag: 'r' }).slice(0, 500)); } catch {}
 
         const result = execCli(['import', foundDat, 'MAME', version], { binary: 'parse' });
         if (!result) throw new Error('CLI returned null');

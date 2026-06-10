@@ -111,12 +111,75 @@ router.get('/:id', async (req, res) => {
     if (typeof game.synopsis === 'string') try { game.synopsis = JSON.parse(game.synopsis); } catch {}
     const roms = all('SELECT * FROM rom_entries WHERE game_entry_id = ?', [game.id]);
     const state = get('SELECT * FROM game_state WHERE game_entry_id = ?', [game.id]);
-    // Mark which ROMs are available: downloaded via queue, or imported (game_state.available)
-    const completedDownloads = new Set(
-      all('SELECT filename FROM download_queue WHERE game_entry_id = ? AND status = ?', [game.id, 'completed']).map(r => r.filename)
-    );
+
+    // Helper: check if a specific zip contains an entry with matching CRC
+    function checkRomInZip(zipPath, expectedCrc) {
+      try {
+        if (!fs.existsSync(zipPath) || !expectedCrc) return false;
+        const output = execSync(`unzip -v "${zipPath}"`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+        for (const line of output.split('\n')) {
+          const parts = line.trim().split(/\s+/);
+          // Format: Length Method Size Ratio Date Time CRC-32 Name
+          if (parts.length >= 7 && parts[6].length === 8 && /^[0-9a-f]{8}$/i.test(parts[6])) {
+            if (parts[6].toUpperCase() === expectedCrc.toUpperCase()) return true;
+          }
+        }
+        return false;
+      } catch { return false; }
+    }
+
+    // Find the game's zip file
+    let gameZipPath = null;
+    const dataDir = path.resolve(__dirname, '..', '..', '..', '..', 'data');
+    const col = get('SELECT c.folder, c.slug FROM collections c JOIN collection_versions cv ON cv.collection_id = c.id WHERE cv.version_id = ? LIMIT 1', [game.version_id]);
+    const colFolder = col?.folder || col?.slug;
+    if (colFolder) {
+      const romsDir = path.join(dataDir, 'roms', colFolder, game.version || '', 'roms');
+      const dirs = game.platform ? [path.join(romsDir, game.platform), romsDir] : [romsDir];
+      for (const d of dirs) {
+        if (!fs.existsSync(d)) continue;
+        for (const entry of fs.readdirSync(d)) {
+          if (entry.endsWith('.zip') && path.basename(entry, '.zip') === game.name) {
+            gameZipPath = path.join(d, entry);
+            break;
+          }
+        }
+        if (gameZipPath) break;
+      }
+    }
+
+    // Helper: find a zip by game name following romof chain
+    function findParentZip(gameName, vers) {
+      const romsDir = path.join(dataDir, 'roms', colFolder, vers, 'roms');
+      const dirs = game.platform ? [path.join(romsDir, game.platform), romsDir] : [romsDir];
+      for (const d of dirs) {
+        if (!fs.existsSync(d)) continue;
+        for (const entry of fs.readdirSync(d)) {
+          if (entry.endsWith('.zip') && path.basename(entry, '.zip') === gameName) {
+            return path.join(d, entry);
+          }
+        }
+      }
+      return null;
+    }
+
     for (const rom of roms) {
-      rom.downloaded = completedDownloads.has(rom.filename) || state?.available === 1
+      if (rom.merge_target) {
+        // Merge ROM — follow romof chain to find parent zip
+        let parentZip = null;
+        let currentName = game.romof || game.cloneof;
+        while (currentName && !parentZip) {
+          parentZip = findParentZip(currentName, game.version);
+          if (!parentZip) {
+            const parentGame = get('SELECT romof, cloneof FROM game_entries WHERE version_id = ? AND name = ?', [game.version_id, currentName]);
+            currentName = parentGame ? (parentGame.romof || parentGame.cloneof) : null;
+          }
+        }
+        rom.downloaded = parentZip ? checkRomInZip(parentZip, rom.crc32) : false;
+      } else {
+        // Non-merge ROM — check in game's own zip
+        rom.downloaded = gameZipPath ? checkRomInZip(gameZipPath, rom.crc32) : false;
+      }
     }
     const clones = all(`SELECT id, name, description, cloneof, region FROM game_entries WHERE name = ? AND version_id = ? AND id != ?${game.cloneof ? ' AND cloneof IS NOT NULL' : ''} ORDER BY name`, [game.cloneof || game.name, game.version_id, game.id]);
     let parent = null;
