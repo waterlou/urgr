@@ -38,7 +38,13 @@ pub fn parse_logiqx_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>, Vec
                     .and_then(|a| a.ok())
                     .and_then(|a| a.unescape_value().ok());
 
-                match parse_game(&mut xml, &name, cloneof.as_deref()) {
+                let romof = e
+                    .attributes()
+                    .find(|a| a.as_ref().is_ok_and(|a| a.key.as_ref() == b"romof"))
+                    .and_then(|a| a.ok())
+                    .and_then(|a| a.unescape_value().ok());
+
+                match parse_game(&mut xml, &name, cloneof.as_deref(), romof.as_deref()) {
                     Ok((game, roms)) => {
                         let game_id = games.len() as i64;
                         let game_entry = GameEntry {
@@ -49,7 +55,7 @@ pub fn parse_logiqx_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>, Vec
                             year: game.2,
                             manufacturer: game.3,
                             cloneof: game.4,
-                            romof: None,
+                            romof: game.5,
                             platform: String::new(),
                             region: None,
                         };
@@ -94,13 +100,14 @@ pub fn parse_logiqx_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>, Vec
     Ok((games, all_roms, stats))
 }
 
-type GameData = (String, String, Option<String>, Option<String>, Option<String>);
+type GameData = (String, String, Option<String>, Option<String>, Option<String>, Option<String>);
 type RomRecord = (String, Option<i64>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>);
 
 fn parse_game<R: BufRead>(
     xml: &mut Reader<R>,
     name: &str,
     cloneof: Option<&str>,
+    romof: Option<&str>,
 ) -> Result<(GameData, Vec<RomRecord>)> {
     let mut description = String::new();
     let mut year: Option<String> = None;
@@ -160,6 +167,7 @@ fn parse_game<R: BufRead>(
             year,
             manufacturer,
             cloneof.map(|s| s.to_string()),
+            romof.map(|s| s.to_string()),
         ),
         roms,
     ))

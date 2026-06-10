@@ -143,6 +143,10 @@ fn print_usage() {
 }
 
 fn main() -> ExitCode {
+    if std::env::args().any(|a| a == "--version") {
+        println!("build-cli {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
