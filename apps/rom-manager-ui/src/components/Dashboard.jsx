@@ -10,6 +10,7 @@ export default function Dashboard({ onSelectCollection, onSelectGame }) {
   const [loading, setLoading] = useState(true)
   const [emulatorGame, setEmulatorGame] = useState(null)
   const [emuKey, setEmuKey] = useState(0)
+  const [orientations, setOrientations] = useState({})
 
   useEffect(() => {
     Promise.all([
@@ -28,6 +29,13 @@ export default function Dashboard({ onSelectCollection, onSelectGame }) {
     recordPlay(game.id).catch(() => {})
     setEmulatorGame(game)
     setEmuKey(k => k + 1)
+  }
+
+  function handleImgLoad(e, gameId) {
+    const { naturalWidth, naturalHeight } = e.target
+    if (naturalWidth && naturalHeight) {
+      setOrientations(prev => ({ ...prev, [gameId]: naturalWidth > naturalHeight ? 'landscape' : 'portrait' }))
+    }
   }
 
   if (loading) {
@@ -55,10 +63,11 @@ export default function Dashboard({ onSelectCollection, onSelectGame }) {
               {recentGames.map(game => {
                 const img = game.screenshots?.length > 0 ? (() => { let u = game.screenshots[0]; if (u.startsWith('//')) u = 'https:' + u; return u; })() : null
                 const supported = isEmulatorSupported(game.platform, game.source)
+                const orient = orientations[game.id]
                 return (
-                  <div key={game.id} className="recently-played-card" onClick={() => onSelectGame(game)}>
+                  <div key={game.id} className={`recently-played-card${orient ? ' ' + orient : ''}`} onClick={() => onSelectGame(game)}>
                     <div className="recently-played-img">
-                      {img ? <img src={img} alt="" loading="lazy" /> : <div className="recently-played-placeholder"><span className="icon">image_not_supported</span></div>}
+                      {img ? <img src={img} alt="" loading="lazy" onLoad={e => handleImgLoad(e, game.id)} /> : <div className="recently-played-placeholder"><span className="icon">image_not_supported</span></div>}
                       {supported && (
                         <button className="recently-played-play" onClick={e => handlePlayGame(e, game)} title={`Play ${game.name}`}>
                           <span className="icon">play_arrow</span>

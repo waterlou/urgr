@@ -1546,8 +1546,9 @@ html, body, #root {
 
 .recently-played-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-auto-flow: dense;
+  gap: 8px;
 }
 
 .recently-played-card {
@@ -1557,6 +1558,17 @@ html, body, #root {
   overflow: hidden;
   cursor: pointer;
   transition: border-color 0.15s, transform 0.15s;
+  min-height: 120px;
+}
+
+.recently-played-card.landscape {
+  grid-column: span 2;
+  aspect-ratio: 16/9;
+}
+
+.recently-played-card.portrait {
+  grid-column: span 1;
+  aspect-ratio: 3/4;
 }
 
 .recently-played-card:hover {
@@ -1566,7 +1578,8 @@ html, body, #root {
 
 .recently-played-img {
   position: relative;
-  aspect-ratio: 1;
+  width: 100%;
+  height: 100%;
   background: var(--bg);
   overflow: hidden;
 }
