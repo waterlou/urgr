@@ -301,8 +301,9 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
     // Download to temp path first for CRC verification
     let temp_dir = out_dir.join(".ia-tmp");
     tokio::fs::create_dir_all(&temp_dir).await.map_err(|e| format!("Failed to create temp dir: {}", e))?;
-    let filename = file_path.rsplit('/').next().unwrap_or(&file_path);
-    let temp_path = temp_dir.join(filename);
+    let ia_filename = file_path.rsplit('/').next().unwrap_or(&file_path);
+    let ext = ia_filename.rsplit('.').next().unwrap_or("zip");
+    let filename = format!("{}.{}", game, ext);
 
     let (actual_path, _) = ia_archive::download_file_with_client(
         dl_client,
@@ -319,7 +320,7 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
     .await?;
 
     // Move to final destination
-    let final_path = out_dir.join(filename);
+    let final_path = out_dir.join(&filename);
     if actual_path != final_path.to_string_lossy().to_string() {
         tokio::fs::rename(&actual_path, &final_path).await.map_err(|e| format!("Failed to move file: {}", e))?;
     }
