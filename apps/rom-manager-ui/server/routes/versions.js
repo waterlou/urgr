@@ -819,43 +819,26 @@ router.post('/api/versions/import-online', async (req, res) => {
         };
         walkDir(extractDir);
 
-        // Score files: prefer .xml (Logiqx/MAME XML) over .dat (can be ROMCenter/other)
-        // First check for version-matched files; if none found, accept any MAME-named DAT/XML
-        let bestScore = 0;
-        const candidateFiles = [];
+        // Pick the best MAME DAT/XML: prefer XML (has romof), skip arcade/mess subsets
+        const dats = allFiles.map(fp => ({ fp, base: path.basename(fp).toLowerCase() }))
+          .filter(({ base }) => {
+            if (!base.endsWith('.xml') && !(base.endsWith('.dat') && !/without.?crc|nocrc/i.test(base))) return false;
+            if (/\(arcade\)|\(mess\)/.test(base)) return false; // skip partial sets
+            return mameDatMatches(base, version) || /^mame(\s|\b|_)/.test(base);
+          })
+          .sort((a, b) => {
+            // .xml first (has romof), then .dat
+            const aIsXml = a.base.endsWith('.xml') ? 0 : 1;
+            const bIsXml = b.base.endsWith('.xml') ? 0 : 1;
+            if (aIsXml !== bIsXml) return aIsXml - bIsXml;
+            // Version match before generic MAME name
+            const aVer = mameDatMatches(a.base, version) ? 0 : 1;
+            const bVer = mameDatMatches(b.base, version) ? 0 : 1;
+            if (aVer !== bVer) return aVer - bVer;
+            return a.base.localeCompare(b.base);
+          });
 
-        for (const fp of allFiles) {
-          const base = path.basename(fp).toLowerCase();
-          const isDat = base.endsWith('.dat') && !/without.?crc|nocrc/i.test(base);
-          const isXml = base.endsWith('.xml');
-          if (!isDat && !isXml) continue;
-
-          const versionMatch = mameDatMatches(base, version);
-          const isMame = /^mame(\s|\b|_)/.test(base);
-          const isQualified = /\(arcade\)|\(mess\)/.test(base);
-
-          let score = 0;
-          if (versionMatch) score = 4;
-          else if (isMame) score = 2;
-
-          if (isQualified) score -= 1;
-          if (isXml) score += 2;  // prefer XML over DAT (has romof)
-
-          if (score > 0) {
-            candidateFiles.push({ fp, score });
-            if (score > bestScore) bestScore = score;
-          }
-        }
-
-        // Pick the highest-scored file; prefer .xml on tie
-        let candidates = candidateFiles.filter(c => c.score === bestScore);
-        candidates.sort((a, b) => {
-          // .xml first, then .dat
-          const aExt = a.fp.endsWith('.xml') ? 0 : 1;
-          const bExt = b.fp.endsWith('.xml') ? 0 : 1;
-          return aExt - bExt || a.fp.localeCompare(b.fp);
-        });
-        if (candidates.length > 0) foundDat = candidates[0].fp;
+        if (dats.length > 0) foundDat = dats[0].fp;
 
         if (!foundDat) {
           for (const fp of allFiles) {
