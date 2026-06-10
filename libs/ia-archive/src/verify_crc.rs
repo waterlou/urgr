@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
 
 /// Result of CRC verification on a downloaded zip.
@@ -7,6 +8,8 @@ pub struct CrcResult {
     pub match_count: usize,
     pub mismatch_count: usize,
     pub mismatches: Vec<CrcMismatch>,
+    pub missing_count: usize,
+    pub missing: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -18,8 +21,8 @@ pub struct CrcMismatch {
 
 /// Open a zip file at `path` and compare entry CRCs against `expected`.
 /// `expected` is a map of entry filename (lowercase) -> 8-char hex CRC string (uppercase).
-/// An entry CRC matches if the expected map contains its name and the CRCs are equal.
-/// Returns the number of matched and mismatched entries.
+/// All expected entries must be present in the zip — any missing entry causes a mismatch.
+/// Returns the number of matched, mismatched, and missing entries.
 pub fn verify_zip_crc(path: &Path, expected: &HashMap<String, String>) -> Result<CrcResult, String> {
     let file = std::fs::File::open(path)
         .map_err(|e| format!("Failed to open zip for CRC verification: {}", e))?;
@@ -27,11 +30,12 @@ pub fn verify_zip_crc(path: &Path, expected: &HashMap<String, String>) -> Result
         .map_err(|e| format!("Failed to read zip for CRC verification: {}", e))?;
 
     if expected.is_empty() {
-        return Ok(CrcResult { match_count: 0, mismatch_count: 0, mismatches: vec![] });
+        return Ok(CrcResult { match_count: 0, mismatch_count: 0, mismatches: vec![], missing_count: 0, missing: vec![] });
     }
 
     let mut match_count = 0usize;
     let mut mismatches = Vec::new();
+    let mut found_in_zip: HashSet<String> = HashSet::new();
 
     for i in 0..archive.len() {
         let entry = archive.by_index_raw(i)
@@ -42,6 +46,7 @@ pub fn verify_zip_crc(path: &Path, expected: &HashMap<String, String>) -> Result
         let entry_crc = format!("{:08X}", entry.crc32());
 
         if let Some(expected_crc) = expected.get(&entry_name) {
+            found_in_zip.insert(entry_name);
             if entry_crc == *expected_crc {
                 match_count += 1;
             } else {
@@ -54,6 +59,13 @@ pub fn verify_zip_crc(path: &Path, expected: &HashMap<String, String>) -> Result
         }
     }
 
-    let mismatch_count = mismatches.len();
-    Ok(CrcResult { match_count, mismatch_count, mismatches })
+    // Check for expected entries missing from the zip
+    let missing: Vec<String> = expected.keys()
+        .filter(|k| !found_in_zip.contains(*k))
+        .cloned()
+        .collect();
+
+    let missing_count = missing.len();
+
+    Ok(CrcResult { match_count, mismatch_count: mismatches.len(), mismatches, missing_count, missing })
 }

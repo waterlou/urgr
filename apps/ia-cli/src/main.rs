@@ -302,7 +302,6 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
     let temp_dir = out_dir.join(".ia-tmp");
     tokio::fs::create_dir_all(&temp_dir).await.map_err(|e| format!("Failed to create temp dir: {}", e))?;
     let filename = file_path.rsplit('/').next().unwrap_or(&file_path);
-    let temp_path = temp_dir.join(filename);
 
     let (actual_path, _) = ia_archive::download_file_with_client(
         dl_client,
@@ -328,12 +327,20 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
     let crc_result = if !expected_crcs.is_empty() {
         eprintln!("\r  Verifying CRC...");
         let r = ia_archive::verify_zip_crc(&final_path, &expected_crcs)?;
-        if r.mismatches.is_empty() {
+        if r.mismatches.is_empty() && r.missing.is_empty() {
             eprintln!("  CRC: {} entries matched ✓", r.match_count);
         } else {
-            eprintln!("  CRC mismatch! {} matched, {} mismatched:", r.match_count, r.mismatch_count);
-            for m in &r.mismatches {
-                eprintln!("    {}: expected {}, got {}", m.entry_name, m.expected, m.got);
+            if !r.mismatches.is_empty() {
+                eprintln!("  CRC mismatch! {} matched, {} mismatched:", r.match_count, r.mismatch_count);
+                for m in &r.mismatches {
+                    eprintln!("    {}: expected {}, got {}", m.entry_name, m.expected, m.got);
+                }
+            }
+            if !r.missing.is_empty() {
+                eprintln!("  CRC incomplete! {} entries missing from zip:", r.missing_count);
+                for m in &r.missing {
+                    eprintln!("    {}", m);
+                }
             }
         }
         Some(r)
@@ -341,7 +348,7 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
         None
     };
 
-    let crc_match = crc_result.as_ref().map_or(true, |r| r.mismatches.is_empty());
+    let crc_match = crc_result.as_ref().map_or(true, |r| r.mismatches.is_empty() && r.missing.is_empty());
     let download_url = format!("https://archive.org/download/{}/{}", identifier, file_path);
 
     // Output JSON result
@@ -366,6 +373,7 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
                 "expected": m.expected,
                 "got": m.got,
             })).collect::<Vec<_>>(),
+            "crc_missing": r.missing,
             "download_url": download_url,
         })
     };
@@ -392,13 +400,15 @@ fn flag_val<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
 
 async fn find_game_in_item(ident: &str, game_lower: &str, is_authenticated: bool) -> Result<Option<(String, String, u64)>, String> {
     let meta = ia_archive::get_metadata(ident).await?;
+    let game_zip = format!("{}.zip", game_lower);
+    let game_7z = format!("{}.7z", game_lower);
     let matches: Vec<_> = meta
         .files
         .iter()
         .filter(|f| {
             let nl = f.name.to_lowercase();
-            nl.contains(game_lower)
-                && (nl.ends_with(".zip") || nl.ends_with(".7z"))
+            let base = nl.rsplit('/').next().unwrap_or(&nl);
+            (base == &game_zip || base == &game_7z)
                 && f.size.parse::<u64>().unwrap_or(0) > 0
                 && (is_authenticated || f.private.as_deref() != Some("true"))
         })
