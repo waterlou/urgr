@@ -241,43 +241,51 @@ router.get('/:id/play', async (req, res) => {
 
     if (!filePath) return res.status(404).json({ error: 'ROM file not found on disk' })
 
-    // For split-format zips: merge parent ROMs into the game zip (use romof, fallback to cloneof)
-    const parentRef = game.romof || game.cloneof;
-    if (parentRef && colFolder1) {
+    // For split-format zips: merge all parent ROMs in the romof chain recursively
+    if (colFolder1) {
       const vers = get('SELECT version FROM set_versions WHERE id = ?', [game.version_id]);
       if (vers) {
         const romsDir = path.join(dataDir, 'roms', colFolder1, vers.version, 'roms');
-        const parentDirs = [
+        const searchDirs = [
           ...(game.platform ? [path.join(romsDir, game.platform)] : []),
           romsDir,
         ];
-        let parentPath = null;
-        for (const d of parentDirs) {
-          parentPath = findInDir(d)
-          if (parentPath && path.basename(parentPath, '.zip') === parentRef) break;
-          parentPath = null;
+
+        // Collect all parent zips following romof chain
+        const parentZips = [];
+        let currentRef = game.romof || game.cloneof;
+        while (currentRef) {
+          let found = null;
+          for (const d of searchDirs) {
+            found = findInDir(d);
+            if (found && path.basename(found, '.zip') === currentRef) break;
+            found = null;
+          }
+          if (!found) break;
+          parentZips.push(found);
+          // Find the parent game's romof for next chain link
+          const parentGame = get('SELECT romof, cloneof FROM game_entries WHERE version_id = ? AND name = ?', [game.version_id, currentRef]);
+          currentRef = parentGame ? (parentGame.romof || parentGame.cloneof) : null;
         }
-        if (parentPath) {
+
+        if (parentZips.length > 0) {
           const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rom-'));
           const mergedPath = path.join(tmpDir, path.basename(filePath));
           try {
-            // Extract game zip
-            execSync(`unzip -o "${filePath}" -d "${tmpDir}/game"`, { stdio: 'ignore' });
-            // Extract parent zip (entries that game doesn't override)
-            execSync(`unzip -o "${parentPath}" -d "${tmpDir}/parent"`, { stdio: 'ignore' });
-            // Merge: copy parent entries first, then game entries overrides
             const mergeDir = path.join(tmpDir, 'merged');
             fs.mkdirSync(mergeDir, { recursive: true });
-            execSync(`cp -R "${tmpDir}/parent/." "${mergeDir}/"`, { stdio: 'ignore' });
-            execSync(`cp -R "${tmpDir}/game/." "${mergeDir}/"`, { stdio: 'ignore' });
+            // Extract parents in chain order (root first, then closer)
+            for (const pz of parentZips.reverse()) {
+              execSync(`unzip -o "${pz}" -d "${mergeDir}"`, { stdio: 'ignore' });
+            }
+            // Extract game zip last (overrides)
+            execSync(`unzip -o "${filePath}" -d "${mergeDir}"`, { stdio: 'ignore' });
             // Re-zip
             execSync(`cd "${mergeDir}" && zip -X -r "${mergedPath}" .`, { stdio: 'ignore' });
             filePath = mergedPath;
-            // Register cleanup after response
             res.on('finish', () => { try { fs.rmSync(tmpDir, { recursive: true }); } catch {} });
           } catch (e) {
             try { fs.rmSync(tmpDir, { recursive: true }); } catch {}
-            // Fall through to serve the game zip alone
           }
         }
       }
