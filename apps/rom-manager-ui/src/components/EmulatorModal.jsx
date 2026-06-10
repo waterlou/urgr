@@ -78,11 +78,21 @@ export default function EmulatorModal({ game, onClose }) {
       document.querySelectorAll('iframe').forEach(c => c.remove())
       const el = document.getElementById('emulator-game')
       if (el) el.innerHTML = ''
-      document.querySelectorAll('script[src*="loader.js"]').forEach(s => s.remove())
+      // Remove ALL EmulatorJS scripts (loader + core wasm)
+      document.querySelectorAll('script').forEach(s => {
+        if (s.src && (s.src.includes('emulatorjs') || s.src.includes('loader.js') || s.src.includes('wasm'))) {
+          s.remove()
+        }
+      })
 
       try { delete window.EJS_gameUrl } catch {}
       try { delete window.EJS_emulator } catch {}
       try { delete window.EJS_core } catch {}
+      window.Module = undefined
+      // Clear any remaining EJS globals
+      Object.keys(window).filter(k => k.startsWith('EJS_')).forEach(k => {
+        try { delete window[k] } catch { window[k] = undefined }
+      })
     }
   }, [game])
 

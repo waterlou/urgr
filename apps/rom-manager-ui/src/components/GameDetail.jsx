@@ -16,6 +16,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
   const [iaDownloadMsg, setIaDownloadMsg] = useState(null)
   const [showEmulator, setShowEmulator] = useState(false)
   const [iaAuth, setIaAuth] = useState(null)
+  const [emuKey, setEmuKey] = useState(0)
 
   useEffect(() => {
     getGame(gameId).then(g => {
@@ -194,7 +195,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                 return (
                   <button
                     className={`btn btn-sm play-btn ${!supported ? 'play-btn-unsupported' : ''}`}
-                    onClick={() => canPlay && supported && setShowEmulator(true)}
+                    onClick={() => canPlay && supported && (setShowEmulator(true), setEmuKey(n => n + 1))}
                     disabled={!canPlay || !supported}
                     title={!supported
                       ? `EmulatorJS does not support ${game.platform || 'this platform'}`
@@ -342,7 +343,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
       </div>
 
       {showEmulator && (
-        <EmulatorModal game={game} onClose={() => setShowEmulator(false)} />
+        <EmulatorModal key={emuKey} game={game} onClose={() => setShowEmulator(false)} />
       )}
     </div>
   )
