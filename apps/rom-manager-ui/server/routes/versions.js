@@ -819,7 +819,7 @@ router.post('/api/versions/import-online', async (req, res) => {
         };
         walkDir(extractDir);
 
-        // Pick the best MAME DAT/XML: prefer .xml (has romof), skip arcade/mess subsets
+        // Pick the best MAME DAT/XML: prefer .dat (smaller), skip arcade/mess/chd subsets
         const dats = allFiles.map(fp => ({ fp, base: path.basename(fp).toLowerCase() }))
           .filter(({ base }) => {
             if (!base.endsWith('.xml') && !(base.endsWith('.dat') && !/without.?crc|nocrc/i.test(base))) return false;
@@ -827,10 +827,10 @@ router.post('/api/versions/import-online', async (req, res) => {
             return mameDatMatches(base, version) || /^mame(\s|\b|_)/.test(base);
           })
           .sort((a, b) => {
-            // .xml preferred (has romof); .dat fallback (ClrMAMEPro lacks romof)
-            const aIsXml = a.base.endsWith('.xml') ? 0 : 1;
-            const bIsXml = b.base.endsWith('.xml') ? 0 : 1;
-            if (aIsXml !== bIsXml) return aIsXml - bIsXml;
+            // .dat preferred (smaller, faster); .xml fallback (huge)
+            const aIsDat = a.base.endsWith('.dat') ? 0 : 1;
+            const bIsDat = b.base.endsWith('.dat') ? 0 : 1;
+            if (aIsDat !== bIsDat) return aIsDat - bIsDat;
             // Version match before generic MAME name
             const aVer = mameDatMatches(a.base, version) ? 0 : 1;
             const bVer = mameDatMatches(b.base, version) ? 0 : 1;
