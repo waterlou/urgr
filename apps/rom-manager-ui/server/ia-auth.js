@@ -1,5 +1,12 @@
 // IA auth module — stores cookies and S3 keys for authenticated IA access.
-// Single-user, in-memory (resets on server restart).
+// Credentials are loaded from data/.env on server startup.
+
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ENV_PATH = path.join(__dirname, '..', '..', '..', 'data', '.env');
 
 let authState = null;
 
@@ -31,7 +38,6 @@ export async function setAuth(username, password) {
   }
   const vals = data.values;
 
-  // Parse cookie values (strip "; expires=..." suffixes)
   const loggedInUser = vals.cookies['logged-in-user'].split(';')[0];
   const loggedInSig = vals.cookies['logged-in-sig'].split(';')[0];
 
@@ -51,7 +57,35 @@ export function clearAuth() {
   authState = null;
 }
 
-// Cookie header for IA fetch requests (for HTTP stream downloads)
 export function getCookieHeader() {
   return authState?.cookieString || '';
+}
+
+// Load IA credentials from .env file and authenticate.
+// Call on server startup — credentials are stored by the Settings page.
+export async function loadFromEnv() {
+  try {
+    if (!fs.existsSync(ENV_PATH)) return null;
+    const text = fs.readFileSync(ENV_PATH, 'utf-8');
+    let username = '', password = '';
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eq = trimmed.indexOf('=');
+      if (eq === -1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      const val = trimmed.slice(eq + 1).trim();
+      if (key === 'IA_USERNAME') username = val;
+      else if (key === 'IA_PASSWORD') password = val;
+    }
+    if (username && password) {
+      console.log(`[ia-auth] Logging in as ${username}...`);
+      await setAuth(username, password);
+      console.log(`[ia-auth] Login successful (screenname: ${authState.screenname})`);
+      return authState;
+    }
+  } catch (e) {
+    console.error('[ia-auth] Failed to load from env:', e.message);
+  }
+  return null;
 }

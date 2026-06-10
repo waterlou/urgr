@@ -52,6 +52,7 @@ const SETTINGS_KEYS = [
   'IGDB_CLIENT_ID', 'IGDB_CLIENT_SECRET',
   'TGDB_API_KEY',
   'SCRAPER_SOURCE',
+  'IA_USERNAME', 'IA_PASSWORD',
 ];
 
 function parseEnv(text) {

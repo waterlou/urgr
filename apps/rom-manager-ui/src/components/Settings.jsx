@@ -13,6 +13,21 @@ const PROVIDER_TABS = [
     ],
   },
   {
+    id: 'ia',
+    label: 'Internet Archive',
+    fields: [
+      { key: 'IA_USERNAME', label: 'Email', type: 'text', required: true },
+      { key: 'IA_PASSWORD', label: 'Password', type: 'password', required: true },
+    ],
+    instructions: (
+      <p className="settings-hint">
+        Required for downloading access-restricted ROM files from Internet Archive.
+        Enter your <strong>archive.org</strong> email and password.
+        Saved credentials are loaded on server startup.
+      </p>
+    ),
+  },
+  {
     id: 'igdb',
     label: 'IGDB (Twitch)',
     fields: [

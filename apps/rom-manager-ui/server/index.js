@@ -14,6 +14,7 @@ import iaRouter from './routes/ia.js';
 import miscRouter from './routes/misc.js';
 import downloadsRouter from './routes/downloads.js';
 import operationsRouter from './routes/operations.js';
+import { loadFromEnv } from './ia-auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -83,6 +84,7 @@ dbReady.then(() => {
 
 app.listen(PORT, () => {
   console.log(`ROM Manager API running at http://localhost:${PORT}`);
+  loadFromEnv();
 });
 
 function shutdown() { saveDb(); closeDb(); process.exit(0); }
