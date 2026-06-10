@@ -263,9 +263,28 @@ router.get('/:id/play', async (req, res) => {
           }
           if (!found) break;
           parentZips.push(found);
-          // Find the parent game's romof for next chain link
           const parentGame = get('SELECT romof, cloneof FROM game_entries WHERE version_id = ? AND name = ?', [game.version_id, currentRef]);
           currentRef = parentGame ? (parentGame.romof || parentGame.cloneof) : null;
+        }
+
+        // Fallback: if no romof chain but game has merge_target ROMs,
+        // check for known BIOS zips (neogeo is the most common parent)
+        if (parentZips.length === 0) {
+          const hasMerge = get('SELECT 1 FROM rom_entries WHERE game_entry_id = ? AND merge_target IS NOT NULL LIMIT 1', [game.id]);
+          if (hasMerge) {
+            for (const d of searchDirs) {
+              if (!fs.existsSync(d)) continue;
+              for (const entry of fs.readdirSync(d)) {
+                if (entry.endsWith('.zip') && entry !== path.basename(filePath)) {
+                  const knownBios = ['neogeo', 'cthd2003', 'pugsley', 'isgsm'];
+                  const stem = path.basename(entry, '.zip');
+                  if (knownBios.includes(stem)) {
+                    parentZips.push(path.join(d, entry));
+                  }
+                }
+              }
+            }
+          }
         }
 
         if (parentZips.length > 0) {
