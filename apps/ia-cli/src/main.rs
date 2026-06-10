@@ -123,7 +123,7 @@ async fn cmd_list(args: &[String]) -> Result<(), String> {
 
 async fn cmd_download(args: &[String]) -> Result<(), String> {
     if args.len() < 3 {
-        return Err("Usage: ia-cli download <identifier> <path> -o <output-dir>".into());
+        return Err("Usage: ia-cli download <identifier> <path> -o <output-dir> [--username <u>] [--password <p>]".into());
     }
     let identifier = &args[1];
     let path = &args[2];
@@ -134,9 +134,35 @@ async fn cmd_download(args: &[String]) -> Result<(), String> {
         .map(|s| Path::new(s))
         .unwrap_or_else(|| Path::new("."));
 
+    let username = args
+        .iter()
+        .position(|a| a == "--username")
+        .and_then(|p| args.get(p + 1));
+    let password = args
+        .iter()
+        .position(|a| a == "--password")
+        .and_then(|p| args.get(p + 1));
+
+    let dl_client = if let (Some(u), Some(p)) = (username, password) {
+        eprintln!("Logging in as {}...", u);
+        match ia_archive::login(u, p).await {
+            Ok(session) => {
+                eprintln!("  Login successful.");
+                Some(session.client)
+            }
+            Err(e) => {
+                eprintln!("  Login failed (will try anonymous): {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     println!("Downloading {} from {} ...", path, identifier);
 
-    let (saved_path, size) = ia_archive::download_file(
+    let (saved_path, size) = ia_archive::download_file_with_client(
+        dl_client,
         identifier,
         path,
         out_dir,
@@ -187,12 +213,12 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
         .unwrap_or_else(|| Path::new("."));
 
     // Log in to IA if credentials provided (enables downloading private files)
-    let auth_client = if let (Some(u), Some(p)) = (username, password) {
+    let auth_session = if let (Some(u), Some(p)) = (username, password) {
         eprintln!("Logging in as {}...", u);
         match ia_archive::login(u, p).await {
-            Ok(client) => {
-                eprintln!("  Login successful.");
-                Some(client)
+            Ok(session) => {
+                eprintln!("  Login successful (screenname: {}).", session.screenname);
+                Some(session)
             }
             Err(e) => {
                 eprintln!("  Login failed (will try anonymous): {}", e);
@@ -202,7 +228,7 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
     } else {
         None
     };
-    let is_authenticated = auth_client.is_some();
+    let is_authenticated = auth_session.is_some();
 
     // Step 1: Search for the ROM set
     eprintln!("Searching for {} rom set...", romset);
@@ -264,7 +290,9 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
                 .iter()
                 .filter(|f| {
                     let name_lower = f.name.to_lowercase();
-                    name_lower == game_lower + ".zip" || name_lower == game_lower + ".7z"
+                    let zip_name = format!("{}.zip", game_lower);
+                    let z7_name = format!("{}.7z", game_lower);
+                    name_lower == zip_name || name_lower == z7_name
                         || name_lower.contains(&game_lower) && (name_lower.ends_with(".zip") || name_lower.ends_with(".7z"))
                         && f.size.parse::<u64>().unwrap_or(0) > 0
                         && (is_authenticated || f.private.as_deref() != Some("true"))
@@ -299,8 +327,9 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
 
     // Step 3: Download the file
     eprintln!("  Downloading...");
+    let dl_client = auth_session.as_ref().map(|s| s.client.clone());
     let (saved_path, size) = ia_archive::download_file_with_client(
-        auth_client,
+        dl_client,
         &identifier,
         &file_path,
         out_dir,
