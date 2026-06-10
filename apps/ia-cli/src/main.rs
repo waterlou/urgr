@@ -179,7 +179,7 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
         .unwrap_or_else(|| Path::new("."));
 
     // Step 1: Search for the ROM set
-    println!("Searching for {} rom set...", romset);
+    eprintln!("Searching for {} rom set...", romset);
     let docs = ia_archive::search_items(romset, version.map(|s| s.as_str()), 5).await?;
 
     if docs.is_empty() {
@@ -189,58 +189,61 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
         ));
     }
 
-    let identifier = &docs[0].identifier;
-    let title = docs[0].title.as_deref().unwrap_or(identifier);
-    println!("  Found: {}  ({})", identifier, title);
-
-    // Step 2: List files and find the game
-    println!("Searching for {}...", game);
-    let meta = ia_archive::get_metadata(identifier).await?;
-
     let game_lower = game.to_lowercase();
-    let _game_zip = format!("{}.zip", game_lower);
+    let mut found_match: Option<(String, String, u64)> = None; // (identifier, file_path, size)
+    let mut tried_items = Vec::new();
 
-    let matches: Vec<_> = meta
-        .files
-        .iter()
-        .filter(|f| {
-            let name_lower = f.name.to_lowercase();
-            name_lower.contains(&game_lower)
-                && (name_lower.ends_with(".zip") || name_lower.ends_with(".7z"))
-                && f.size.parse::<u64>().unwrap_or(0) > 0
-        })
-        .collect();
+    // Try each search result in order until we find the game
+    for doc in &docs {
+        tried_items.push(doc.identifier.clone());
+        eprintln!("  Checking: {}...", doc.identifier);
+        let meta = match ia_archive::get_metadata(&doc.identifier).await {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
 
-    if matches.is_empty() {
-        eprintln!("  Game '{}' not found in item '{}'.", game, identifier);
-        let zips: Vec<_> = meta
+        let matches: Vec<_> = meta
             .files
             .iter()
-            .filter(|f| f.name.ends_with(".zip") && f.size.parse().unwrap_or(0) > 0)
-            .take(10)
+            .filter(|f| {
+                let name_lower = f.name.to_lowercase();
+                name_lower.contains(&game_lower)
+                    && (name_lower.ends_with(".zip") || name_lower.ends_with(".7z"))
+                    && f.size.parse::<u64>().unwrap_or(0) > 0
+            })
             .collect();
-        if !zips.is_empty() {
-            eprintln!("  Example files available:");
-            for z in &zips {
-                eprintln!("    {}", z.name);
-            }
+
+        if let Some(best) = matches.first() {
+            let file_path = best.name.trim_start_matches('/').to_string();
+            let size = best.size.parse::<u64>().unwrap_or(0);
+            found_match = Some((doc.identifier.clone(), file_path, size));
+            break;
         }
-        return Err(format!("Game '{}' not found on Internet Archive", game));
     }
 
-    let target = &matches[0];
-    if matches.len() > 1 {
-        println!("  Found {} matches, using first: {}", matches.len(), target.name);
-    } else {
-        println!("  Found: {}", target.name);
+    let (identifier, file_path, file_size) = match found_match {
+        Some((id, path, size)) => (id, path, size),
+        None => {
+            eprintln!("  Game '{}' not found in any search result.", game);
+            eprintln!("  Tried items:");
+            for id in &tried_items {
+                eprintln!("    - {}", id);
+            }
+            return Err(format!("Game '{}' not found on Internet Archive", game));
+        }
+    };
+
+    eprintln!("  Found: {}  ({})", identifier, &file_path.rsplit('/').next().unwrap_or(&file_path));
+    let size_mb = file_size as f64 / 1_048_576.0;
+    if size_mb > 0.0 {
+        eprintln!("  Size: {:.1} MB", size_mb);
     }
 
     // Step 3: Download the file
-    let file_path = target.name.trim_start_matches('/');
-    println!("Downloading...");
+    eprintln!("  Downloading...");
     let (saved_path, size) = ia_archive::download_file(
-        identifier,
-        file_path,
+        &identifier,
+        &file_path,
         out_dir,
         Some(&|downloaded, total| {
             if total > 0 {
