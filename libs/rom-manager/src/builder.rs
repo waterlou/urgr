@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::io::Write;
@@ -910,9 +910,26 @@ fn verify_game_zip(db: &Database, version_id: i64, game_name: &str, zip_path: &P
         Some(g) => g,
         None => return Ok(false),
     };
-    let expected = db.list_roms_for_game(game.id)?;
+    let mut expected = db.list_roms_for_game(game.id)?;
     if expected.is_empty() {
         return Ok(false);
+    }
+
+    // Split-format support: subtract ROMs inherited from parent (cloneof)
+    if let Some(ref parent_name) = game.cloneof {
+        if let Some(parent) = games.iter().find(|g| g.name == *parent_name) {
+            let parent_roms = db.list_roms_for_game(parent.id)?;
+            let parent_crcs: HashSet<String> = parent_roms.iter()
+                .filter_map(|r| r.crc32.as_ref())
+                .cloned()
+                .collect();
+            expected.retain(|r| !r.crc32.as_ref().map_or(false, |c| parent_crcs.contains(c)));
+        }
+    }
+    // If after subtraction we have nothing left, check all (game is its own parent)
+    if expected.is_empty() {
+        let all = db.list_roms_for_game(game.id)?;
+        return Ok(verify_zip_contains(zip_path, &all));
     }
     Ok(verify_zip_contains(zip_path, &expected))
 }

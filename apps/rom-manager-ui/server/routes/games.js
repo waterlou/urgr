@@ -2,7 +2,9 @@ import { Router } from 'express';
 import crypto, { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 import { getDb } from '../db.js';
 import { execCli } from '../cli.js';
 import { createJob, updateProgress, doneJob, failJob } from '../jobs.js';
@@ -238,6 +240,47 @@ router.get('/:id/play', async (req, res) => {
     }
 
     if (!filePath) return res.status(404).json({ error: 'ROM file not found on disk' })
+
+    // For split-format zips: merge parent (cloneof) ROMs into the game zip
+    if (game.cloneof && colFolder1) {
+      const vers = get('SELECT version FROM set_versions WHERE id = ?', [game.version_id]);
+      if (vers) {
+        const romsDir = path.join(dataDir, 'roms', colFolder1, vers.version, 'roms');
+        const parentDirs = [
+          ...(game.platform ? [path.join(romsDir, game.platform)] : []),
+          romsDir,
+        ];
+        let parentPath = null;
+        for (const d of parentDirs) {
+          parentPath = findInDir(d)
+          if (parentPath && path.basename(parentPath, '.zip') === game.cloneof) break;
+          parentPath = null;
+        }
+        if (parentPath) {
+          const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rom-'));
+          const mergedPath = path.join(tmpDir, path.basename(filePath));
+          try {
+            // Extract game zip
+            execSync(`unzip -o "${filePath}" -d "${tmpDir}/game"`, { stdio: 'ignore' });
+            // Extract parent zip (entries that game doesn't override)
+            execSync(`unzip -o "${parentPath}" -d "${tmpDir}/parent"`, { stdio: 'ignore' });
+            // Merge: copy parent entries first, then game entries overrides
+            const mergeDir = path.join(tmpDir, 'merged');
+            fs.mkdirSync(mergeDir, { recursive: true });
+            execSync(`cp -R "${tmpDir}/parent/." "${mergeDir}/"`, { stdio: 'ignore' });
+            execSync(`cp -R "${tmpDir}/game/." "${mergeDir}/"`, { stdio: 'ignore' });
+            // Re-zip
+            execSync(`cd "${mergeDir}" && zip -X -r "${mergedPath}" .`, { stdio: 'ignore' });
+            filePath = mergedPath;
+            // Register cleanup after response
+            res.on('finish', () => { try { fs.rmSync(tmpDir, { recursive: true }); } catch {} });
+          } catch (e) {
+            try { fs.rmSync(tmpDir, { recursive: true }); } catch {}
+            // Fall through to serve the game zip alone
+          }
+        }
+      }
+    }
 
     const ext = path.extname(filePath).toLowerCase()
     const contentTypes = {
@@ -637,9 +680,20 @@ router.post('/:id/download-ia', async (req, res) => {
         const outputDir = game.platform ? path.join(baseRomDir, game.platform) : baseRomDir;
         fs.mkdirSync(outputDir, { recursive: true });
 
-        // Build CRC string from rom_entries
+        // Build CRC string from rom_entries (subtract parent ROMs for split sets)
+        const gameData = get('SELECT g.*, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [game.id]);
         const roms = all('SELECT filename, crc32 FROM rom_entries WHERE game_entry_id = ? AND crc32 IS NOT NULL AND crc32 != ?', [game.id, '']);
-        const crcStr = roms.map(r => `${r.filename}:${r.crc32.toUpperCase()}`).join(',');
+        let crcMap = new Map(roms.map(r => [r.filename.toLowerCase(), r.crc32.toUpperCase()]));
+        if (gameData.cloneof) {
+          const parent = get('SELECT id FROM game_entries WHERE version_id = ? AND name = ?', [gameData.version_id, gameData.cloneof]);
+          if (parent) {
+            const parentRoms = all('SELECT filename, crc32 FROM rom_entries WHERE game_entry_id = ? AND crc32 IS NOT NULL AND crc32 != ?', [parent.id, '']);
+            for (const pr of parentRoms) {
+              crcMap.delete(pr.filename.toLowerCase());
+            }
+          }
+        }
+        const crcStr = [...crcMap.entries()].map(([k, v]) => `${k}:${v}`).join(',');
 
         // Check cache for a known IA item identifier
         const cachedId = getCachedId(romset, game.version || '');
