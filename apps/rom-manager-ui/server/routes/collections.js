@@ -421,7 +421,10 @@ router.post('/api/collections/:id/build', async (req, res) => {
                   ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id, ...names]);
               }
             } catch (_) {}
-            doneJob(jobId, result);
+            // Count actual available games after build
+            const total = get('SELECT COUNT(DISTINCT name) as c FROM game_entries WHERE version_id = ?', [version_id]).c;
+            const matched = get('SELECT COUNT(DISTINCT g.name) as c FROM game_entries g JOIN game_state gs ON gs.game_entry_id = g.id WHERE g.version_id = ? AND gs.available = 1', [version_id]).c;
+            doneJob(jobId, { ...result, added: matched, missing: total - matched });
           }).catch(err => {
             failJob(jobId, err.message);
           });

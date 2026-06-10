@@ -162,9 +162,11 @@ router.get('/:id/play', async (req, res) => {
     if (colFolder1) {
       const vers = get('SELECT version FROM set_versions WHERE id = ?', [game.version_id]);
       if (vers) {
+        const romsDir = path.join(dataDir, 'roms', colFolder1, vers.version, 'roms');
         const searchDirs = [
-          path.join(dataDir, 'roms', colFolder1, vers.version, 'roms', 'arcade'),
-          path.join(dataDir, 'roms', colFolder1, vers.version, 'roms'),
+          ...(game.platform ? [path.join(romsDir, game.platform)] : []),
+          path.join(romsDir, 'arcade'),
+          romsDir,
         ];
         for (const d of searchDirs) {
           filePath = findInDir(d)
@@ -615,7 +617,7 @@ router.get('/:id/cover', async (req, res) => {
 router.post('/:id/download-ia', async (req, res) => {
   await dbReady;
   try {
-    const game = get('SELECT g.id, g.name, g.version_id, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [req.params.id]);
+    const game = get('SELECT g.id, g.name, g.platform, g.version_id, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [req.params.id]);
     if (!game) return res.status(404).json({ error: 'Game not found' });
 
     const col = get(`SELECT c.id, c.folder, c.slug, c.name FROM collections c
@@ -632,7 +634,10 @@ router.post('/:id/download-ia', async (req, res) => {
 
     setTimeout(async () => {
       try {
-        const outputDir = path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms', colFolder, game.version || '', 'roms');
+        const baseRomDir = path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms', colFolder, game.version || '', 'roms');
+        // Put file in platform subdirectory if game has one (matches builder layout)
+        const platformDir = game.platform ? path.join(baseRomDir, game.platform) : baseRomDir;
+        const outputDir = platformDir;
         fs.mkdirSync(outputDir, { recursive: true });
 
         // Build CRC string from rom_entries
