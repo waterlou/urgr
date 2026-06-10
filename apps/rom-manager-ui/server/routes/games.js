@@ -150,14 +150,6 @@ router.get('/:id/play', async (req, res) => {
             if (stem === game.name) return fullPath
           }
         }
-        // Fallback: find any .zip containing game name
-        for (const entry of entries) {
-          const fullPath = path.join(dir, entry)
-          if (entry.endsWith('.zip') && !fs.statSync(fullPath).isDirectory()) {
-            const stem = path.basename(entry, '.zip')
-            if (stem.includes(game.name) || game.name.includes(stem)) return fullPath
-          }
-        }
       } catch {}
       return null
     }
