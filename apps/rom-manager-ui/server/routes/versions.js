@@ -837,6 +837,12 @@ router.post('/api/versions/import-online', async (req, res) => {
             if (aVer !== bVer) return aVer - bVer;
             return a.base.localeCompare(b.base);
           });
+            // Version match before generic MAME name
+            const aVer = mameDatMatches(a.base, version) ? 0 : 1;
+            const bVer = mameDatMatches(b.base, version) ? 0 : 1;
+            if (aVer !== bVer) return aVer - bVer;
+            return a.base.localeCompare(b.base);
+          });
 
         if (dats.length > 0) foundDat = dats[0].fp;
 
