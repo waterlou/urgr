@@ -10,6 +10,7 @@ const CLI_NAMES = {
   parse: 'parse-cli',
   build: 'build-cli',
   nps: 'nps-cli',
+  ia: 'ia-cli',
 };
 
 const SETTINGS_PATH = path.join(__dirname, '..', '..', '..', 'data', '.env');

@@ -1,0 +1,9 @@
+[package]
+name = "ia-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ia-archive = { path = "../../libs/ia-archive" }
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3"
