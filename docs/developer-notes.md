@@ -6,6 +6,8 @@
 - **Frontend changes require rebuild**: server serves `dist/` statically; run `npx vite build` after JSX/CSS edits
 - **Rust changes require recompilation**: run `cargo build -p <name> --release` after modifying Rust source
 - **sql.js in-memory DB**: server loads DB into memory at startup; autosave happens 200ms after each write via debounce. Direct file edits while server runs get overwritten.
+- **IA credentials stored in `data/.env`**: saved via Settings → Internet Archive tab; auto-loaded on server startup via `ia-auth.js:loadFromEnv()`. Re-login happens on restart, so restart after saving credentials.
+- **IA item cache**: `data/ia-cache.json` maps `(source, version)` → IA item ID to skip re-searching. Managed automatically by server from `ia-cli find` JSON output.
 - DB path injection: `execCli` automatically appends `--json --db <path>` for Rust binaries
 - `findBinary` checks: env var → PATH → `target/release/` → `target/debug/` → `/usr/local/bin/`
 
