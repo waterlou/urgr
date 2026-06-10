@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getCollections, getRecentlyPlayed, recordPlay, coverUrl } from '../api.js'
+import { getCollections, getRecentlyPlayed, recordPlay } from '../api.js'
 import { isEmulatorSupported } from '../platformEmulator.js'
 import IconDisplay from './IconDisplay.jsx'
 import EmulatorModal from './EmulatorModal.jsx'
@@ -53,21 +53,17 @@ export default function Dashboard({ onSelectCollection, onSelectGame }) {
             <h2 className="section-title">Recently Played</h2>
             <div className="recently-played-grid">
               {recentGames.map(game => {
-                const img = game.covers?.length > 0 ? coverUrl(game.id) : null
+                const img = game.screenshots?.length > 0 ? (() => { let u = game.screenshots[0]; if (u.startsWith('//')) u = 'https:' + u; return u; })() : null
                 const supported = isEmulatorSupported(game.platform, game.source)
                 return (
                   <div key={game.id} className="recently-played-card" onClick={() => onSelectGame(game)}>
                     <div className="recently-played-img">
-                      {img ? <img src={img} alt={game.name} loading="lazy" /> : <div className="recently-played-placeholder"><span className="icon">image_not_supported</span></div>}
+                      {img ? <img src={img} alt="" loading="lazy" /> : <div className="recently-played-placeholder"><span className="icon">image_not_supported</span></div>}
                       {supported && (
                         <button className="recently-played-play" onClick={e => handlePlayGame(e, game)} title={`Play ${game.name}`}>
                           <span className="icon">play_arrow</span>
                         </button>
                       )}
-                    </div>
-                    <div className="recently-played-info">
-                      <div className="recently-played-name">{game.name}</div>
-                      {game.description && <div className="recently-played-desc">{game.description}</div>}
                     </div>
                   </div>
                 )

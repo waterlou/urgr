@@ -1620,27 +1620,6 @@ html, body, #root {
   font-size: 18px;
 }
 
-.recently-played-info {
-  padding: 8px 10px;
-}
-
-.recently-played-name {
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.recently-played-desc {
-  font-size: 11px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-top: 2px;
-}
-
 .modal-body { padding: 24px 40px 40px; }
 
 .modal-description {
