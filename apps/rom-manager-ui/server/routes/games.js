@@ -607,4 +607,58 @@ router.get('/:id/cover', async (req, res) => {
   } catch (e) { res.status(500).end(); }
 });
 
+// =============================================================================
+// Download game from Internet Archive via ia-cli
+// =============================================================================
+router.post('/:id/download-ia', async (req, res) => {
+  await dbReady;
+  try {
+    const game = get('SELECT g.id, g.name, g.version_id, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [req.params.id]);
+    if (!game) return res.status(404).json({ error: 'Game not found' });
+
+    const col = get(`SELECT c.id, c.folder, c.slug FROM collections c
+      JOIN collection_versions cv ON cv.collection_id = c.id
+      WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
+    if (!col) return res.status(404).json({ error: 'Collection not found' });
+
+    // Determine romset name from source
+    const romset = game.source.toLowerCase();
+    const colFolder = col.folder || col.slug;
+
+    const jobId = crypto.randomUUID();
+    const job = createJob(jobId);
+    job._abort = new AbortController();
+
+    setTimeout(async () => {
+      try {
+        const outputDir = path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms', colFolder);
+
+        const args = ['find', romset, game.name, '--output', outputDir];
+        if (game.version) {
+          // Use the import dir as a fallback version hint (ia-cli uses it for search)
+          args.push('--version', game.version);
+        }
+
+        updateProgress(jobId, 0, `Searching for ${game.name} on Internet Archive...`);
+
+        const result = execCli(args, { binary: 'ia' });
+
+        updateProgress(jobId, 90, 'Updating availability...');
+
+        // Update game_state.available after download
+        run(`INSERT INTO game_state (game_entry_id, available, updated_at)
+          SELECT ge.id, 1, datetime('now') FROM game_entries ge WHERE ge.id = ?
+          ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [game.id]);
+
+        doneJob(jobId, { ok: true, details: result });
+      } catch (e) {
+        if (job._abort.signal.aborted) return;
+        failJob(jobId, e.message);
+      }
+    }, 0);
+
+    res.status(202).json({ jobId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;

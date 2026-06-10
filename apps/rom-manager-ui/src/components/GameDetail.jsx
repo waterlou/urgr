@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { getGame, coverUrl, scrapeGameMetadata, enqueueDownload } from '../api.js'
+import { getGame, coverUrl, scrapeGameMetadata, enqueueDownload, downloadGameFromIA, subscribeJobSSE } from '../api.js'
 import { isEmulatorSupported } from '../platformEmulator.js'
 import EmulatorModal from './EmulatorModal.jsx'
 
@@ -12,6 +12,8 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
   const [lightbox, setLightbox] = useState(null)
   const [coverFailed, setCoverFailed] = useState(false)
   const [downloadMsg, setDownloadMsg] = useState(null)
+  const [iaDownloading, setIaDownloading] = useState(false)
+  const [iaDownloadMsg, setIaDownloadMsg] = useState(null)
   const [showEmulator, setShowEmulator] = useState(false)
 
   useEffect(() => {
@@ -82,6 +84,31 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
       setDownloadMsg(`Error: ${err.message}`)
     }
     setTimeout(() => setDownloadMsg(null), 4000)
+  }
+
+  async function handleIaDownload() {
+    setIaDownloading(true)
+    setIaDownloadMsg('Searching Internet Archive...')
+    try {
+      const { jobId } = await downloadGameFromIA(gameId)
+      subscribeJobSSE(jobId, {
+        onProgress: (msg) => setIaDownloadMsg(msg.msg || `Progress: ${msg.pct}%`),
+        onResult: () => {
+          setIaDownloadMsg('Download complete!')
+          setIaDownloading(false)
+          getGame(gameId).then(g => { if (g) setGame(g) }).catch(() => {})
+          setTimeout(() => setIaDownloadMsg(null), 4000)
+        },
+        onError: (err) => {
+          setIaDownloadMsg(`Error: ${err}`)
+          setIaDownloading(false)
+          setTimeout(() => setIaDownloadMsg(null), 4000)
+        },
+      })
+    } catch (err) {
+      setIaDownloadMsg(`Error: ${err.message}`)
+      setIaDownloading(false)
+    }
   }
 
   if (!game) return (
@@ -276,6 +303,18 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                 : null;
             })()}
             {downloadMsg && <p className="scrape-success" style={{marginTop:4}}>{downloadMsg}</p>}
+          </section>
+        )}
+
+        {game.source !== 'NPS' && !game.available && (
+          <section>
+            {iaDownloading
+              ? <div className="loading-inline"><div className="loading-spinner-sm" /> {iaDownloadMsg}</div>
+              : <button className="btn btn-sm" onClick={handleIaDownload} disabled={iaDownloading}>
+                  <span className="icon">download</span> Download from Internet Archive
+                </button>
+            }
+            {iaDownloadMsg && !iaDownloading && <p className="scrape-success" style={{marginTop:4}}>{iaDownloadMsg}</p>}
           </section>
         )}
       </div>

@@ -259,6 +259,9 @@ export function saveSettings(data) { return fetchWithBody('/settings', 'PUT', da
 export function enqueueDownload(gameEntryId) {
   return fetchWithBody('/downloads/enqueue', 'POST', { game_entry_id: gameEntryId });
 }
+export function downloadGameFromIA(gameId) {
+  return fetchWithBody(`/games/${gameId}/download-ia`, 'POST');
+}
 export function getDownloadQueue() {
   return fetchJson('/downloads');
 }
