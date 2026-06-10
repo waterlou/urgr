@@ -20,7 +20,7 @@ router.get('/', async (req, res) => {
   await dbReady;
   try {
     const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, collection_id, version_id, parents_only, favourites_only, roms_only } = req.query;
-    const sortCol = sort === 'rating' ? 'COALESCE(r.rating, 0)' : sort === 'play_count' ? 'COALESCE(r.play_count, 0)' : sort === 'last_played' ? 'r.last_played' : 'g.name';
+    const sortCol = sort === 'rating' ? 'COALESCE(r.rating, 0)' : sort === 'play_count' ? 'COALESCE(r.play_count, 0)' : 'g.name';
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
 
     let where = [];
@@ -56,7 +56,7 @@ router.get('/', async (req, res) => {
     const countSql = `SELECT COUNT(DISTINCT g.name) as c FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id ${joinClause} ${whereClause}`;
     const total = params.length ? get(countSql, params).c : get(countSql).c;
 
-    const sortCol2 = sort === 'rating' ? 'MAX(COALESCE(r.rating, 0))' : sort === 'play_count' ? 'MAX(COALESCE(r.play_count, 0))' : sort === 'last_played' ? 'MAX(r.last_played)' : 'g.name';
+    const sortCol2 = sort === 'rating' ? 'MAX(COALESCE(r.rating, 0))' : sort === 'play_count' ? 'MAX(COALESCE(r.play_count, 0))' : 'g.name';
     const pageParams = params.slice();
     pageParams.push(Number(limit), Number(offset));
     let games = all(`
@@ -66,7 +66,6 @@ router.get('/', async (req, res) => {
         MAX(COALESCE(r.rating, 0)) as rating,
         MAX(COALESCE(r.favourite, 0)) as favourite,
         MAX(COALESCE(r.play_count, 0)) as play_count,
-        MAX(r.last_played) as last_played,
         MAX(CASE WHEN g.covers != '[]' THEN g.covers ELSE NULL END) as covers_json,
         MAX(CASE WHEN g.screenshots != '[]' THEN g.screenshots ELSE NULL END) as screenshots_json
       FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id
@@ -99,6 +98,39 @@ router.get('/scrape-jobs', async (req, res) => {
       ...j,
       result: j.result ? JSON.parse(j.result) : null,
     })));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/recently-played', async (req, res) => {
+  await dbReady;
+  try {
+    const games = all(`
+      SELECT g.id, g.name, g.description, g.year, g.manufacturer, g.cloneof, g.platform,
+        MIN(g.version_id) as version_id, MIN(sv.source) as source, MIN(sv.version) as version,
+        GROUP_CONCAT(sv.source || '||' || sv.version, '||') as versions_tags,
+        MAX(CASE WHEN g.covers != '[]' THEN g.covers ELSE NULL END) as covers_json,
+        MAX(CASE WHEN g.screenshots != '[]' THEN g.screenshots ELSE NULL END) as screenshots_json,
+        rp.played_at
+      FROM recently_played rp
+      JOIN game_entries g ON g.id = rp.game_entry_id
+      JOIN set_versions sv ON sv.id = g.version_id
+      GROUP BY g.name
+      ORDER BY rp.played_at DESC
+      LIMIT 6
+    `).map(g => {
+      const tags = g.versions_tags ? g.versions_tags.split('||') : [];
+      const versions = [];
+      for (let i = 0; i < tags.length; i += 2) versions.push(tags[i + 1]);
+      delete g.versions_tags;
+      let covers = [];
+      let screenshots = [];
+      try { covers = JSON.parse(g.covers_json) || []; } catch {}
+      try { screenshots = JSON.parse(g.screenshots_json) || []; } catch {}
+      delete g.covers_json;
+      delete g.screenshots_json;
+      return { ...g, versions, covers, screenshots };
+    });
+    res.json({ games });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -738,11 +770,15 @@ router.post('/:id/play', async (req, res) => {
   try {
     const game = get('SELECT id FROM game_entries WHERE id = ?', [req.params.id]);
     if (!game) return res.status(404).json({ error: 'Game not found' });
+    run("INSERT OR REPLACE INTO recently_played (game_entry_id, played_at) VALUES (?, datetime('now'))", [req.params.id]);
+    run(`DELETE FROM recently_played WHERE game_entry_id NOT IN (
+      SELECT game_entry_id FROM recently_played ORDER BY played_at DESC LIMIT 6
+    )`);
     const existing = get('SELECT game_entry_id FROM game_state WHERE game_entry_id = ?', [req.params.id]);
     if (existing) {
-      run("UPDATE game_state SET play_count = play_count + 1, last_played = datetime('now'), updated_at = datetime('now') WHERE game_entry_id = ?", [req.params.id]);
+      run("UPDATE game_state SET play_count = play_count + 1, updated_at = datetime('now') WHERE game_entry_id = ?", [req.params.id]);
     } else {
-      run("INSERT INTO game_state (game_entry_id, play_count, last_played) VALUES (?, 1, datetime('now'))", [req.params.id]);
+      run("INSERT INTO game_state (game_entry_id, play_count) VALUES (?, 1)", [req.params.id]);
     }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }

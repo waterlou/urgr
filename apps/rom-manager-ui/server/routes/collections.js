@@ -141,7 +141,7 @@ router.get('/api/collections/:id/games', async (req, res) => {
 
     const vids = version_id ? [Number(version_id)] : versions.map(v => v.version_id);
     const ph = vids.map(() => '?').join(',');
-    const sortCol = sort === 'rating' ? 'MAX(COALESCE(r.rating, 0))' : sort === 'play_count' ? 'MAX(COALESCE(r.play_count, 0))' : sort === 'last_played' ? 'MAX(r.last_played)' : 'g.name';
+    const sortCol = sort === 'rating' ? 'MAX(COALESCE(r.rating, 0))' : sort === 'play_count' ? 'MAX(COALESCE(r.play_count, 0))' : 'g.name';
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
 
     let whereExtra = '';

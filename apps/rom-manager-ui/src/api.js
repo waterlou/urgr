@@ -151,6 +151,7 @@ export function updateGameRating(id, data) {
 export function coverUrl(id) { return `${BASE}/games/${id}/cover?_=${Date.now()}`; }
 export function playUrl(gameId) { return `${BASE}/games/${gameId}/play`; }
 export function recordPlay(gameId) { return fetchWithBody(`/games/${gameId}/play`, 'POST', {}); }
+export function getRecentlyPlayed() { return fetchJson('/games/recently-played'); }
 
 // ==============================
 // Versions

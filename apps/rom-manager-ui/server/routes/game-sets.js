@@ -51,11 +51,11 @@ router.get('/api/game-sets/:id/games', async (req, res) => {
     const { limit = 200, offset = 0, sort = 'name', order = 'asc' } = req.query;
     const gameSet = get('SELECT * FROM game_sets WHERE id = ?', [id]);
     if (!gameSet) return res.status(404).json({ error: 'not found' });
-    const sortCol = sort === 'rating' ? 'COALESCE(r.rating, 0)' : sort === 'favourite' ? 'COALESCE(r.favourite, 0)' : sort === 'play_count' ? 'COALESCE(r.play_count, 0)' : sort === 'last_played' ? 'r.last_played' : 'g.name';
+    const sortCol = sort === 'rating' ? 'COALESCE(r.rating, 0)' : sort === 'favourite' ? 'COALESCE(r.favourite, 0)' : sort === 'play_count' ? 'COALESCE(r.play_count, 0)' : 'g.name';
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
     const total = get('SELECT COUNT(*) as c FROM game_set_games WHERE game_set_id = ?', [id]).c;
     const games = all(`
-      SELECT g.*, sv.source, sv.version, COALESCE(r.rating, 0) as rating, COALESCE(r.favourite, 0) as favourite, COALESCE(r.play_count, 0) as play_count, r.last_played
+      SELECT g.*, sv.source, sv.version, COALESCE(r.rating, 0) as rating, COALESCE(r.favourite, 0) as favourite, COALESCE(r.play_count, 0) as play_count
       FROM game_set_games gsg JOIN game_entries g ON g.id = gsg.game_entry_id
       JOIN set_versions sv ON sv.id = g.version_id
       LEFT JOIN game_state r ON r.game_entry_id = g.id

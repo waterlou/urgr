@@ -284,8 +284,13 @@ export function initDb(dbPath) {
   // Drop scanned_games table (CLI now returns JSON directly)
   try { db.run("DROP TABLE IF EXISTS scanned_games"); } catch (_) {}
 
-  // Migration: add last_played column to game_state
-  try { db.run("ALTER TABLE game_state ADD COLUMN last_played TEXT"); } catch (_) {}
+  // Recently played games (max 6)
+  try {
+    db.run(`CREATE TABLE IF NOT EXISTS recently_played (
+      game_entry_id INTEGER PRIMARY KEY,
+      played_at     TEXT DEFAULT (datetime('now'))
+    )`);
+  } catch (_) {}
 
   // Migration: normalize NULL regions and deduplicate game_entries
   try {

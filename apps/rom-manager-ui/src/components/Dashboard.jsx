@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getCollections, getGames, recordPlay, coverUrl } from '../api.js'
+import { getCollections, getRecentlyPlayed, recordPlay, coverUrl } from '../api.js'
 import { isEmulatorSupported } from '../platformEmulator.js'
 import IconDisplay from './IconDisplay.jsx'
 import EmulatorModal from './EmulatorModal.jsx'
@@ -14,7 +14,7 @@ export default function Dashboard({ onSelectCollection, onSelectGame }) {
   useEffect(() => {
     Promise.all([
       getCollections().catch(() => []),
-      getGames({ sort: 'last_played', order: 'desc', roms_only: 'true', limit: 6 }).catch(() => ({ games: [] }))
+      getRecentlyPlayed().catch(() => ({ games: [] }))
     ]).then(([cols, gamesData]) => {
       setCollections(cols || [])
       setRecentGames(gamesData.games || [])
