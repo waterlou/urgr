@@ -107,8 +107,9 @@ impl ImportIndex {
         if expected_roms.is_empty() { return None; }
         let path = self.name_to_path.get(game_name)?;
         let zip_crc_set = self.zip_crcs.get(game_name)?;
-        // ALL expected CRCs must be present in the zip
+        // ALL expected CRCs must be present in the zip (skip merge_target ROMs — split format)
         let all_match = expected_roms.iter()
+            .filter(|r| r.merge_target.is_none())
             .filter_map(|r| r.crc32.as_deref())
             .filter(|c| !c.is_empty())
             .all(|ec| zip_crc_set.contains(ec));
