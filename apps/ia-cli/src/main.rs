@@ -247,6 +247,38 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
         }
     }
 
+    // Fallback: search directly for the game name on IA
+    if found_match.is_none() {
+        eprintln!("  Not found in ROM sets. Searching for game name directly...");
+        let game_docs = ia_archive::search_items(game, version.map(|s| s.as_str()), 10).await.unwrap_or_default();
+        for doc in &game_docs {
+            if tried_items.contains(&doc.identifier) { continue; }
+            tried_items.push(doc.identifier.clone());
+            eprintln!("  Checking: {}...", doc.identifier);
+            let meta = match ia_archive::get_metadata(&doc.identifier).await {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let matches: Vec<_> = meta
+                .files
+                .iter()
+                .filter(|f| {
+                    let name_lower = f.name.to_lowercase();
+                    name_lower == game_lower + ".zip" || name_lower == game_lower + ".7z"
+                        || name_lower.contains(&game_lower) && (name_lower.ends_with(".zip") || name_lower.ends_with(".7z"))
+                        && f.size.parse::<u64>().unwrap_or(0) > 0
+                        && (is_authenticated || f.private.as_deref() != Some("true"))
+                })
+                .collect();
+            if let Some(best) = matches.first() {
+                let file_path = best.name.trim_start_matches('/').to_string();
+                let size = best.size.parse::<u64>().unwrap_or(0);
+                found_match = Some((doc.identifier.clone(), file_path, size));
+                break;
+            }
+        }
+    }
+
     let (identifier, file_path, file_size) = match found_match {
         Some((id, path, size)) => (id, path, size),
         None => {
