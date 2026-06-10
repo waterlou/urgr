@@ -3,6 +3,16 @@ import { getSettings, saveSettings, testIgdbConnection, testTgdbConnection } fro
 
 const PROVIDER_TABS = [
   {
+    id: 'screenscraper',
+    label: 'ScreenScraper',
+    fields: [
+      { key: 'SS_DEVID', label: 'Dev ID', type: 'text', required: true },
+      { key: 'SS_DEVPASSWORD', label: 'Dev Password', type: 'password', required: true },
+      { key: 'SS_USERNAME', label: 'Username', type: 'text' },
+      { key: 'SS_PASSWORD', label: 'Password', type: 'password' },
+    ],
+  },
+  {
     id: 'igdb',
     label: 'IGDB (Twitch)',
     fields: [
