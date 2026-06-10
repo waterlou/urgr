@@ -6,7 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ENV_PATH = path.join(__dirname, '..', '..', '..', 'data', '.env');
+const ENV_PATH = path.join(__dirname, '..', '..', '..', '..', 'data', '.env');
 
 let authState = null;
 

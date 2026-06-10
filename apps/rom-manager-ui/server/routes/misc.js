@@ -46,7 +46,7 @@ router.post('/api/jobs/:jobId/cancel', (req, res) => {
 // Settings (read/write .env)
 // =============================================================================
 
-const SETTINGS_PATH = path.join(__dirname, '..', '..', '..', 'data', '.env');
+const SETTINGS_PATH = path.join(__dirname, '..', '..', '..', '..', 'data', '.env');
 const SETTINGS_KEYS = [
   'SS_DEVID', 'SS_DEVPASSWORD', 'SS_USERNAME', 'SS_PASSWORD',
   'IGDB_CLIENT_ID', 'IGDB_CLIENT_SECRET',
