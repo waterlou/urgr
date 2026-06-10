@@ -1,6 +1,6 @@
 # CLI Reference
 
-Four CLI tools operate on the `data/roms.db` SQLite database:
+Five CLI tools operate on the `data/roms.db` SQLite database (plus `ia-cli` for Internet Archive):
 
 | CLI | Purpose | Writes to DB | Reads from DB |
 |-----|---------|-------------|---------------|
@@ -8,6 +8,7 @@ Four CLI tools operate on the `data/roms.db` SQLite database:
 | [`build-cli`](#build-cli) | Build/verify ROM collections | `scanned_games` | `set_versions`, `game_entries`, `rom_entries` |
 | [`scraper-cli`](#scraper-cli) | Scrape game metadata | — (outputs JSON) | — |
 | [`db-cli`](#db-cli) | Inspect database | — | All tables |
+| [`ia-cli`](#ia-cli) | Search/download from Internet Archive | — (outputs JSON) | — |
 
 ---
 
@@ -231,6 +232,86 @@ Reads `scanned_games` and checks each game against the DAT. If `--fallback` is g
 
 **`diff <version-id-a> <version-id-b>`**
 Compares game lists and ROM hashes between two versions. Returns: added, removed, changed (same name, different ROMs), unchanged.
+
+---
+
+## ia-cli
+
+**Purpose:** Search and download ROM files from Internet Archive. Used by the web UI's "Download from Internet Archive" button.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `search <query>` | Search IA items by query string |
+| `list <id> [--filter <name>]` | List files in an IA item |
+| `download <id> <path> -o <dir>` | Direct download from an IA item |
+| `find <source> <game> [--version <v>]` | Search, find, and download a game ROM |
+
+### `find <source> <game>`
+
+**Search strategy (tried in order):**
+1. If `--cached-id` provided → check that IA item first
+2. Search `"{source} {version} roms"` (version-specific, e.g. "MAME 0.287 roms")
+3. Search `"{source} roms"` (generic, e.g. "MAME roms")
+4. Search by game name directly (e.g. "1943kai")
+5. For each result: fetch item metadata, find file matching game name
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--version <v>` | Version string for targeted search (e.g. "0.287") |
+| `--cached-id <id>` | IA item identifier to check first (avoids search) |
+| `--crc <name:crc,...>` | Comma-separated expected CRCs for verification (e.g. "1943kai.01:7544B926,1943kai.02:DBA1C66E") |
+| `--output <dir>` | Directory to save downloaded file |
+| `--username <u>` | IA email for private file access |
+| `--password <p>` | IA password |
+
+**CRC verification:**
+- Downloads the ZIP to a temp directory
+- Reads entry CRCs from zip headers (no decompression, same as scanner)
+- Compares against expected CRCs from `rom_entries`
+- On mismatch: rejects the download, provides `download_url` for manual inspection
+- On match: moves file to final destination
+
+**Output (single JSON line on stdout):**
+
+Success:
+```json
+{"ok":true,"file":"1943kai.zip","size":313346,"path":"/data/roms/mame/0.287/roms/1943kai.zip","identifier":"mame-roms-non-merged","cached_id":"mame-roms-non-merged","crc_match":true,"download_url":"https://archive.org/download/mame-roms-non-merged/MAME%20ROMs%20(non-merged)/1943kai.zip"}
+```
+
+Game not found:
+```json
+{"ok":false,"error":"Game not found on Internet Archive","tried_items":["item1","item2"]}
+```
+
+CRC mismatch:
+```json
+{"ok":false,"error":"CRC mismatch","crc_mismatches":[{"file":"1943kai.01","expected":"ABCD1234","got":"5678EF90"}],"download_url":"https://archive.org/download/.../1943kai.zip"}
+```
+
+### Examples
+```bash
+# Download a game named 1943kai from MAME 0.287
+ia-cli find MAME 1943kai --version 0.287 --output /roms/mame
+
+# With CRC verification
+ia-cli find MAME 1943kai --version 0.287 --crc "1943kai.01:7544B926,1943kai.02:DBA1C66E" --output /roms/mame
+
+# With authenticated access to private files
+ia-cli find MAME 1943kai --version 0.287 --username user@example.com --password mypass --output /roms/mame
+
+# Skip search, check a known IA item directly
+ia-cli find MAME 1943kai --cached-id mame-roms-non-merged --output /roms/mame
+
+# List files in an IA item
+ia-cli list mame-roms-non-merged --filter 1943kai
+
+# Search IA for items
+ia-cli search "MAME 0.287 roms"
+```
 
 ---
 
