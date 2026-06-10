@@ -1553,22 +1553,25 @@ html, body, #root {
 
 .recently-played-card {
   position: relative;
-  background: var(--bg-elevated);
+  background: #111;
   border: none;
-  overflow: hidden;
   cursor: pointer;
   transition: transform 0.15s;
   min-height: 120px;
-  clip-path: ellipse(48% 46%);
+  border-radius: 50% / 10%;
+  overflow: visible;
 }
 
 .recently-played-card::after {
   content: '';
   position: absolute;
-  inset: 0;
-  background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.4) 100%);
-  pointer-events: none;
-  z-index: 1;
+  top: 10%;
+  bottom: 10%;
+  right: -5%;
+  left: -5%;
+  border-radius: 5% / 50%;
+  background: inherit;
+  z-index: 0;
 }
 
 .recently-played-card.landscape {
@@ -1582,7 +1585,6 @@ html, body, #root {
 }
 
 .recently-played-card:hover {
-  border-color: var(--accent);
   transform: translateY(-2px);
 }
 
@@ -1590,8 +1592,9 @@ html, body, #root {
   position: relative;
   width: 100%;
   height: 100%;
-  background: var(--bg);
   overflow: hidden;
+  border-radius: inherit;
+  z-index: 1;
 }
 
 .recently-played-img img {
@@ -1625,7 +1628,7 @@ html, body, #root {
   justify-content: center;
   box-shadow: 0 2px 8px rgba(0,0,0,0.4);
   pointer-events: none;
-  z-index: 2;
+  z-index: 3;
 }
 
 .recently-played-play .icon {
