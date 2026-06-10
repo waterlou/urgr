@@ -241,7 +241,7 @@ router.get('/:id/play', async (req, res) => {
 
     if (!filePath) return res.status(404).json({ error: 'ROM file not found on disk' })
 
-    // For split-format zips: merge all parent ROMs in the romof chain recursively
+    // For split-format zips: merge parent ROMs into the game zip
     if (colFolder1) {
       const vers = get('SELECT version FROM set_versions WHERE id = ?', [game.version_id]);
       if (vers) {
@@ -251,8 +251,10 @@ router.get('/:id/play', async (req, res) => {
           romsDir,
         ];
 
-        // Collect all parent zips following romof chain
+        // Collect parent zips for merge: follow romof chain, or find via merge_target
         const parentZips = [];
+
+        // Method 1: Follow romof (or cloneof fallback) chain
         let currentRef = game.romof || game.cloneof;
         while (currentRef) {
           let found = null;
@@ -267,21 +269,28 @@ router.get('/:id/play', async (req, res) => {
           currentRef = parentGame ? (parentGame.romof || parentGame.cloneof) : null;
         }
 
-        // Fallback: if no romof chain but game has merge_target ROMs,
-        // check for known BIOS zips (neogeo is the most common parent)
+        // Method 2: No romof chain but has merge_target ROMs — find parent by content
         if (parentZips.length === 0) {
-          const hasMerge = get('SELECT 1 FROM rom_entries WHERE game_entry_id = ? AND merge_target IS NOT NULL LIMIT 1', [game.id]);
-          if (hasMerge) {
+          const mergeTargets = all('SELECT DISTINCT merge_target FROM rom_entries WHERE game_entry_id = ? AND merge_target IS NOT NULL', [game.id]);
+          if (mergeTargets.length > 0) {
+            const targetNames = new Set(mergeTargets.map(r => r.merge_target));
             for (const d of searchDirs) {
               if (!fs.existsSync(d)) continue;
               for (const entry of fs.readdirSync(d)) {
-                if (entry.endsWith('.zip') && entry !== path.basename(filePath)) {
-                  const knownBios = ['neogeo', 'cthd2003', 'pugsley', 'isgsm'];
-                  const stem = path.basename(entry, '.zip');
-                  if (knownBios.includes(stem)) {
+                if (!entry.endsWith('.zip') || entry === path.basename(filePath)) continue;
+                try {
+                  // Check if this zip contains any merge target entry
+                  const listing = execSync(`unzip -l "${path.join(d, entry)}"`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+                  const lines = listing.split('\n').filter(l => l.includes('  '));
+                  const hasMatch = lines.some(l => {
+                    const parts = l.trim().split(/\s+/);
+                    const fname = parts[parts.length - 1];
+                    return targetNames.has(fname);
+                  });
+                  if (hasMatch) {
                     parentZips.push(path.join(d, entry));
                   }
-                }
+                } catch {}
               }
             }
           }
