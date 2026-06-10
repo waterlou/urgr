@@ -130,7 +130,7 @@ fn print_usage() {
     eprintln!("  scan <version-id> <dir>");
     eprintln!("  verify <version-id> <dir> [--fallback <id>]");
     eprintln!("  diff <version-id-a> <version-id-b>");
-    eprintln!("  build <source> <import-dir> [--update] [--dry-run] [--version-id <id>] [--base-dir <dir>]");
+    eprintln!("  build <source> <import-dir> [--update] [--dry-run] [--version-id <id>] [--base-dir <dir>] [--collection-dir <dir>] [--progress] [--verbose]");
     eprintln!();
     eprintln!("  Build automatically detects the latest version for <source> from the");
     eprintln!("  database. Use --update to upgrade in-place (renames old folder, deletes");
@@ -139,7 +139,7 @@ fn print_usage() {
     eprintln!("Global flags:");
     eprintln!("  --json                 Output in JSON format");
     eprintln!("  --db <path>            Database path (required, or $ROM_DB)");
-}
+    eprintln!("  --verbose              Verbose per-game decision logging on stderr");
 
 fn main() -> ExitCode {
     tracing_subscriber::fmt()
@@ -433,6 +433,7 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
     let update = args.iter().any(|a| a == "--update");
     let show_progress = args.iter().any(|a| a == "--progress");
     let dry_run = args.iter().any(|a| a == "--dry-run");
+    let verbose = args.iter().any(|a| a == "--verbose");
     let version_id = args.iter().position(|a| a == "--version-id")
         .and_then(|p| args.get(p + 1))
         .and_then(|s| s.parse::<i64>().ok());
@@ -458,7 +459,7 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
         }
     };
 
-    match build_version(&db, source, import_dir, &base_dir, collection_dir.as_deref(), update, dry_run, version_id, &progress_cb, &CANCEL_FLAG) {
+    match build_version(&db, source, import_dir, &base_dir, collection_dir.as_deref(), update, dry_run, version_id, &progress_cb, &CANCEL_FLAG, verbose) {
         Ok(result) => {
             if json {
                 print_json(&BuildOutput {

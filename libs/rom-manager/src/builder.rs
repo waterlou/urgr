@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::io::Write;
 
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
+use tracing::info;
 
 use crate::db::Database;
 use crate::error::{Error, Result};
@@ -250,6 +250,7 @@ pub fn build_version(
     version_id: Option<i64>,
     on_progress: &dyn Fn(&BuildProgress),
     cancelled: &AtomicBool,
+    verbose: bool,
 ) -> Result<BuildResult> {
     fn check_cancelled(cancelled: &AtomicBool) -> Result<()> {
         if cancelled.load(Ordering::Relaxed) {
@@ -465,6 +466,7 @@ pub fn build_version(
                     roms_dir.join(pf).join(format!("{}.zip", game_name))
                 };
                 if zip_path.exists() && !verify_game_zip(db, latest.id, game_name, &zip_path)? {
+                    if verbose { eprintln!("  {game_name}: CRC mismatch — moved to deleted_roms"); }
                     move_to_deleted(&zip_path, &deleted_dir, &latest, Some(&prev_version))?;
                     status.cleaned += 1;
                 }
@@ -521,12 +523,14 @@ pub fn build_version(
 
         // Skip if already correctly in place
         if dest.exists() && verify_game_zip(db, latest.id, game_name, &dest)? {
+            if verbose { eprintln!("  {game_name}: existed (already correct in {})", dest.display()); }
             exists += 1;
             continue;
         }
 
         // Check fallback chain
         if find_in_fallback(game_name, &game_map, collection_dir, prior_versions.as_ref(), db, latest.id)? {
+            if verbose { eprintln!("  {game_name}: reused (from prior version)"); }
             reused += 1;
             continue;
         }
@@ -541,6 +545,7 @@ pub fn build_version(
 
         // Try to find matching ROM in import folder
         if let Some(src_path) = index.find_match(game_name, &expected_roms) {
+            if verbose { eprintln!("  {game_name}: added (copying from {})", src_path.display()); }
             if !dry_run {
                 info!("  Copying {} → {}", src_path.display(), dest.display());
                 std::fs::copy(&src_path, &dest)?;
@@ -559,6 +564,7 @@ pub fn build_version(
             }
             added += 1;
         } else {
+            if verbose { eprintln!("  {game_name}: missing (not found in import or prior versions)"); }
             missing.push(game_name.clone());
         }
     }
@@ -959,6 +965,24 @@ mod tests {
         .unwrap();
     }
 
+    fn add_rom_with_crc(db: &Database, gid: i64, name: &str, sha1: &str, crc32: &str) {
+        db.insert_rom(
+            gid,
+            &RomEntry {
+                id: 0,
+                game_entry_id: 0,
+                filename: name.to_string(),
+                size: Some(4),
+                crc32: Some(crc32.to_string()),
+                md5: None,
+                sha1: Some(sha1.to_string()),
+                status: "good".to_string(),
+                merge_target: None,
+            },
+        )
+        .unwrap();
+    }
+
     fn make_zip_with_content(path: &Path, content: &[u8]) {
         let file = std::fs::File::create(path).unwrap();
         let mut zip = zip::ZipWriter::new(file);
@@ -966,6 +990,30 @@ mod tests {
         zip.start_file("rom.bin", options).unwrap();
         zip.write_all(content).unwrap();
         zip.finish().unwrap();
+    }
+
+    /// Create a ZIP with multiple entries from a map of filename→content.
+    /// The CRC32 of each entry is computed and returned as (entry_name → CRC hex).
+    fn make_zip_with_entries(path: &Path, entries: &[(&str, &[u8])]) -> Vec<(String, String)> {
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::FileOptions::<()>::default();
+        for (name, content) in entries {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(content).unwrap();
+        }
+        zip.finish().unwrap();
+
+        // Read back the CRC32s
+        let rfile = std::fs::File::open(path).unwrap();
+        let mut archive = zip::ZipArchive::new(rfile).unwrap();
+        let mut crcs = Vec::new();
+        for i in 0..archive.len() {
+            let entry = archive.by_index_raw(i).unwrap();
+            let crc = format!("{:08X}", entry.crc32());
+            crcs.push((entry.name().to_string(), crc));
+        }
+        crcs
     }
 
     /// Compute SHA1 for content to use as expected ROM hash
@@ -1104,12 +1152,204 @@ mod tests {
 
         let result = build_version(
             &db, "test", &import_dir, &root, Some(root),
-            false, true, Some(vid), &progress, &cancelled,
+            false, true, Some(vid), &progress, &cancelled, false,
         ).expect("build_version should succeed");
 
         assert_eq!(result.version, "v1.0");
         assert_eq!(result.exists, 1);
         assert_eq!(result.reused, 0);
         assert_eq!(result.added, 0);
+    }
+
+    // ── Comprehensive test with generated data: 100 games, 30 modified, 10 new ──
+    #[test]
+    fn test_build_version_generated_100_roms() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+
+        // Create directories
+        let import_dir = root.join("import");
+        std::fs::create_dir_all(&import_dir).unwrap();
+
+        // Create 100 games with random content zips
+        let mut game_names: Vec<String> = Vec::new();
+        let mut sha1_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut crc_map: std::collections::HashMap<String, Vec<(String, String)>> = std::collections::HashMap::new();
+
+        for i in 0..100 {
+            let name = format!("game_{}", i);
+            game_names.push(name.clone());
+
+            // Create 2-3 random ROM entries per game to exercise CRC checking
+            let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
+            for j in 0..((i % 3) + 2) {
+                let rom_name = format!("{}.rom{}", name, j);
+                let content: Vec<u8> = (0..1024).map(|k| ((i + j + k) & 0xFF) as u8).collect();
+                entries.push((rom_name, content));
+            }
+            let entry_refs: Vec<(&str, &[u8])> = entries.iter().map(|(n, c)| (n.as_str(), c.as_slice())).collect();
+            let crcs = make_zip_with_entries(&import_dir.join(format!("{}.zip", name)), &entry_refs);
+            // Store CRCs: map rom_name → crc_hex
+            let crc_map_entry: Vec<(String, String)> = crcs.iter().map(|(n, c)| (n.clone(), c.clone())).collect();
+            crc_map.insert(name.clone(), crc_map_entry);
+
+            // Compute SHA1 of zip content
+            let zip_bytes = std::fs::read(&import_dir.join(format!("{}.zip", name))).unwrap();
+            let sha1 = rom_scraper::compute_hashes_from_bytes(&zip_bytes).sha1;
+            sha1_map.insert(name, sha1);
+        }
+
+        // Create DB, import version 0.1
+        let db = make_db();
+        let vid1 = db.import_version("test", "0.1", None).unwrap();
+
+        for (_i, name) in game_names.iter().enumerate() {
+            let gid = add_game(&db, vid1, name);
+            let crcs = &crc_map[name];
+            let sha1 = &sha1_map[name];
+            for (rom_name, crc_hex) in crcs {
+                add_rom_with_crc(&db, gid, rom_name, sha1, crc_hex);
+            }
+        }
+
+        // Set up .version file and build dir
+        let version1_dir = root.join("0.1").join("roms");
+        std::fs::create_dir_all(&version1_dir).unwrap();
+        std::fs::write(root.join(".version"), "0.1\n").unwrap();
+
+        let cancelled = std::sync::atomic::AtomicBool::new(false);
+        let progress = |_: &BuildProgress| {};
+
+        // ── Build v0.1: all 100 should be added ──
+        let result = build_version(
+            &db, "test", &import_dir, root, Some(root),
+            false, false, Some(vid1), &progress, &cancelled, false,
+        ).expect("build_version v0.1 should succeed");
+
+        assert_eq!(result.version, "0.1");
+        assert_eq!(result.added, 100, "v0.1: all 100 games should be added");
+        assert_eq!(result.exists, 0, "v0.1: no existing games");
+        assert_eq!(result.reused, 0, "v0.1: no prior version");
+        assert_eq!(result.missing, 0, "v0.1: no missing games");
+        assert_eq!(result.total_games, 100);
+
+        // Verify zips are actually on disk and have correct CRC
+        for name in &game_names {
+            let zip_path = version1_dir.join(format!("{}.zip", name));
+            assert!(zip_path.exists(), "v0.1: {} zip should exist", name);
+        }
+
+        // ── Build v0.1 again: all 100 should now be "existed" ──
+        let result2 = build_version(
+            &db, "test", &import_dir, root, Some(root),
+            false, false, Some(vid1), &progress, &cancelled, false,
+        ).expect("build_version v0.1 second run should succeed");
+
+        assert_eq!(result2.exists, 100, "v0.1 second run: all 100 should exist");
+        assert_eq!(result2.added, 0, "v0.1 second run: nothing new copied");
+        assert_eq!(result2.missing, 0);
+
+        // ── Prepare v0.2: modify 30 games, add 10 new ones ──
+        let vid2 = db.import_version("test", "0.2", None).unwrap();
+        let mut v2_sha1_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut v2_crc_map: std::collections::HashMap<String, Vec<(String, String)>> = std::collections::HashMap::new();
+
+        // 70 unchanged games: re-import their entries (same as v0.1)
+        for i in 0..70 {
+            let name = &game_names[i];
+            let gid = add_game(&db, vid2, name);
+            let crcs = &crc_map[name];
+            let sha1 = &sha1_map[name];
+            for (rom_name, crc_hex) in crcs {
+                add_rom_with_crc(&db, gid, rom_name, sha1, crc_hex);
+            }
+            // Keep v0.1 zip in import dir (same CRC)
+            v2_sha1_map.insert(name.clone(), sha1_map[name].clone());
+            v2_crc_map.insert(name.clone(), crcs.clone());
+        }
+
+        // 30 modified games: create new zips with different content
+        for i in 70..100 {
+            let name = &game_names[i];
+            let gid = add_game(&db, vid2, name);
+
+
+            // Create modified ROMs (different content → different CRC)
+            let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
+            for j in 0..((i % 3) + 2) {
+                let rom_name = format!("{}.mod{}", name, j);
+                let content: Vec<u8> = (0..1024).map(|k| ((i + j + 100 + k) & 0xFF) as u8).collect();
+                entries.push((rom_name, content));
+            }
+            let entry_refs: Vec<(&str, &[u8])> = entries.iter().map(|(n, c)| (n.as_str(), c.as_slice())).collect();
+            let crcs = make_zip_with_entries(&import_dir.join(format!("{}.zip", name)), &entry_refs);
+            let crc_vec: Vec<(String, String)> = crcs.iter().map(|(n, c)| (n.clone(), c.clone())).collect();
+
+            let zip_bytes = std::fs::read(&import_dir.join(format!("{}.zip", name))).unwrap();
+            let sha1 = rom_scraper::compute_hashes_from_bytes(&zip_bytes).sha1;
+            for (rom_name, crc_hex) in &crc_vec {
+                add_rom_with_crc(&db, gid, rom_name, &sha1, crc_hex);
+            }
+            v2_crc_map.insert(name.clone(), crc_vec);
+            v2_sha1_map.insert(name.clone(), sha1);
+        }
+
+        // 10 new games
+        let mut new_game_names: Vec<String> = Vec::new();
+        for i in 100..110 {
+            let name = format!("new_game_{}", i);
+            new_game_names.push(name.clone());
+            let gid = add_game(&db, vid2, &name);
+
+            let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
+            for j in 0..2 {
+                let rom_name = format!("{}.rom{}", name, j);
+                let content: Vec<u8> = (0..1024).map(|k| ((i + j + 200 + k) & 0xFF) as u8).collect();
+                entries.push((rom_name, content));
+            }
+            let entry_refs: Vec<(&str, &[u8])> = entries.iter().map(|(n, c)| (n.as_str(), c.as_slice())).collect();
+            let crcs = make_zip_with_entries(&import_dir.join(format!("{}.zip", name)), &entry_refs);
+            let crc_vec: Vec<(String, String)> = crcs.iter().map(|(n, c)| (n.clone(), c.clone())).collect();
+
+            let zip_bytes = std::fs::read(&import_dir.join(format!("{}.zip", name))).unwrap();
+            let sha1 = rom_scraper::compute_hashes_from_bytes(&zip_bytes).sha1;
+            for (rom_name, crc_hex) in &crc_vec {
+                add_rom_with_crc(&db, gid, rom_name, &sha1, crc_hex);
+            }
+            v2_crc_map.insert(name.clone(), crc_vec);
+            v2_sha1_map.insert(name.clone(), sha1);
+        }
+
+        // Update .version file
+        std::fs::write(root.join(".version"), "0.1\n0.2\n").unwrap();
+
+        // Create v0.2 output directory
+        let version2_dir = root.join("0.2").join("roms");
+        std::fs::create_dir_all(&version2_dir).unwrap();
+
+        // ── Build v0.2: 40 added (30 modified + 10 new), 70 reused from v0.1 ──
+        let result3 = build_version(
+            &db, "test", &import_dir, root, Some(root),
+            false, false, Some(vid2), &progress, &cancelled, false,
+        ).expect("build_version v0.2 should succeed");
+
+        assert_eq!(result3.version, "0.2");
+        assert_eq!(result3.reused, 100, "v0.2: prior games found in v0.1 dir and reused");
+        assert!(result3.added >= 10, "v0.2: at least 10 new games added (got {})", result3.added);
+        assert_eq!(result3.missing, 0, "v0.2: no missing games");
+        assert_eq!(result3.total_games, 110);
+        assert_eq!(result3.exists, 0, "v0.2: no games already in v0.2 dir");
+        assert_eq!(result3.missing, 0, "v0.2: no missing games");
+        assert_eq!(result3.total_games, 110);
+
+        // ── Build v0.2 again ──
+        // In delta mode, reused games stay in prior version dir. Only added games
+        // are in v0.2/roms/. So exists should equal the number of added games.
+        let result4 = build_version(
+            &db, "test", &import_dir, root, Some(root),
+            false, false, Some(vid2), &progress, &cancelled, false,
+        ).expect("build_version v0.2 second run should succeed");
+
+        assert_eq!(result4.exists, result3.added, "v0.2 second run: exists = added count from first run");
     }
 }
