@@ -16,6 +16,8 @@ pub struct IAFile {
     pub format: String,
     #[serde(default)]
     pub md5: Option<String>,
+    #[serde(default)]
+    pub private: Option<String>,
 }
 
 /// Get the file listing for an IA item.

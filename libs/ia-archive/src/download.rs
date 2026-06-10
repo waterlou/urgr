@@ -26,17 +26,33 @@ pub async fn download_file(
     out_dir: &Path,
     on_progress: Option<&dyn Fn(u64, u64)>,
 ) -> Result<(String, u64), String> {
+    download_file_with_client(None, identifier, path, out_dir, on_progress).await
+}
+
+/// Download a file from an IA item, using an optional pre-authenticated client.
+pub async fn download_file_with_client(
+    client: Option<reqwest::Client>,
+    identifier: &str,
+    path: &str,
+    out_dir: &Path,
+    on_progress: Option<&dyn Fn(u64, u64)>,
+) -> Result<(String, u64), String> {
     let encoded_path = encode_ia_path(path);
     let url = format!("https://archive.org/download/{}/{}", identifier, encoded_path);
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-        .cookie_store(true)
-        .build()
-        .map_err(|e| format!("Failed to build client: {}", e))?;
+    let referer = format!("https://archive.org/details/{}", identifier);
+    let client = client.unwrap_or_else(||
+        reqwest::Client::builder()
+            .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+            .cookie_store(true)
+            .build()
+            .expect("Failed to build HTTP client")
+    );
 
+    // First visit the item page to get IA cookies
+    let _ = client.get(&referer).send().await;
     let resp = client
         .get(&url)
-        .header("Referer", "https://archive.org/")
+        .header("Referer", &referer)
         .send()
         .await
         .map_err(|e| format!("HTTP error: {}", e))?;

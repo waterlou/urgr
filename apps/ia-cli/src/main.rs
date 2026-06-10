@@ -158,7 +158,7 @@ async fn cmd_download(args: &[String]) -> Result<(), String> {
 
 async fn cmd_find(args: &[String]) -> Result<(), String> {
     if args.len() < 3 {
-        return Err("Usage: ia-cli find <romset> <game> [--version <v>] [--crc <crc>] [--output <dir>]"
+        return Err("Usage: ia-cli find <romset> <game> [--version <v>] [--crc <crc>] [--output <dir>] [--username <u>] [--password <p>]"
             .into());
     }
     let romset = &args[1];
@@ -171,6 +171,14 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
         .iter()
         .position(|a| a == "--crc")
         .and_then(|p| args.get(p + 1));
+    let username = args
+        .iter()
+        .position(|a| a == "--username")
+        .and_then(|p| args.get(p + 1));
+    let password = args
+        .iter()
+        .position(|a| a == "--password")
+        .and_then(|p| args.get(p + 1));
     let out_dir = args
         .iter()
         .position(|a| a == "-o" || a == "--output")
@@ -178,9 +186,27 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
         .map(|s| Path::new(s))
         .unwrap_or_else(|| Path::new("."));
 
+    // Log in to IA if credentials provided (enables downloading private files)
+    let auth_client = if let (Some(u), Some(p)) = (username, password) {
+        eprintln!("Logging in as {}...", u);
+        match ia_archive::login(u, p).await {
+            Ok(client) => {
+                eprintln!("  Login successful.");
+                Some(client)
+            }
+            Err(e) => {
+                eprintln!("  Login failed (will try anonymous): {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let is_authenticated = auth_client.is_some();
+
     // Step 1: Search for the ROM set
     eprintln!("Searching for {} rom set...", romset);
-    let docs = ia_archive::search_items(romset, version.map(|s| s.as_str()), 5).await?;
+    let docs = ia_archive::search_items(romset, version.map(|s| s.as_str()), 20).await?;
 
     if docs.is_empty() {
         return Err(format!(
@@ -190,10 +216,9 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
     }
 
     let game_lower = game.to_lowercase();
-    let mut found_match: Option<(String, String, u64)> = None; // (identifier, file_path, size)
+    let mut found_match: Option<(String, String, u64)> = None;
     let mut tried_items = Vec::new();
 
-    // Try each search result in order until we find the game
     for doc in &docs {
         tried_items.push(doc.identifier.clone());
         eprintln!("  Checking: {}...", doc.identifier);
@@ -210,6 +235,7 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
                 name_lower.contains(&game_lower)
                     && (name_lower.ends_with(".zip") || name_lower.ends_with(".7z"))
                     && f.size.parse::<u64>().unwrap_or(0) > 0
+                    && (is_authenticated || f.private.as_deref() != Some("true"))
             })
             .collect();
 
@@ -241,7 +267,8 @@ async fn cmd_find(args: &[String]) -> Result<(), String> {
 
     // Step 3: Download the file
     eprintln!("  Downloading...");
-    let (saved_path, size) = ia_archive::download_file(
+    let (saved_path, size) = ia_archive::download_file_with_client(
+        auth_client,
         &identifier,
         &file_path,
         out_dir,
