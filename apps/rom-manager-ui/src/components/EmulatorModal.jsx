@@ -4,47 +4,77 @@ import {
 } from '@mui/material';
 import { Close as CloseIcon, ArrowBack } from '@mui/icons-material';
 import { createPortal } from 'react-dom';
-import { getEmulatorCore, isEmulatorSupported } from '../platformEmulator.js';
-import { recordPlay } from '../api.js';
+import { getEmulatorCore } from '../platformEmulator.js';
+import { playUrl, recordPlay } from '../api.js';
+
+const EJS_CDN = 'https://cdn.emulatorjs.org/nightly/data/';
+
+let scriptEl = null;
+
+function loadScript() {
+  return new Promise((resolve, reject) => {
+    if (scriptEl) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = EJS_CDN + 'loader.js';
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Failed to load EmulatorJS'));
+    document.head.appendChild(s);
+    scriptEl = s;
+  });
+}
 
 export default function EmulatorModal({ game, onClose }) {
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-  const emuRef = useRef(null);
-  const scriptRef = useRef(null);
+  const [error, setError] = useState(null);
   const recordedRef = useRef(false);
 
-  const core = getEmulatorCore(game.platform, game.source);
-  const supported = isEmulatorSupported(game.platform, game.source);
-
   useEffect(() => {
-    if (!supported || !core) { setError(true); setLoading(false); return; }
-    if (typeof window.EJS_player !== 'undefined') return;
+    let destroyed = false;
 
-    recordedRef.current = false;
-    const script = document.createElement('script');
-    script.src = `https://www.emulatorjs.com/emulator.js`;
-    script.async = true;
-    script.onload = () => { setLoading(false); };
-    script.onerror = () => { setError(true); setLoading(false); };
-    document.body.appendChild(script);
-    scriptRef.current = script;
+    async function init() {
+      try {
+        const core = getEmulatorCore(game.platform, game.source);
+        if (!core) {
+          setError(`Platform "${game.platform}" is not supported by EmulatorJS`);
+          setLoading(false);
+          return;
+        }
 
-    window.ejsOnLoad = () => {
-      if (emuRef.current) {
-        const ejs = new window.EJS_player(emuRef.current);
-        ejs.gameUrl = `/api/games/${game.id}/play`;
-        ejs.core = core;
-        ejs.start();
+        window.EJS_player = '#emulator-game';
+        window.EJS_core = core;
+        window.EJS_gameName = game.name || game.title || 'Game';
+        window.EJS_gameUrl = playUrl(game.id);
+        window.EJS_color = '#1a1a2e';
+        window.EJS_fullscreenOnExit = false;
+        window.EJS_startOnLoaded = true;
+        window.EJS_volume = 1.0;
+        window.EJS_lang = 'en';
+        window.EJS_pathtodata = EJS_CDN;
+
+        await loadScript();
+
+        if (!destroyed) setLoading(false);
+      } catch (err) {
+        if (!destroyed) { setError(err.message); setLoading(false); }
       }
-    };
+    }
+
+    init();
 
     return () => {
-      if (scriptRef.current?.parentNode) scriptRef.current.parentNode.removeChild(scriptRef.current);
-      const ejsEl = emuRef.current;
-      if (ejsEl) ejsEl.innerHTML = '';
+      destroyed = true;
+      try {
+        const emu = window.EJS_emulator;
+        if (emu) {
+          const al = emu.Module?.AL?.currentCtx;
+          if (al?.audioCtx) al.audioCtx.close().catch(() => {});
+          if (emu.Module?.pauseMainLoop) emu.Module.pauseMainLoop();
+        }
+      } catch {}
+      const el = document.getElementById('emulator-game');
+      if (el) el.innerHTML = '';
     };
-  }, [game?.id, core, supported]);
+  }, [game]);
 
   useEffect(() => {
     if (!loading && !error && !recordedRef.current) {
@@ -53,14 +83,20 @@ export default function EmulatorModal({ game, onClose }) {
     }
   }, [loading, error, game?.id]);
 
-  const title = game?.name || game?.title || 'Game';
+  useEffect(() => {
+    function handleKey(e) {
+      if (e.key === 'Escape') onClose?.();
+    }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose]);
 
   return createPortal(
     <Dialog open fullScreen onClose={onClose}>
       <AppBar position="static" color="primary" sx={{ height: 48 }}>
         <Toolbar variant="dense">
           <IconButton edge="start" color="inherit" onClick={onClose}><ArrowBack /></IconButton>
-          <Typography sx={{ ml: 2, flex: 1 }} noWrap>{title}</Typography>
+          <Typography sx={{ ml: 2, flex: 1 }} noWrap>{game?.name || game?.title || 'Game'}</Typography>
           <IconButton color="inherit" onClick={onClose}><CloseIcon /></IconButton>
         </Toolbar>
       </AppBar>
@@ -68,10 +104,10 @@ export default function EmulatorModal({ game, onClose }) {
         {loading && <CircularProgress color="primary" />}
         {error && (
           <Typography color="error">
-            {supported ? 'Failed to load emulator' : `Emulator not supported for ${game.platform || 'this platform'}`}
+            {error}
           </Typography>
         )}
-        <Box ref={emuRef} id="emulator-game" sx={{ width: '100%', height: '100%', display: loading || error ? 'none' : 'block' }} />
+        <Box id="emulator-game" sx={{ width: '100%', height: '100%', display: loading || error ? 'none' : 'block' }} />
       </Box>
     </Dialog>,
     document.body
