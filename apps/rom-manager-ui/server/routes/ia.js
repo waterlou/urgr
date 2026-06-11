@@ -1,10 +1,9 @@
 import { Router } from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { get, dbReady } from '../helpers.js';
 import { getAuth, isAuthenticated, setAuth, clearAuth, getCookieHeader } from '../ia-auth.js';
+import { romsDir } from '../paths.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = Router();
 
 // =============================================================================
@@ -66,7 +65,7 @@ router.post('/api/ia/download', async (req, res) => {
   try {
     const { url, entry, collection_id } = req.body;
     if (!url || !entry) return res.status(400).json({ error: 'url and entry required' });
-    const baseDir = path.join(__dirname, '..', '..', '..', 'data', 'roms');
+    const baseDir = romsDir;
     let dest = path.join(baseDir, entry.replace(/^roms\//, ''));
     if (collection_id) {
       const col = get('SELECT id, folder, slug FROM collections WHERE id = ?', [collection_id]);

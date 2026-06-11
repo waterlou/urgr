@@ -1,0 +1,16 @@
+{
+  "name": "gamemanager",
+  "private": true,
+  "scripts": {
+    "dev": "cd apps/rom-manager-ui && npm run dev",
+    "build": "cd apps/rom-manager-ui && npm run build",
+    "start": "cd apps/rom-manager-ui && npm run start",
+    "test:api": "cd apps/rom-manager-ui && npm run test:api",
+    "test:nps": "cd apps/rom-manager-ui && npm run test:nps",
+    "electron:dev": "cd apps/rom-manager-ui && npm run electron:dev",
+    "electron:build": "cd apps/rom-manager-ui && npm run electron:build",
+    "electron:build:mac": "cd apps/rom-manager-ui && npm run electron:build:mac",
+    "electron:build:win": "cd apps/rom-manager-ui && npm run electron:build:win",
+    "electron:build:linux": "cd apps/rom-manager-ui && npm run electron:build:linux"
+  }
+}

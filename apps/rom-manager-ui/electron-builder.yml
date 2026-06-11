@@ -1,0 +1,71 @@
+appId: com.gamemanager.rom-manager
+productName: ROM Manager
+copyright: Copyright © 2026
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - electron/**/*
+  - server/**/*
+  - dist/**/*
+  - node_modules/**/*
+  - package.json
+
+extraResources:
+  - from: ../../target/release/parse-cli
+    to: bin/parse-cli
+  - from: ../../target/release/build-cli
+    to: bin/build-cli
+  - from: ../../target/release/nps-cli
+    to: bin/nps-cli
+  - from: ../../target/release/scraper-cli
+    to: bin/scraper-cli
+  - from: ../../target/release/ia-cli
+    to: bin/ia-cli
+  - from: ../../icons
+    to: icons
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64
+  artifactName: ${productName}-${version}-mac.${ext}
+  category: public.app-category.games
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-win.${ext}
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-linux.${ext}
+  category: Game
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+
+publish:
+  provider: github
+  owner: water
+  repo: gamemanager

@@ -1,12 +1,11 @@
 import { Router } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
 import { getJob, cancelJob } from '../jobs.js';
 import { get, dbReady } from '../helpers.js';
 import { setAuth, clearAuth } from '../ia-auth.js';
+import { envFile } from '../paths.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = Router();
 
 // =============================================================================
@@ -47,7 +46,7 @@ router.post('/api/jobs/:jobId/cancel', (req, res) => {
 // Settings (read/write .env)
 // =============================================================================
 
-const SETTINGS_PATH = path.join(__dirname, '..', '..', '..', '..', 'data', '.env');
+const SETTINGS_PATH = envFile;
 const SETTINGS_KEYS = [
   'SS_DEVID', 'SS_DEVPASSWORD', 'SS_USERNAME', 'SS_PASSWORD',
   'IGDB_CLIENT_ID', 'IGDB_CLIENT_SECRET',

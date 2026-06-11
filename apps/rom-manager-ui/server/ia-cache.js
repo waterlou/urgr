@@ -3,10 +3,9 @@
 
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
+import { cacheFile } from './paths.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CACHE_PATH = path.join(__dirname, '..', '..', '..', 'data', 'ia-cache.json');
+const CACHE_PATH = cacheFile;
 
 let cache = null;
 

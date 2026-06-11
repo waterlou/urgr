@@ -3,7 +3,6 @@ import crypto, { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import { getDb } from '../db.js';
 import { execCli } from '../cli.js';
@@ -11,8 +10,7 @@ import { createJob, updateProgress, doneJob, failJob } from '../jobs.js';
 import { all, get, run, runNow, dbReady } from '../helpers.js';
 import { getAuth } from '../ia-auth.js';
 import { getCachedId, setCachedId } from '../ia-cache.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import { dataDir } from '../paths.js';
 
 const router = Router();
 
@@ -166,7 +164,6 @@ router.get('/:id', async (req, res) => {
 
     // Find the game's zip file
     let gameZipPath = null;
-    const dataDir = path.resolve(__dirname, '..', '..', '..', '..', 'data');
     const col = get('SELECT c.folder, c.slug FROM collections c JOIN collection_versions cv ON cv.collection_id = c.id WHERE cv.version_id = ? LIMIT 1', [game.version_id]);
     const colFolder = col?.folder || col?.slug;
     if (colFolder) {
@@ -248,7 +245,6 @@ router.get('/:id/play', async (req, res) => {
     if (!game) return res.status(404).json({ error: 'Game not found' });
 
     let filePath = null
-    const dataDir = path.resolve(__dirname, '..', '..', '..', '..', 'data')
 
     // Helper: search directory recursively for a .zip matching game name
     function findInDir(dir) {
@@ -292,7 +288,7 @@ router.get('/:id/play', async (req, res) => {
     // 1b. FBNeo/MAME only: fallback to older versions via .version
     if (!filePath && (game.source === 'FBNeo' || game.source === 'MAME')) {
       if (colFolder1) {
-        const versionFile = path.join(path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms'), colFolder1, '.version')
+        const versionFile = path.join(dataDir, 'roms', colFolder1, '.version')
         if (fs.existsSync(versionFile)) {
           const versions = fs.readFileSync(versionFile, 'utf-8').split('\n').map(s => s.trim()).filter(Boolean)
           const idx = versions.indexOf(game.version)
@@ -321,7 +317,6 @@ router.get('/:id/play', async (req, res) => {
           JOIN collection_versions cv ON cv.collection_id = c.id
           WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
         const colFolder = col?.folder || col?.slug || String(game.version_id);
-        const dataDir = path.resolve(__dirname, '..', '..', '..', '..', 'data')
         const subDir = rom.subtype === 'dlc' ? 'DLCs' : rom.subtype === 'update' ? 'Updates' : 'Games'
         const candidate = path.join(dataDir, 'roms', colFolder, game.platform, subDir, rom.filename)
         if (fs.existsSync(candidate)) filePath = candidate
@@ -336,7 +331,6 @@ router.get('/:id/play', async (req, res) => {
           JOIN collection_versions cv ON cv.collection_id = c.id
           WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
         const colFolder = col?.folder || col?.slug || String(game.version_id);
-        const dataDir = path.resolve(__dirname, '..', '..', '..', '..', 'data')
         const baseRomsDir = path.join(dataDir, 'roms', colFolder);
         const candidates = [
           path.join(baseRomsDir, rom.filename),
@@ -845,7 +839,7 @@ router.post('/:id/download-ia', async (req, res) => {
 
     setTimeout(async () => {
       try {
-        const baseRomDir = path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms', colFolder, game.version || '', 'roms');
+        const baseRomDir = path.resolve(dataDir, 'roms', colFolder, game.version || '', 'roms');
         const outputDir = game.platform ? path.join(baseRomDir, game.platform) : baseRomDir;
         fs.mkdirSync(outputDir, { recursive: true });
 

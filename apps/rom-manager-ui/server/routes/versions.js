@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { execSync } from 'child_process';
 import { getDb, saveDb } from '../db.js';
@@ -10,8 +9,8 @@ import { createJob, updateProgress, doneJob, failJob } from '../jobs.js';
 import { all, get, run, runNow, unescapeXml, dbReady } from '../helpers.js';
 import { importNps, scanNpsDir, buildNps, NPS_PLATFORMS, NPS_PLATFORM_MAP } from '../nps.js';
 import { sortVersions } from '../versionSort.js';
+import { romsDir } from '../paths.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = Router();
 
 // =============================================================================
@@ -731,7 +730,7 @@ router.post('/api/versions/import-online', async (req, res) => {
       // Update .version file so fallback can find this version
       const col = get('SELECT c.folder FROM collections c WHERE c.id = ?', [collection_id])
       if (col?.folder) {
-        const versionFile = path.join(path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms'), col.folder, '.version')
+        const versionFile = path.join(romsDir, col.folder, '.version')
         let versions = []
         if (fs.existsSync(versionFile)) {
           versions = fs.readFileSync(versionFile, 'utf-8').split('\n').map(s => s.trim()).filter(Boolean)
@@ -888,7 +887,7 @@ router.post('/api/versions/import-online', async (req, res) => {
         // Update .version file so fallback can find this version
         const col = get('SELECT c.folder FROM collections c WHERE c.id = ?', [collection_id])
         if (col?.folder) {
-          const versionFile = path.join(path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms'), col.folder, '.version')
+          const versionFile = path.join(romsDir, col.folder, '.version')
           let versions = []
           if (fs.existsSync(versionFile)) {
             versions = fs.readFileSync(versionFile, 'utf-8').split('\n').map(s => s.trim()).filter(Boolean)

@@ -1,12 +1,10 @@
 import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { fileURLToPath } from 'url'
 import { getDb } from './db.js'
 import { all, get, run } from './helpers.js'
 import { execCli } from './cli.js'
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
+import { dataDir } from './paths.js'
 
 let currentJob = null
 
@@ -90,7 +88,6 @@ export async function processNext() {
     const game = get('SELECT platform FROM game_entries WHERE id = ?', [item.game_entry_id])
     const platform = game?.platform || 'Games'
 
-    const dataDir = path.resolve(__dirname, '..', '..', '..', 'data')
     const romsDir = path.join(dataDir, 'roms', colFolder, platform)
     const subDir = item.subtype === 'dlc' ? 'DLCs' : item.subtype === 'update' ? 'Updates' : 'Games'
     const subPath = path.join(romsDir, subDir)
@@ -178,7 +175,7 @@ async function checkGameComplete(gameEntryId) {
   try {
     const game = get('SELECT g.id, g.version_id, sv.source, c.folder FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id LEFT JOIN collection_versions cv ON cv.version_id = sv.id LEFT JOIN collections c ON c.id = cv.collection_id WHERE g.id = ?', [gameEntryId])
     if (game && game.folder && game.source === 'NPS') {
-      const collectionDir = path.resolve(__dirname, '..', '..', '..', 'data', 'roms', game.folder)
+      const collectionDir = path.resolve(dataDir, 'roms', game.folder)
       execCli(['scan', String(game.version_id), collectionDir, '--game-id', String(game.id)], { binary: 'nps' })
     }
   } catch (_) {}

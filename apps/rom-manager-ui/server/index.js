@@ -2,9 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
 import { closeDb, saveDb } from './db.js';
 import { all, run, dbReady } from './helpers.js';
+import { distDir, iconsDir, isElectron } from './paths.js';
 import collectionsRouter from './routes/collections.js';
 import gamesRouter from './routes/games.js';
 import gameSetsRouter from './routes/game-sets.js';
@@ -16,10 +16,8 @@ import downloadsRouter from './routes/downloads.js';
 import operationsRouter from './routes/operations.js';
 import { loadFromEnv } from './ia-auth.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3001;
-const distPath = path.join(__dirname, '..', 'dist');
 
 app.use(cors());
 app.use(express.json({ limit: '100mb' }));
@@ -47,13 +45,12 @@ app.use((err, req, res, next) => {
 // =============================================================================
 // Static files + SPA fallback
 // =============================================================================
-app.use('/assets', express.static(path.join(distPath, 'assets')));
+app.use('/assets', express.static(path.join(distDir, 'assets')));
 
-const iconsDir = path.join(__dirname, '..', '..', '..', 'icons');
 app.use('/icons', express.static(iconsDir));
 
 app.use((req, res) => {
-  const filePath = path.join(distPath, 'index.html');
+  const filePath = path.join(distDir, 'index.html');
   if (fs.existsSync(filePath)) {
     res.sendFile(filePath);
   } else {
@@ -82,12 +79,23 @@ dbReady.then(() => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`ROM Manager API running at http://localhost:${PORT}`);
+let server;
+function shutdown() {
+  saveDb();
+  closeDb();
+  if (!isElectron) process.exit(0);
+}
+
+server = app.listen(PORT, () => {
+  const actualPort = server.address().port;
+  console.log(`ROM Manager API running at http://localhost:${actualPort}`);
   loadFromEnv();
+  // In Electron, signal the main process that the server is ready
+  if (isElectron && process.send) {
+    process.send({ type: 'server-ready', port: actualPort });
+  }
 });
 
-function shutdown() { saveDb(); closeDb(); process.exit(0); }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 process.on('unhandledRejection', (err) => {
@@ -95,5 +103,7 @@ process.on('unhandledRejection', (err) => {
 });
 process.on('uncaughtException', (err) => {
   console.error('Uncaught exception:', err?.stack || err?.message || err);
-  process.exit(1);
+  if (!isElectron) process.exit(1);
 });
+
+export { app, server };

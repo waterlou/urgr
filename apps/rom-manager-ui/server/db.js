@@ -1,9 +1,8 @@
 import initSqlJs from 'sql.js';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { dbPath as defaultDbPath } from './paths.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let db = null;
 let dbFilePath = null;
 let SQL = null;
@@ -190,7 +189,7 @@ CREATE INDEX IF NOT EXISTS idx_operations_collection ON operations(collection_id
 `;
 
 export function initDb(dbPath) {
-  const resolved = path.resolve(dbPath || path.join(__dirname, '..', '..', '..', 'data', 'roms.db'));
+  const resolved = path.resolve(dbPath || defaultDbPath);
   dbFilePath = resolved;
 
   if (fs.existsSync(resolved)) {

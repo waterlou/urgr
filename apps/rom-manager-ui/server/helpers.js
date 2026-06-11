@@ -1,9 +1,7 @@
 import { getDb, saveDb, initDb } from './db.js';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { dbPath } from './paths.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const dbPath = process.env.ROM_DB || path.join(__dirname, '..', '..', '..', 'data', 'roms.db');
+export { dbPath };
 export const dbReady = Promise.resolve(initDb(dbPath));
 
 export function all(sql, params = []) {

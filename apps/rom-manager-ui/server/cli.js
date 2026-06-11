@@ -2,8 +2,7 @@ import { execFileSync, spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { getDb, saveDb, initDb, getDbPath } from './db.js';
-
-const __dirname = path.dirname(new URL(import.meta.url).pathname);
+import { envFile, cliDir } from './paths.js';
 
 const CLI_NAMES = {
   scraper: 'scraper-cli',
@@ -13,7 +12,7 @@ const CLI_NAMES = {
   ia: 'ia-cli',
 };
 
-const SETTINGS_PATH = path.join(__dirname, '..', '..', '..', 'data', '.env');
+const SETTINGS_PATH = envFile;
 const SETTINGS_KEYS = [
   'SS_DEVID', 'SS_DEVPASSWORD', 'SS_USERNAME', 'SS_PASSWORD',
   'IGDB_CLIENT_ID', 'IGDB_CLIENT_SECRET',
@@ -57,8 +56,8 @@ function findBinary(binary) {
   const name = CLI_NAMES[binary];
   const candidates = [
     name,
-    path.join(__dirname, '..', '..', '..', 'target', 'release', name),
-    path.join(__dirname, '..', '..', '..', 'target', 'debug', name),
+    path.join(cliDir, name),
+    path.join(cliDir, '..', 'debug', name),
     `/usr/local/bin/${name}`,
   ];
   for (const c of candidates) {

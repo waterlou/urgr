@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { execSync } from 'child_process';
 import { getDb, reloadDb } from '../db.js';
@@ -12,8 +11,8 @@ import { getCookieHeader } from '../ia-auth.js';
 import { sortVersions } from '../versionSort.js';
 import { scanNpsDir, buildNps } from '../nps.js';
 import { scrapeSingleGame } from './games.js';
+import { romsDir, dataDir } from '../paths.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = Router();
 
 router.get('/api/status', async (req, res) => {
@@ -96,10 +95,9 @@ router.put('/api/collections/:id', async (req, res) => {
     if (sets.length) run(`UPDATE collections SET ${sets.join(', ')} WHERE id = ?`, vals);
 
     // Rename data folder if it changed
-    const __dirname = path.dirname(fileURLToPath(import.meta.url));
     if (newFolder !== oldFolder) {
-      const oldDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', oldFolder);
-      const newDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', newFolder);
+      const oldDir = path.join(romsDir, oldFolder);
+      const newDir = path.join(romsDir, newFolder);
       if (fs.existsSync(oldDir) && !fs.existsSync(newDir)) {
         fs.renameSync(oldDir, newDir);
       }
@@ -320,7 +318,7 @@ router.post('/api/collections/:id/build', async (req, res) => {
     const needsImportDir = !isNps && !scan;
     if (needsImportDir && !import_dir) return res.status(400).json({ error: 'import_dir required for DAT builds' });
 
-    const collectionDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', col.folder || col.slug);
+    const collectionDir = path.join(romsDir, col.folder || col.slug);
 
     const jobId = crypto.randomUUID();
     const job = createJob(jobId);
@@ -543,7 +541,7 @@ router.post('/api/collections/:id/builds/:buildId/run', async (req, res) => {
         [result.added || 0, result.missing || 0, buildId]);
       // Scan output dir to set game_state.available for built games
       try {
-        const buildDir = base_dir || path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', build.source);
+        const buildDir = base_dir || path.join(romsDir, build.source);
         const foundGames = new Set();
         function scanDir(dir) {
           for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -743,7 +741,7 @@ router.post('/api/collections/:id/build-nps', async (req, res) => {
     if (!sv) return res.status(404).json({ error: 'Version not found' });
     if (sv.source !== 'NPS') return res.status(400).json({ error: 'Version is not an NPS version' });
 
-    const collectionDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'roms', col.folder || col.slug);
+    const collectionDir = path.join(romsDir, col.folder || col.slug);
     fs.mkdirSync(collectionDir, { recursive: true });
 
     const result = buildNps(collectionDir, version_id, input_dir);

@@ -1,10 +1,7 @@
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const cliDir = path.resolve(__dirname, '..', '..', 'target', 'release');
+import { cliDir } from './paths.js';
 
 function findBinary(name) {
   const bin = name === 'scraper-cli' ? 'rom-scraper-cli' : 'rom-manager-cli';

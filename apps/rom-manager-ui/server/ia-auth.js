@@ -2,11 +2,7 @@
 // Credentials are loaded from data/.env on server startup.
 
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ENV_PATH = path.join(__dirname, '..', '..', '..', '..', 'data', '.env');
+import { envFile } from './paths.js';
 
 let authState = null;
 
@@ -65,8 +61,8 @@ export function getCookieHeader() {
 // Call on server startup — credentials are stored by the Settings page.
 export async function loadFromEnv() {
   try {
-    if (!fs.existsSync(ENV_PATH)) return null;
-    const text = fs.readFileSync(ENV_PATH, 'utf-8');
+    if (!fs.existsSync(envFile)) return null;
+    const text = fs.readFileSync(envFile, 'utf-8');
     let username = '', password = '';
     for (const line of text.split('\n')) {
       const trimmed = line.trim();
