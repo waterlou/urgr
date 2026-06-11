@@ -4,7 +4,7 @@ import {
   Menu, MenuItem, ListItemIcon, ListItemText,
 } from '@mui/material';
 import { Star, StarBorder, MoreVert, PlaylistAdd, PlaylistRemove } from '@mui/icons-material';
-import { updateGameRating } from '../api.js';
+import { updateGameRating, coverUrl } from '../api.js';
 
 export default function GameListItem({ game, onSelect, onRating, onFavourite, onAddToGameSet, onRemoveFromGameSet, gameSets, gameSetId, listImageMode }) {
   const [anchorEl, setAnchorEl] = useState(null);
@@ -24,8 +24,8 @@ export default function GameListItem({ game, onSelect, onRating, onFavourite, on
   return (
     <TableRow hover sx={{ cursor: 'pointer' }} onClick={() => onSelect?.(game)}>
       <TableCell sx={{ width: 50 }}>
-        {listImageMode !== 'none' && game.cover_url ? (
-          <Avatar src={game.cover_url} variant="rounded" sx={{ width: 40, height: 40 }} />
+        {listImageMode !== 'none' && (game.covers?.[0] || game.cover_url) ? (
+          <Avatar src={coverUrl(game.id)} variant="rounded" sx={{ width: 40, height: 40 }} />
         ) : (
           <Avatar variant="rounded" sx={{ width: 40, height: 40, bgcolor: 'action.hover' }}>?</Avatar>
         )}

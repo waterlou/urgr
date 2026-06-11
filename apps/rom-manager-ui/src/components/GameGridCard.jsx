@@ -28,8 +28,8 @@ export default function GameGridCard({ game, onSelect, onRating, onFavourite, on
   return (
     <Card sx={{ position: 'relative', cursor: 'pointer', '&:hover': { boxShadow: 6 } }} onClick={() => onSelect?.(game)}>
       <Box sx={{ position: 'relative', aspectRatio: '4/3', bgcolor: '#111', overflow: 'hidden' }}>
-        {listImageMode !== 'none' && game.cover_url ? (
-          <CardMedia component="img" image={game.cover_url} sx={{ height: '100%', objectFit: 'cover' }}
+        {listImageMode !== 'none' && (game.covers?.[0] || game.cover_url) ? (
+          <CardMedia component="img" image={coverUrl(game.id)} sx={{ height: '100%', objectFit: 'cover' }}
             onError={(e) => { e.target.style.display = 'none'; }}
           />
         ) : listImageMode === 'screenshot' && game.screenshots?.[0] ? (

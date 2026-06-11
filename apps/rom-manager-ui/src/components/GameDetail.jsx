@@ -110,9 +110,9 @@ export default function GameDetail() {
               <Grid container spacing={2} sx={{ mb: 2 }}>
                 <Grid item xs={12} sm={4} md={3}>
                   <Box sx={{ position: 'relative', borderRadius: 1, overflow: 'hidden', bgcolor: 'action.hover' }}>
-                    {!coverFailed && game.cover_url ? (
-                      <img src={game.cover_url} alt="" style={{ width: '100%', display: 'block', cursor: 'pointer' }}
-                        onClick={() => setLightbox(game.cover_url)} onError={() => setCoverFailed(true)} />
+                    {!coverFailed && (game.covers?.[0] || game.cover_url) ? (
+                      <img src={coverUrl(game.id)} alt="" style={{ width: '100%', display: 'block', cursor: 'pointer' }}
+                        onClick={() => setLightbox(coverUrl(game.id))} onError={() => setCoverFailed(true)} />
                     ) : (
                       <Box sx={{ aspectRatio: '3/4', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'text.secondary' }}>
                         <Typography>No cover</Typography>

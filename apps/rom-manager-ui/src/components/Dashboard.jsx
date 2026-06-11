@@ -37,11 +37,11 @@ export default function Dashboard() {
             {recentGames.map(g => (
               <Card key={g.id} sx={{ minWidth: 200, maxWidth: 240, cursor: 'pointer', flexShrink: 0 }}
                 onClick={() => navigate(`/collections/${g.collection_id}/game/${g.id}`)}>
-                {g.screenshots?.[0] || g.cover_url ? (
+                {g.screenshots?.[0] || g.covers?.[0] ? (
                   <CardMedia
                     component="img"
                     height="140"
-                    image={g.screenshots?.[0] || g.cover_url}
+                    image={g.screenshots?.[0] || g.covers?.[0]}
                     sx={{ objectFit: 'cover' }}
                   />
                 ) : (
