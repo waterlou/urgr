@@ -258,7 +258,7 @@ export default function GameDetail() {
       )}
 
       {showEmulator && game && (
-        <EmulatorModal key={`emu-${game.id}-${Date.now()}`} game={{ id: game.id, name: game.name, platform: game.platform, source: game.source }}
+        <EmulatorModal key={`emu-${game.id}-${Date.now()}`} game={{ id: game.id, name: game.name, description: game.description, platform: game.platform, source: game.source }}
           onClose={() => setShowEmulator(false)} />
       )}
     </>

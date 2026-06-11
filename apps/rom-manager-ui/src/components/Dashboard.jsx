@@ -34,7 +34,7 @@ export default function Dashboard() {
           <Box sx={{ display: 'flex', gap: 2, overflow: 'auto', pb: 2, mb: 3 }}>
             {recentGames.map(g => (
               <Card key={g.id} sx={{ minWidth: 200, maxWidth: 240, cursor: 'pointer', flexShrink: 0 }}
-                onClick={() => setEmulatorGame({ id: g.id, name: g.name, platform: g.platform, source: g.source })}>
+                onClick={() => setEmulatorGame({ id: g.id, name: g.name, description: g.description, platform: g.platform, source: g.source })}>
                 {g.screenshots?.[0] || g.covers?.[0] ? (
                   <CardMedia
                     component="img"

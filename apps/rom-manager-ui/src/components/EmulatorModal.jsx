@@ -39,7 +39,7 @@ export default function EmulatorModal({ game, onClose }) {
 <script>
   window.EJS_player='#ejs';
   window.EJS_core='${core}';
-  window.EJS_gameName='${(game.name || '').replace(/'/g, "\\'")}';
+  window.EJS_gameName='${((game.description || game.name) || '').replace(/'/g, "\\'")}';
   window.EJS_gameUrl='${window.location.origin}${playUrl(game.id)}';
   window.EJS_color='#1a1a2e';
   window.EJS_fullscreenOnExit=false;
@@ -85,7 +85,7 @@ export default function EmulatorModal({ game, onClose }) {
       <AppBar position="static" color="primary" sx={{ height: 48 }}>
         <Toolbar variant="dense">
           <IconButton edge="start" color="inherit" onClick={onClose}><ArrowBack /></IconButton>
-          <Typography sx={{ ml: 2, flex: 1 }} noWrap>{game?.name || game?.title || 'Game'}</Typography>
+          <Typography sx={{ ml: 2, flex: 1 }} noWrap>{game?.description || game?.name || game?.title || 'Game'}</Typography>
           <IconButton color="inherit" onClick={onClose}><CloseIcon /></IconButton>
         </Toolbar>
       </AppBar>
