@@ -18,7 +18,9 @@ export default function VersionManager({ collectionId, collection }) {
 
   useEffect(() => {
     const slug = collection?.dataset_preset;
-    if (slug) getAvailableVersions(slug).then(setAvailableDats).catch(() => {});
+    if (slug) getAvailableVersions(slug).then(data => {
+      setAvailableDats(data.available || []);
+    }).catch(() => {});
   }, [collection?.dataset_preset]);
 
   async function handleImport(version, source) {
@@ -72,7 +74,7 @@ export default function VersionManager({ collectionId, collection }) {
         <Box sx={{ mb: 1 }}>
           <Typography variant="body2" sx={{ mb: 1 }}>{isMame ? 'MAME' : 'FBNeo'} versions:</Typography>
           <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-            {availableDats.slice(0, 10).map(d => (
+            {Array.isArray(availableDats) && availableDats.slice(0, 10).map(d => (
               <Chip key={d.id || d} label={d.version || d} size="small"
                 onClick={() => handleImport(d.id || d, isMame ? 'mame' : 'fbneo')}
                 disabled={importingVer === (d.id || d)}

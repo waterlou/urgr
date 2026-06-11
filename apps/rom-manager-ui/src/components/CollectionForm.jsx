@@ -51,7 +51,7 @@ export default function CollectionForm() {
 
   useEffect(() => {
     if (datasetMode === 'preset' && selectedPreset) {
-      getAvailableVersions(selectedPreset.slug).then(setAvailableDats).catch(() => {});
+      getAvailableVersions(selectedPreset.slug).then(data => setAvailableDats(data.available || [])).catch(() => {});
     }
   }, [datasetMode, selectedPreset]);
 
