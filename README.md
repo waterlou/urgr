@@ -5,7 +5,7 @@ A retro game ROM collection manager with DAT parsing, metadata scraping, ROM bui
 ## Features
 
 - **DAT Import** — Parse MAME, FBNeo, OfflineList, DAT-O-MATIC, and custom DAT files
-- **Metadata Scraping** — Fetch covers, screenshots, descriptions from TGDB, IGDB, ScreenScraper
+- **Metadata Scraping** — Fetch covers, screenshots, descriptions from TGDB, IGDB, ScreenScraper, VGMuseum, NoIntroPictures, SonyStore
 - **ROM Building** — Build verified split-format ROM sets with parent/clone merge support
 - **NPS Integration** — Import, scan, and build NoPayStation (PS Vita/PS3/PSP) collections
 - **Internet Archive** — Search and download ROMs directly from archive.org
@@ -89,8 +89,8 @@ gamemanager/
 ├── apps/
 │   ├── rom-manager-ui/          # Web app (React + Express)
 │   │   ├── electron/            # Electron main process
-│   │   │   ├── main.js          # Main process entry
-│   │   │   └── preload.js       # Context bridge
+│   │   │   ├── main.cjs          # Main process entry (.cjs for ESM compat)
+│   │   │   └── preload.cjs       # Context bridge
 │   │   ├── server/              # Express API server
 │   │   │   ├── index.js         # Server entry point
 │   │   │   ├── paths.js         # Centralized path resolution
@@ -179,6 +179,19 @@ Full API docs: [`docs/api-reference.md`](docs/api-reference.md)
 | DAT-O-MATIC | datomatic.no-intro.org | No build | Per-system DATs |
 | NPS | NoPayStation API | PKG build | PS Vita/PS3/PSP |
 | Custom DAT | Upload | Split format | Any Logiqx/ClrMAMEPro XML |
+
+## Scraper Providers
+
+| Provider | Type | Auth | Data |
+|----------|------|------|------|
+| **TheGamesDB** | REST API | Built-in key (zero-config) | Platform data, covers |
+| **IGDB (Twitch)** | Apicalypse API | `IGDB_CLIENT_ID` + `IGDB_CLIENT_SECRET` | Full metadata, covers, screenshots |
+| **ScreenScraper** | API v2 | Dev ID + Password | Metadata + media (untested) |
+| **VGMuseum** | HTML scrape | None (browser UA) | Screenshots only (~13,766 games, 50+ platforms) |
+| **NoIntroPictures** | GitHub raw | None | Box art / screenshots |
+| **SonyStore** | PSN API | None | Screenshots |
+
+Run `scraper-cli test` to check connectivity to all configured providers.
 
 ## Docker
 
