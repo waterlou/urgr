@@ -9,26 +9,39 @@ import { playUrl, recordPlay } from '../api.js';
 
 const EJS_CDN = 'https://cdn.emulatorjs.org/nightly/data/';
 
+function stopEmulator() {
+  try {
+    const emu = window.EJS_emulator;
+    if (emu) {
+      const ctx = emu.Module?.AL?.currentCtx?.audioCtx;
+      if (ctx?.close) ctx.close().catch(() => {});
+      if (emu.Module?.pauseMainLoop) emu.Module.pauseMainLoop();
+    }
+  } catch {}
+  const el = document.getElementById('emulator-game');
+  if (el) el.innerHTML = '';
+  delete window.EJS_emulator;
+}
+
 export default function EmulatorModal({ game, onClose }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const recordedRef = useRef(false);
+  const scriptRef = useRef(null);
 
   useEffect(() => {
     let destroyed = false;
+
+    stopEmulator();
+    document.querySelectorAll(`script[src*="${EJS_CDN}loader.js"]`).forEach(s => s.remove());
 
     async function init() {
       try {
         const core = getEmulatorCore(game.platform, game.source);
         if (!core) {
-          setError(`Platform "${game.platform}" is not supported by EmulatorJS`);
-          setLoading(false);
+          if (!destroyed) { setError(`Platform "${game.platform}" is not supported`); setLoading(false); }
           return;
         }
-
-        // Remove any stale EmulatorJS scripts so the new one runs fresh
-        document.querySelectorAll(`script[src*="${EJS_CDN}loader.js"]`).forEach(s => s.remove());
-        delete window.EJS_emulator;
 
         window.EJS_player = '#emulator-game';
         window.EJS_core = core;
@@ -46,12 +59,19 @@ export default function EmulatorModal({ game, onClose }) {
         s.onload = () => { if (!destroyed) setLoading(false); };
         s.onerror = () => { if (!destroyed) { setError('Failed to load EmulatorJS'); setLoading(false); } };
         document.head.appendChild(s);
+        scriptRef.current = s;
       } catch (err) {
         if (!destroyed) { setError(err.message); setLoading(false); }
       }
     }
 
     init();
+
+    return () => {
+      destroyed = true;
+      stopEmulator();
+      if (scriptRef.current?.parentNode) scriptRef.current.parentNode.removeChild(scriptRef.current);
+    };
   }, [game]);
 
   useEffect(() => {
@@ -81,7 +101,7 @@ export default function EmulatorModal({ game, onClose }) {
       <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#000', position: 'relative' }}>
         {loading && <CircularProgress color="primary" />}
         {error && (
-          <Typography color="error">
+          <Typography color="error" sx={{ p: 2 }}>
             {error}
           </Typography>
         )}
