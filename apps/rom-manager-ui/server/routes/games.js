@@ -560,11 +560,6 @@ export async function scrapeSingleGame(gameId) {
     const stripped = game.description.replace(/\s*\([^)]*\)\s*/g, '').trim();
     if (stripped && !candidates.includes(stripped)) candidates.push(stripped);
     if (!candidates.includes(game.description)) candidates.push(game.description);
-    // Split description on common separators (e.g., "A / B", "A ~ B")
-    const parts = game.description.split(/\s*[\/~]\s*/).map(s => s.trim()).filter(Boolean);
-    for (const part of parts) {
-      if (part.length > 2 && !candidates.includes(part)) candidates.push(part);
-    }
   }
 
   if (game.name) {
@@ -591,12 +586,45 @@ export async function scrapeSingleGame(gameId) {
   let matchedTitle = null;
   for (const q of candidates) {
     const r = trySearch(q, game.platform);
-    if (!r) continue;
-    const ranked = rankResults(r.results, q, game.name, game.platform);
-    const best = ranked[0];
-    searchResult = { results: [best] };
-    matchedTitle = best.title;
-    break;
+    if (r) {
+      const ranked = rankResults(r.results, q, game.name, game.platform);
+      const best = ranked[0];
+      searchResult = { results: [best] };
+      matchedTitle = best.title;
+      break;
+    }
+    // Fallback: if the full description failed, try splitting on separators
+    if (q === game.description && game.description.length > 5) {
+      // Try each part split by / or ~
+      const parts = game.description.split(/\s*[\/~]\s*/).filter(p => p.length > 3);
+      for (const part of parts) {
+        const pr = trySearch(part, game.platform);
+        if (pr) {
+          const ranked = rankResults(pr.results, part, game.name, game.platform);
+          const best = ranked[0];
+          searchResult = { results: [best] };
+          matchedTitle = best.title;
+          break;
+        }
+      }
+      if (!searchResult) {
+        // Try stripped description (remove parenthetical)
+        const stripped = game.description.replace(/\s*\([^)]*\)\s*/g, '').trim();
+        if (stripped && stripped !== game.description) {
+          // Try first part before " - " or " : "
+          const head = stripped.split(/\s*[-–:]\s*/)[0].trim();
+          if (head.length > 3) {
+            const pr = trySearch(head, game.platform);
+            if (pr) {
+              const ranked = rankResults(pr.results, head, game.name, game.platform);
+              searchResult = { results: [ranked[0]] };
+              matchedTitle = ranked[0].title;
+            }
+          }
+        }
+      }
+      if (searchResult) break;
+    }
   }
 
   if (!searchResult) {
