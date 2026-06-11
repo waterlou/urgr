@@ -82,11 +82,16 @@ export function execCli(args, { binary = 'build' } = {}) {
     if (binary === 'scraper') opts.env = loadScraperEnv();
     stdout = execFileSync(cmdArgs[0], cmdArgs.slice(1), opts);
   } catch (e) {
-    // CLI exited with error — try to extract download_url from JSON in stdout
+    // CLI exited with error — try to extract error + download_url from JSON in stdout
     const out = e.stdout?.toString().trim();
     let dlUrl = '';
+    let jsonError = '';
     if (out) {
-      try { const j = JSON.parse(out); dlUrl = j.download_url || ''; } catch {}
+      try { const j = JSON.parse(out); dlUrl = j.download_url || ''; jsonError = j.error || ''; } catch {}
+    }
+    if (jsonError) {
+      const suffix = dlUrl ? `\nDownload URL: ${dlUrl}` : '';
+      throw new Error(`${jsonError}${suffix}`);
     }
     const lines = (e.stderr?.toString() || e.message).trim().split('\n').filter(l => l.trim());
     const lastErr = lines.filter(l => l.startsWith('Error:')).pop() || lines.pop() || e.message;
