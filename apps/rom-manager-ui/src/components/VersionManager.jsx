@@ -13,6 +13,8 @@ export default function VersionManager({ collectionId, collection }) {
   const [versions, setVersions] = useState([]);
   const [showAll, setShowAll] = useState(false);
 
+  const MAME_MILESTONES = new Set(['0.37b5', '0.78', '0.106', '0.139', '0.160']);
+
   useEffect(() => {
     if (collectionId) getCollectionVersions(collectionId).then(setVersions).catch(() => {});
   }, [collectionId]);
@@ -46,7 +48,8 @@ export default function VersionManager({ collectionId, collection }) {
     } finally { setImportingVer(null); }
   }
 
-  async function handleRemoveVersion(vId) {
+  async function handleRemoveVersion(vId, vLabel) {
+    if (!window.confirm(`Remove version "${vLabel}" from this collection?`)) return;
     await removeCollectionVersion(collectionId, vId);
     setVersions(p => p.filter(v => v.id !== vId));
   }
@@ -64,7 +67,7 @@ export default function VersionManager({ collectionId, collection }) {
         <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 2 }}>
           {versions.map(v => (
             <Chip key={v.id} label={`${v.version} (${v.game_count || 0} games)`} size="small"
-              onDelete={() => handleRemoveVersion(v.id)}
+              onDelete={() => handleRemoveVersion(v.id, v.version)}
               color="primary" variant="outlined"
             />
           ))}
@@ -75,17 +78,29 @@ export default function VersionManager({ collectionId, collection }) {
         <Box sx={{ mb: 1 }}>
           <Typography variant="body2" sx={{ mb: 1 }}>{isMame ? 'MAME' : 'FBNeo'} versions:</Typography>
           <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
-            {Array.isArray(availableDats) && availableDats.slice(0, showAll ? undefined : 10).map(d => (
-              <Chip key={d.id || d.version || d} label={d.version || d} size="small"
-                onClick={() => {
-                  const ver = d.id || d.version || d.numeric || d;
-                  handleImport(ver, isMame ? 'mame' : 'fbneo');
-                }}
-                disabled={importingVer === (d.id || d.version || d.numeric || d)}
-                icon={importingVer === (d.id || d.version || d.numeric || d) ? <CircularProgress size={12} /> : undefined}
+            {(function() {
+              let items = Array.isArray(availableDats) ? availableDats : [];
+              if (isMame && !showAll && items.length > 0) {
+                const latest = items.find(d => d.version === items[0]?.version);
+                const milestones = items.filter(d => MAME_MILESTONES.has(d.version));
+                const seen = new Set();
+                [...milestones, ...(latest ? [latest] : [])].forEach(d => { if (d) seen.add(d.numeric || d.version); });
+                items = items.filter(d => seen.has(d.numeric || d.version));
+              }
+              return items;
+            })().slice(0, showAll ? undefined : 10).map(d => {
+              const ver = d.id || d.version || d.numeric || d;
+              const isMilestone = MAME_MILESTONES.has(d.version);
+              return (
+              <Chip key={ver} label={d.version || d} size="small"
+                sx={isMilestone ? { fontWeight: 700 } : undefined}
+                onClick={() => handleImport(ver, isMame ? 'mame' : 'fbneo')}
+                disabled={importingVer === ver}
+                icon={importingVer === ver ? <CircularProgress size={12} /> : undefined}
               />
-            ))}
-            {availableDats.length > 10 && (
+              );
+            })}
+            {Array.isArray(availableDats) && availableDats.length > 10 && (
               <Button size="small" onClick={() => setShowAll(!showAll)}>
                 {showAll ? 'Show less' : `Show all (${availableDats.length})`}
               </Button>
