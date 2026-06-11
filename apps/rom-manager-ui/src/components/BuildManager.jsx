@@ -31,7 +31,7 @@ export default function BuildManager({ collectionId, collection }) {
     setBuildResult(null);
     try {
       const result = await collectionBuild(collectionId, buildVersion, buildImportDir, false);
-      const jobId = result.job_id || result.id;
+      const jobId = result.jobId || result.job_id || result.id;
       setBuildProgress(p => ({ ...p, [jobId]: 0 }));
       const es = subscribeJobSSE(jobId, {
         onProgress: (msg) => setBuildProgress(p => ({ ...p, [jobId]: msg.percent || 0 })),
@@ -51,7 +51,7 @@ export default function BuildManager({ collectionId, collection }) {
     setBuildScanResult(null);
     try {
       const result = await collectionBuild(collectionId, buildVersion, buildImportDir, true);
-      const jobId = result.job_id || result.id;
+      const jobId = result.jobId || result.job_id || result.id;
       const es = subscribeJobSSE(jobId, {
         onProgress: (msg) => {},
         onResult: (data) => { setBuildScanResult(data); setBuildScanRunning(false); },
