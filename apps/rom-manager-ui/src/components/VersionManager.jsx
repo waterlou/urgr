@@ -49,9 +49,9 @@ export default function VersionManager({ collectionId, collection }) {
   }
 
   const datasetSlug = collection?.dataset_preset;
-  const isMame = datasetSlug === 'mame';
-  const isFbneo = datasetSlug === 'fbneo';
-  const isNps = datasetSlug === 'nps';
+  const isMame = datasetSlug?.toLowerCase() === 'mame';
+  const isFbneo = datasetSlug?.toLowerCase() === 'fbneo';
+  const isNps = datasetSlug?.toLowerCase() === 'nps';
 
   return (
     <Box sx={{ mb: 3 }}>

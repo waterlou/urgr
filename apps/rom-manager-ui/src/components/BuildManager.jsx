@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Box, Typography, Button, Select, MenuItem, FormControl, InputLabel,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Paper, Chip, LinearProgress, CircularProgress, Collapse,
+  Paper, Chip, LinearProgress, CircularProgress, Collapse, TextField,
 } from '@mui/material';
 import {
   getCollectionBuilds, startCollectionBuild, runCollectionBuild, collectionBuild,
@@ -77,6 +77,10 @@ export default function BuildManager({ collectionId, collection }) {
           {Array.isArray(versions) && versions.map(v => <MenuItem key={v.id} value={v.id}>{v.version}</MenuItem>)}
           </Select>
         </FormControl>
+        <TextField size="small" label="Import Directory" value={buildImportDir}
+          onChange={e => setBuildImportDir(e.target.value)}
+          placeholder="/path/to/roms" sx={{ minWidth: 200 }}
+        />
         <Button variant="contained" onClick={handleBuild} disabled={!buildVersion || buildRunning}>
           {buildRunning ? <CircularProgress size={14} /> : 'Build'}
         </Button>
