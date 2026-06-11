@@ -3,6 +3,7 @@ mod no_intro_pictures;
 mod screenscraper;
 mod sony_store;
 mod thegamesdb;
+mod vgmuseum;
 
 use async_trait::async_trait;
 
@@ -16,6 +17,7 @@ pub use no_intro_pictures::NoIntroPictures;
 pub use screenscraper::ScreenScraper;
 pub use sony_store::SonyStore;
 pub use thegamesdb::TheGamesDb;
+pub use vgmuseum::Vgmuseum;
 
 #[async_trait]
 pub trait GameScraper: Send + Sync {
@@ -60,6 +62,8 @@ impl ScraperRegistry {
         scrapers.push(Box::new(NoIntroPictures::new(config)));
         // SonyStore is always available (public PSN API, no auth needed)
         scrapers.push(Box::new(SonyStore::new(config)));
+        // Vgmuseum is always available (public website, no auth needed)
+        scrapers.push(Box::new(Vgmuseum::new(config)));
 
         let mut registry = Self { scrapers };
 

@@ -87,6 +87,7 @@ pub enum ScrapeSource {
     Local,
     NoIntroPictures,
     SonyStore,
+    Vgmuseum,
 }
 
 impl std::fmt::Display for ScrapeSource {
@@ -98,6 +99,7 @@ impl std::fmt::Display for ScrapeSource {
             Self::Local => write!(f, "local"),
             Self::NoIntroPictures => write!(f, "no-intro-pictures"),
             Self::SonyStore => write!(f, "sony-store"),
+            Self::Vgmuseum => write!(f, "vgmuseum"),
         }
     }
 }

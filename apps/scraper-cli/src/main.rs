@@ -476,8 +476,9 @@ fn parse_source(args: &[String]) -> Option<rom_scraper::ScrapeSource> {
             "thegamesdb" => Some(rom_scraper::ScrapeSource::TheGamesDb),
             "no-intro-pictures" => Some(rom_scraper::ScrapeSource::NoIntroPictures),
             "sony-store" => Some(rom_scraper::ScrapeSource::SonyStore),
+            "vgmuseum" => Some(rom_scraper::ScrapeSource::Vgmuseum),
             _ => {
-                eprintln!("Unknown source '{}'. Valid: screenscraper, igdb, thegamesdb, no-intro-pictures, sony-store", val);
+                eprintln!("Unknown source '{}'. Valid: screenscraper, igdb, thegamesdb, no-intro-pictures, sony-store, vgmuseum", val);
                 None
             }
         };
@@ -490,6 +491,7 @@ fn parse_source(args: &[String]) -> Option<rom_scraper::ScrapeSource> {
             "thegamesdb" => Some(rom_scraper::ScrapeSource::TheGamesDb),
             "no-intro-pictures" => Some(rom_scraper::ScrapeSource::NoIntroPictures),
             "sony-store" => Some(rom_scraper::ScrapeSource::SonyStore),
+            "vgmuseum" => Some(rom_scraper::ScrapeSource::Vgmuseum),
             _ => None,
         };
     }

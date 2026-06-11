@@ -50,6 +50,7 @@ impl Default for Config {
                 SourceEntry { source: ScrapeSource::ScreenScraper, priority: 200 },
                 SourceEntry { source: ScrapeSource::Igdb, priority: 300 },
                 SourceEntry { source: ScrapeSource::NoIntroPictures, priority: 400 },
+                SourceEntry { source: ScrapeSource::Vgmuseum, priority: 450 },
                 SourceEntry { source: ScrapeSource::SonyStore, priority: 500 },
             ],
         }
