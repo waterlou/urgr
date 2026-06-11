@@ -27,6 +27,6 @@ const iconsDir = isElectron
   : path.resolve(__dirnameServer, '..', '..', '..', 'icons');
 
 // cliDir: Rust CLI binaries
-const cliDir = path.resolve(__dirnameServer, '..', '..', 'target', 'release');
+const cliDir = path.resolve(__dirnameServer, '..', '..', '..', 'target', 'release');
 
 export { dataDir, dbPath, envFile, cacheFile, romsDir, distDir, iconsDir, cliDir, isElectron };
