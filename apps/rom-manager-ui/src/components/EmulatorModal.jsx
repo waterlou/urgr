@@ -9,17 +9,13 @@ import { playUrl, recordPlay } from '../api.js';
 
 const EJS_CDN = 'https://cdn.emulatorjs.org/nightly/data/';
 
-let scriptEl = null;
-
 function loadScript() {
   return new Promise((resolve, reject) => {
-    if (scriptEl) { resolve(); return; }
     const s = document.createElement('script');
     s.src = EJS_CDN + 'loader.js';
     s.onload = () => resolve();
     s.onerror = () => reject(new Error('Failed to load EmulatorJS'));
     document.head.appendChild(s);
-    scriptEl = s;
   });
 }
 
@@ -73,6 +69,12 @@ export default function EmulatorModal({ game, onClose }) {
       } catch {}
       const el = document.getElementById('emulator-game');
       if (el) el.innerHTML = '';
+      // Remove EmulatorJS globals so next mount reinitializes
+      delete window.EJS_emulator;
+      delete window.EJS_player;
+      ['EJS_core','EJS_gameName','EJS_gameUrl','EJS_color','EJS_startOnLoaded','EJS_pathtodata'].forEach(k => delete window[k]);
+      // Remove all script tags from this CDN to force reload on next mount
+      document.querySelectorAll(`script[src*="${EJS_CDN}"]`).forEach(s => s.remove());
     };
   }, [game]);
 
