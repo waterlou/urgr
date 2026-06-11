@@ -72,6 +72,13 @@ struct RomEntry {
     crc: Option<String>,
 }
 
+#[derive(Serialize)]
+struct HealthResult {
+    name: String,
+    status: String,
+    message: String,
+}
+
 fn normalize_url(u: &str) -> String {
     if u.starts_with("//") {
         format!("https:{}", u)
@@ -161,6 +168,7 @@ fn print_usage() {
     eprintln!("  search <query> [--source <s>]  Search games by name");
     eprintln!("  scrape <file> [--download] [--source <s>]   Match a ROM file and optionally download media");
     eprintln!("  detail <game-id> [--source <s>] Get full game details by ID");
+    eprintln!("  test                           Test connectivity to all configured providers");
     eprintln!();
     eprintln!("OPTIONS:");
     eprintln!("  --source <s>       Provider: thegamesdb (default), screenscraper, igdb");
@@ -218,6 +226,7 @@ async fn main() -> ExitCode {
         "search" => cmd_search(&args[1..]).await,
         "scrape" => cmd_scrape(&args[1..]).await,
         "detail" => cmd_detail(&args[1..]).await,
+        "test" => cmd_test().await,
         _ => {
             eprintln!("Unknown command: {}", args[1]);
             print_usage();
@@ -231,6 +240,158 @@ async fn main() -> ExitCode {
     }
 
     exit
+}
+
+async fn cmd_test() -> ExitCode {
+    let config = build_config();
+    let client = HttpClient::new();
+    let browser_client = HttpClient::new().with_user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+    let mut results: Vec<HealthResult> = Vec::new();
+
+    // TheGamesDB (always has a default API key)
+    {
+        let api_key = config.thegamesdb.as_ref().map(|c| c.api_key.as_str()).unwrap_or("");
+        if api_key.is_empty() {
+            results.push(HealthResult { name: "thegamesdb".into(), status: "skipped".into(), message: "No API key".into() });
+        } else {
+            let url = format!("https://api.thegamesdb.net/v1/Games/ByGameName?name=Mario&apikey={}", api_key);
+            match client.get_json::<serde_json::Value>(&url).await {
+                Ok(data) => {
+                    let count = data["data"]["count"].as_i64().unwrap_or(0);
+                    results.push(HealthResult {
+                        name: "thegamesdb".into(),
+                        status: if count > 0 { "ok".into() } else { "error".into() },
+                        message: format!("Search returned {} games", count),
+                    });
+                }
+                Err(e) => results.push(HealthResult { name: "thegamesdb".into(), status: "error".into(), message: e.to_string() }),
+            }
+        }
+    }
+
+    // ScreenScraper (needs SS_DEVID + SS_DEVPASSWORD)
+    {
+        if let Some(ref ss) = config.screenscraper {
+            let url = format!("https://api.screenscraper.fr/api2/jeuRecherche.php?devid={}&devpassword={}&recherche=Mario&systemeid=1",
+                ss.dev_id, ss.dev_password);
+            match client.get_text(&url).await {
+                Ok(body) => {
+                    let working = body.contains("<response>") || body.contains("\"response\"");
+                    results.push(HealthResult {
+                        name: "screenscraper".into(),
+                        status: if working { "ok".into() } else { "error".into() },
+                        message: if working { "API responded".into() } else { "Unexpected response format".into() },
+                    });
+                }
+                Err(e) => results.push(HealthResult { name: "screenscraper".into(), status: "error".into(), message: e.to_string() }),
+            }
+        } else {
+            results.push(HealthResult { name: "screenscraper".into(), status: "skipped".into(), message: "Not configured (SS_DEVID / SS_DEVPASSWORD)".into() });
+        }
+    }
+
+    // IGDB (needs IGDB_CLIENT_ID + IGDB_CLIENT_SECRET)
+    {
+        if let Some(ref igdb) = config.igdb {
+            let token_url = format!("https://id.twitch.tv/oauth2/token?client_id={}&client_secret={}&grant_type=client_credentials",
+                igdb.client_id, igdb.client_secret);
+            match client.post_form_json::<serde_json::Value>(&token_url, &[]).await {
+                Ok(token_data) => {
+                    if let Some(token) = token_data["access_token"].as_str() {
+                        let search_url = "https://api.igdb.com/v4/games";
+                        let search_body = "search \"Mario\"; fields name; limit 1;";
+                        match client.inner().post(search_url)
+                            .header("User-Agent", client.user_agent())
+                            .header("Client-ID", &igdb.client_id)
+                            .header("Authorization", format!("Bearer {}", token))
+                            .header("Content-Type", "text/plain")
+                            .body(search_body.to_string())
+                            .send().await
+                        {
+                            Ok(resp) => {
+                                match resp.json::<serde_json::Value>().await {
+                                    Ok(games) => {
+                                        let count = games.as_array().map(|a| a.len()).unwrap_or(0);
+                                        results.push(HealthResult {
+                                            name: "igdb".into(),
+                                            status: if count > 0 { "ok".into() } else { "error".into() },
+                                            message: format!("Search returned {} games", count),
+                                        });
+                                    }
+                                    Err(e) => results.push(HealthResult { name: "igdb".into(), status: "error".into(), message: format!("Parse error: {}", e) }),
+                                }
+                            }
+                            Err(e) => results.push(HealthResult { name: "igdb".into(), status: "error".into(), message: e.to_string() }),
+                        }
+                    } else {
+                        results.push(HealthResult { name: "igdb".into(), status: "error".into(), message: "OAuth token missing".into() });
+                    }
+                }
+                Err(e) => results.push(HealthResult { name: "igdb".into(), status: "error".into(), message: e.to_string() }),
+            }
+        } else {
+            results.push(HealthResult { name: "igdb".into(), status: "skipped".into(), message: "Not configured (IGDB_CLIENT_ID / IGDB_CLIENT_SECRET)".into() });
+        }
+    }
+
+    // NoIntroPictures (always on)
+    {
+        let url = "https://raw.githubusercontent.com/";
+        match client.head(url).await {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                results.push(HealthResult {
+                    name: "no-intro-pictures".into(),
+                    status: if status < 500 { "ok".into() } else { "error".into() },
+                    message: format!("GitHub raw reachable (HTTP {})", status),
+                });
+            }
+            Err(e) => results.push(HealthResult { name: "no-intro-pictures".into(), status: "error".into(), message: e.to_string() }),
+        }
+    }
+
+    // SonyStore (always on)
+    {
+        let url = "https://store.playstation.com/";
+        match client.head(url).await {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                results.push(HealthResult {
+                    name: "sony-store".into(),
+                    status: if status < 500 { "ok".into() } else { "error".into() },
+                    message: format!("Store reachable (HTTP {})", status),
+                });
+            }
+            Err(e) => results.push(HealthResult { name: "sony-store".into(), status: "error".into(), message: e.to_string() }),
+        }
+    }
+
+    // VGMuseum (always on, needs browser UA)
+    {
+        let url = "https://www.vgmuseum.com/images/nes_b.html";
+        match browser_client.get_text(url).await {
+            Ok(body) => {
+                let has_entries = body.contains("<li>");
+                let blocked = body.contains("Please visit");
+                let entry_count = body.matches("<li>").count();
+                results.push(HealthResult {
+                    name: "vgmuseum".into(),
+                    status: if has_entries && !blocked { "ok".into() } else if blocked { "error".into() } else { "error".into() },
+                    message: if has_entries && !blocked {
+                        format!("Index page returned {} game entries", entry_count)
+                    } else if blocked {
+                        "Bot-blocked (User-Agent rejected)".into()
+                    } else {
+                        "No game entries found".into()
+                    },
+                });
+            }
+            Err(e) => results.push(HealthResult { name: "vgmuseum".into(), status: "error".into(), message: e.to_string() }),
+        }
+    }
+
+    print_json(&serde_json::json!({"results": results}));
+    ExitCode::SUCCESS
 }
 
 async fn cmd_hash(args: &[String]) -> ExitCode {
