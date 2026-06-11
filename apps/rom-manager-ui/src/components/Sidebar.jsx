@@ -90,7 +90,7 @@ export default function Sidebar() {
                   <IconButton size="small" onClick={() => confirmDeleteCollection(col)}><Delete fontSize="small" /></IconButton>
                 </Box>
               }>
-                <ListItemButton selected={location.pathname === `/collections/${col.id}`} sx={{ pl: 4 }} onClick={() => handleNav(`/collections/${col.id}`)}>
+                <ListItemButton selected={location.pathname.startsWith(`/collections/${col.id}`)} sx={{ pl: 4 }} onClick={() => handleNav(`/collections/${col.id}`)}>
                   <ListItemIcon sx={{ minWidth: 32 }}><IconDisplay name={col.logo} fallback="folder" size={20} /></ListItemIcon>
                   <ListItemText primary={col.name} primaryTypographyProps={{ variant: 'body2', noWrap: true }} />
                 </ListItemButton>

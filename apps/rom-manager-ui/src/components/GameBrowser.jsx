@@ -7,7 +7,7 @@ import {
 } from '@mui/material';
 import {
   GridView, ViewList, ViewModule, Search, ArrowUpward, ArrowDownward,
-  FilterList, Star, CropOriginal, Close, PlayArrow,
+  FilterList, Star, CropOriginal, Close, PlayArrow, Settings as SettingsIcon,
 } from '@mui/icons-material';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useCollections } from '../contexts/CollectionContext.jsx';
@@ -34,6 +34,7 @@ export default function GameBrowser() {
   const activeView = location.pathname.startsWith('/collections') ? 'collection'
     : location.pathname.startsWith('/game-sets') ? 'game-set' : 'browse';
   const activeId = paramId;
+  const isRootCollection = activeView === 'collection' && !location.pathname.includes('/browse') && !location.pathname.includes('/game/');
 
   const [viewMode, setViewMode] = useState('grid');
   const [sortField, setSortField] = useState('name');
@@ -107,7 +108,7 @@ export default function GameBrowser() {
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ p: 2, pb: 0 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          {activeView === 'collection' && (
+          {activeView === 'collection' && !isRootCollection && (
             <IconButton onClick={() => navigate(`/collections/${activeId}`)}><Close /></IconButton>
           )}
           <Box>
@@ -119,6 +120,11 @@ export default function GameBrowser() {
             </Typography>
           </Box>
           <Box sx={{ flex: 1 }} />
+          {activeView === 'collection' && isRootCollection && (
+            <IconButton onClick={() => navigate(`/collections/${activeId}/settings`)}>
+              <SettingsIcon />
+            </IconButton>
+          )}
           {activeMeta?.platforms && activeMeta.platforms.length > 0 && (
             <Box sx={{ display: 'flex', gap: 0.5 }}>
               {activeMeta.platforms.map(p => <Chip key={p} label={p} size="small" icon={<IconDisplay name={p} size={16} />} />)}

@@ -28,11 +28,13 @@ export default function App() {
       <Routes>
         <Route element={<AppLayout />}>
           <Route index element={<Dashboard />} />
-          <Route path="collections/:id" element={<CollectionDetail />} />
+          <Route path="collections/:id" element={<GameBrowser />} />
+          <Route path="collections/:id/settings" element={<CollectionDetail />} />
           <Route path="collections/:id/browse" element={<GameBrowser />} />
           <Route path="collections/:id/browse/game/:gameId" element={<GameDetail />} />
           <Route path="collections/:id/game/:gameId" element={<GameDetail />} />
           <Route path="game-sets/:id" element={<GameBrowser />} />
+          <Route path="game-sets/:id/game/:gameId" element={<GameDetail />} />
           <Route path="browse" element={<GameBrowser />} />
           <Route path="downloads" element={<DownloadManager />} />
           <Route path="operations" element={<OperationsPage />} />
