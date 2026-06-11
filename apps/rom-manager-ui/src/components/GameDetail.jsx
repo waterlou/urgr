@@ -7,8 +7,9 @@ import {
 import { ArrowBack, PlayArrow, Download, CloudDownload, Check, Close } from '@mui/icons-material';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getGame, coverUrl, playUrl, scrapeGameMetadata,
-  downloadGameFromIA, getIaAuthStatus, enqueueDownload, getGameAvailability } from '../api.js';
+  downloadGameFromIA, getIaAuthStatus, enqueueDownload, getGameAvailability, subscribeJobSSE } from '../api.js';
 import EmulatorModal from './EmulatorModal.jsx';
+import DownloadDialog from './DownloadDialog.jsx';
 
 function Transition(props) {
   return <Slide direction="left" {...props} />;
@@ -26,8 +27,9 @@ export default function GameDetail() {
   const [coverFailed, setCoverFailed] = useState(false);
   const [showEmulator, setShowEmulator] = useState(false);
   const [iaAuth, setIaAuth] = useState(null);
-  const [iaDownloading, setIaDownloading] = useState(false);
-  const [downloadMsg, setDownloadMsg] = useState(null);
+  const [showDownloadDialog, setShowDownloadDialog] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(null);
+  const [downloadJobId, setDownloadJobId] = useState(null);
   const [romAvailability, setRomAvailability] = useState(null);
   const dataLoadedRef = useRef(null);
 
@@ -64,13 +66,36 @@ export default function GameDetail() {
   }
 
   async function handleDownloadIA() {
-    setIaDownloading(true); setDownloadMsg(null);
+    setShowDownloadDialog(true);
+    setDownloadProgress({ messages: ['Starting...'], pct: 0, done: false, error: null });
     try {
-      const r = await downloadGameFromIA(gameId);
-      setDownloadMsg(r?.downloaded ? 'Downloaded!' : r?.message || 'Queued');
+      const result = await downloadGameFromIA(gameId);
+      const jobId = result.jobId || result.job_id || result.id;
+      if (!jobId) { setDownloadProgress(p => ({ ...p, error: 'Failed to start download', done: true })); return; }
+      setDownloadJobId(jobId);
+      setDownloadProgress(p => ({ ...p, messages: [...p.messages, `Job started: ${jobId.slice(0, 8)}...`] }));
+
+      const es = subscribeJobSSE(jobId, {
+        onProgress: (msg) => {
+          setDownloadProgress(p => ({
+            ...p,
+            pct: msg.percent || msg.pct || p.pct,
+            messages: msg.msg ? [...p.messages, msg.msg] : p.messages,
+          }));
+        },
+        onResult: (data) => {
+          const msg = data?.ok ? '✓ Download complete!' : '⚠ Download finished with issues';
+          setDownloadProgress(p => ({ ...p, pct: 100, messages: [...p.messages, msg], done: true }));
+          getGame(gameId).then(setGame).catch(() => {});
+          getGameAvailability(gameId).then(setRomAvailability).catch(() => {});
+        },
+        onError: (err) => {
+          setDownloadProgress(p => ({ ...p, error: err, messages: [...p.messages, `✗ ${err}`], done: true }));
+        },
+      });
     } catch (e) {
-      setDownloadMsg(e.message);
-    } finally { setIaDownloading(false); }
+      setDownloadProgress(p => ({ ...p, error: e.message, messages: [...p.messages, `✗ ${e.message}`], done: true }));
+    }
   }
 
   async function handleEnqueueDownload() {
@@ -115,8 +140,8 @@ export default function GameDetail() {
             ) : null}
             {showDownload && game?.source !== 'NPS' && iaAuth?.authenticated ? (
               <Button variant="contained" size="small" startIcon={<CloudDownload />} onClick={handleDownloadIA}
-                disabled={iaDownloading} sx={{ mr: 1 }}>
-                {iaDownloading ? <CircularProgress size={14} /> : 'Get ROM'}
+                disabled={showDownloadDialog} sx={{ mr: 1 }}>
+                {showDownloadDialog ? <CircularProgress size={14} /> : 'Get ROM'}
               </Button>
             ) : null}
             <Button variant="contained" size="small" startIcon={<PlayArrow />}
@@ -243,9 +268,7 @@ export default function GameDetail() {
                   </TableContainer>
                 </>
               )}
-
-              {downloadMsg && <Typography variant="caption" sx={{ mt: 1, display: 'block' }}>{downloadMsg}</Typography>}
-            </>
+</>
           )}
         </Box>
       </Dialog>
@@ -260,6 +283,14 @@ export default function GameDetail() {
         <EmulatorModal key={`emu-${game.id}-${Date.now()}`} game={{ id: game.id, name: game.name, description: game.description, platform: game.platform, source: game.source }}
           onClose={() => setShowEmulator(false)} />
       )}
+
+      <DownloadDialog
+        open={showDownloadDialog}
+        gameName={game?.description || game?.name}
+        progress={downloadProgress}
+        jobId={downloadJobId}
+        onClose={() => setShowDownloadDialog(false)}
+      />
     </>
   );
 }

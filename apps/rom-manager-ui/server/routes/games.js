@@ -952,6 +952,8 @@ router.post('/:id/download-ia', async (req, res) => {
           setCachedId(romset, game.version || '', result.cached_id);
         }
 
+        updateProgress(jobId, 50, `Found: ${result.file || game.name}.zip (${result.size ? (result.size / 1024 / 1024).toFixed(1) + ' MB' : 'size unknown'})`);
+
         // Verify the file was actually downloaded
         const filename = result.file || game.name;
         const downloadedFile = [path.join(outputDir, filename), ...['.zip', '.7z'].map(ext => path.join(outputDir, game.name + ext))]
@@ -962,6 +964,12 @@ router.post('/:id/download-ia', async (req, res) => {
           if (files.length === 0) {
             throw new Error(`Download completed but file not found for ${game.name}`);
           }
+        }
+
+        updateProgress(jobId, 80, `Verifying CRC${result.crc_match ? '...' : ' (no CRC check available)'}`);
+
+        if (result.crc_match !== undefined) {
+          updateProgress(jobId, 90, `CRC: ${result.match_count || 0} entries matched ✓`);
         }
 
         // Update game_state.available after successful download
