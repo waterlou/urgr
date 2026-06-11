@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Box, Typography, Button, Chip, CircularProgress, Paper, Stack,
 } from '@mui/material';
 import { ArrowBack } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCollections } from '../contexts/CollectionContext.jsx';
-import { getCollectionGames } from '../api.js';
+import { getCollectionGames, getCollectionVersions } from '../api.js';
 import IconDisplay from './IconDisplay.jsx';
 import VersionManager from './VersionManager.jsx';
 import IaDownload from './IaDownload.jsx';
@@ -17,6 +17,19 @@ export default function CollectionDetail() {
   const navigate = useNavigate();
   const { collections } = useCollections();
   const collection = collections.find(c => c.id === id);
+  const [versions, setVersions] = useState([]);
+
+  useEffect(() => {
+    if (id) getCollectionVersions(id).then(setVersions).catch(() => {});
+  }, [id]);
+
+  if (!collection) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -36,8 +49,8 @@ export default function CollectionDetail() {
       </Box>
 
       <Box sx={{ flex: 1, overflow: 'auto', px: 2, pb: 2 }}>
-        <VersionManager collectionId={id} collection={collection} />
-        <BuildManager collectionId={id} collection={collection} />
+        <VersionManager collectionId={id} collection={collection} versions={versions} />
+        <BuildManager collectionId={id} collection={collection} versions={versions} />
         <ExportPanel collectionId={id} />
         <IaDownload collectionId={id} />
       </Box>

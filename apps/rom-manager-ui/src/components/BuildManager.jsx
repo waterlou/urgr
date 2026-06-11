@@ -9,7 +9,7 @@ import {
   subscribeJobSSE, cancelJob,
 } from '../api.js';
 
-export default function BuildManager({ collectionId, collection }) {
+export default function BuildManager({ collectionId, collection, versions = [] }) {
   const [builds, setBuilds] = useState([]);
   const [buildProgress, setBuildProgress] = useState({});
   const [buildVersion, setBuildVersion] = useState('');
@@ -63,8 +63,6 @@ export default function BuildManager({ collectionId, collection }) {
       setBuildScanRunning(false);
     }
   }
-
-  const versions = collection?.versions || [];
 
   return (
     <Box sx={{ mb: 3 }}>
