@@ -193,7 +193,7 @@ export default function GameBrowser() {
             <Chip label="All versions" size="small" color={!selectedVersionId ? 'primary' : 'default'}
               onClick={() => setSelectedVersionId(null)} />
             {collectionVersions.map(v => (
-              <Chip key={v.id} label={`${v.version} (${v.game_count})`} size="small"
+              <Chip key={v.id} label={`${v.version} (${v.total_games})`} size="small"
                 color={selectedVersionId === v.id ? 'primary' : 'default'}
                 onClick={() => setSelectedVersionId(v.id)} />
             ))}

@@ -40,7 +40,7 @@ export default function EmulatorModal({ game, onClose }) {
   window.EJS_player='#ejs';
   window.EJS_core='${core}';
   window.EJS_gameName='${(game.name || '').replace(/'/g, "\\'")}';
-  window.EJS_gameUrl='${playUrl(game.id)}';
+  window.EJS_gameUrl='${window.location.origin}${playUrl(game.id)}';
   window.EJS_color='#1a1a2e';
   window.EJS_fullscreenOnExit=false;
   window.EJS_startOnLoaded=true;
