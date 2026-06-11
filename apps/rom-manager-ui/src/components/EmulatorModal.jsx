@@ -9,77 +9,68 @@ import { playUrl, recordPlay } from '../api.js';
 
 const EJS_CDN = 'https://cdn.emulatorjs.org/nightly/data/';
 
-function stopEmulator() {
-  try {
-    const emu = window.EJS_emulator;
-    if (emu) {
-      const ctx = emu.Module?.AL?.currentCtx?.audioCtx;
-      if (ctx?.close) ctx.close().catch(() => {});
-      if (emu.Module?.pauseMainLoop) emu.Module.pauseMainLoop();
-    }
-  } catch {}
-  const el = document.getElementById('emulator-game');
-  if (el) el.innerHTML = '';
-  delete window.EJS_emulator;
-}
-
 export default function EmulatorModal({ game, onClose }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [blobUrl, setBlobUrl] = useState(null);
   const recordedRef = useRef(false);
-  const scriptRef = useRef(null);
+
+  const core = getEmulatorCore(game.platform, game.source);
 
   useEffect(() => {
-    let destroyed = false;
-
-    stopEmulator();
-    document.querySelectorAll(`script[src*="${EJS_CDN}loader.js"]`).forEach(s => s.remove());
-
-    async function init() {
-      try {
-        const core = getEmulatorCore(game.platform, game.source);
-        if (!core) {
-          if (!destroyed) { setError(`Platform "${game.platform}" is not supported`); setLoading(false); }
-          return;
-        }
-
-        window.EJS_player = '#emulator-game';
-        window.EJS_core = core;
-        window.EJS_gameName = game.name || game.title || 'Game';
-        window.EJS_gameUrl = playUrl(game.id);
-        window.EJS_color = '#1a1a2e';
-        window.EJS_fullscreenOnExit = false;
-        window.EJS_startOnLoaded = true;
-        window.EJS_volume = 1.0;
-        window.EJS_lang = 'en';
-        window.EJS_pathtodata = EJS_CDN;
-
-        const s = document.createElement('script');
-        s.src = EJS_CDN + 'loader.js?_=' + Date.now();
-        s.onload = () => { if (!destroyed) setLoading(false); };
-        s.onerror = () => { if (!destroyed) { setError('Failed to load EmulatorJS'); setLoading(false); } };
-        document.head.appendChild(s);
-        scriptRef.current = s;
-      } catch (err) {
-        if (!destroyed) { setError(err.message); setLoading(false); }
-      }
+    if (!core) {
+      setError(`Platform "${game.platform}" is not supported by EmulatorJS`);
+      setLoading(false);
+      return;
     }
 
-    init();
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#111;overflow:hidden;width:100vw;height:100vh}
+  #ejs{width:100%;height:100%}
+</style>
+</head>
+<body>
+<div id="ejs"></div>
+<script>
+  window.EJS_player='#ejs';
+  window.EJS_core='${core}';
+  window.EJS_gameName='${(game.name || '').replace(/'/g, "\\'")}';
+  window.EJS_gameUrl='${playUrl(game.id)}';
+  window.EJS_color='#1a1a2e';
+  window.EJS_fullscreenOnExit=false;
+  window.EJS_startOnLoaded=true;
+  window.EJS_volume=1.0;
+  window.EJS_lang='en';
+  window.EJS_pathtodata='${EJS_CDN}';
+  var s=document.createElement('script');
+  s.src='${EJS_CDN}loader.js?_='+Date.now();
+  s.onload=function(){parent.postMessage('ejs-loaded','*')};
+  document.head.appendChild(s);
+<\/script>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    setBlobUrl(url);
+
+    function handler(e) {
+      if (e.data === 'ejs-loaded') setLoading(false);
+    }
+    window.addEventListener('message', handler);
+
+    recordPlay(game.id).catch(() => {});
 
     return () => {
-      destroyed = true;
-      stopEmulator();
-      if (scriptRef.current?.parentNode) scriptRef.current.parentNode.removeChild(scriptRef.current);
+      window.removeEventListener('message', handler);
+      URL.revokeObjectURL(url);
     };
-  }, [game]);
-
-  useEffect(() => {
-    if (!loading && !error && !recordedRef.current) {
-      recordedRef.current = true;
-      recordPlay(game.id).catch(() => {});
-    }
-  }, [loading, error, game?.id]);
+  }, [game?.id]);
 
   useEffect(() => {
     function handleKey(e) {
@@ -100,12 +91,14 @@ export default function EmulatorModal({ game, onClose }) {
       </AppBar>
       <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#000', position: 'relative' }}>
         {loading && <CircularProgress color="primary" />}
-        {error && (
-          <Typography color="error" sx={{ p: 2 }}>
-            {error}
-          </Typography>
+        {error && <Typography color="error" sx={{ p: 2 }}>{error}</Typography>}
+        {blobUrl && (
+          <iframe
+            src={blobUrl}
+            style={{ width: '100%', height: '100%', border: 'none', display: loading || error ? 'none' : 'block' }}
+            title="Emulator"
+          />
         )}
-        <Box id="emulator-game" sx={{ width: '100%', height: '100%', display: loading || error ? 'none' : 'block' }} />
       </Box>
     </Dialog>,
     document.body
