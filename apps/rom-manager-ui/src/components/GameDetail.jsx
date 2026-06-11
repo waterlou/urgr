@@ -7,7 +7,8 @@ import {
 import { ArrowBack, PlayArrow, Download, CloudDownload, Check, Close } from '@mui/icons-material';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getGame, coverUrl, playUrl, scrapeGameMetadata,
-  downloadGameFromIA, getIaAuthStatus, enqueueDownload, getGameAvailability, subscribeJobSSE } from '../api.js';
+  downloadGameFromIA, getIaAuthStatus, enqueueDownload, getGameAvailability,
+  subscribeJobSSE, subscribeDownloadSSE } from '../api.js';
 import EmulatorModal from './EmulatorModal.jsx';
 import DownloadDialog from './DownloadDialog.jsx';
 
@@ -101,12 +102,45 @@ export default function GameDetail() {
   }
 
   async function handleEnqueueDownload() {
-    setDownloadMsg(null);
+    setShowDownloadDialog(true);
+    setDownloadProgress({ messages: ['Queuing download...'], pct: 0, done: false, error: null });
+    setDownloadJobId(null);
     try {
       await enqueueDownload(gameId);
-      setDownloadMsg('Added to download queue');
+      setDownloadProgress(p => ({ ...p, messages: [...p.messages, 'Download queued, waiting for downloader...'] }));
+
+      const es = subscribeDownloadSSE({
+        onQueue: (queue) => {
+          const items = (queue || []).filter(i => i.game_entry_id === parseInt(gameId));
+          if (items.length === 0) return;
+          const item = items[0];
+          if (item.status === 'downloading') {
+            setDownloadProgress(p => ({
+              ...p,
+              pct: item.progress || 50,
+              messages: [...p.messages, `Downloading ${item.filename}...${item.progress || ''}`],
+            }));
+          } else if (item.status === 'completed') {
+            setDownloadProgress(p => ({
+              ...p, pct: 100,
+              messages: [...p.messages, `✓ ${item.filename} downloaded`],
+              done: true,
+            }));
+            es.close();
+            getGame(gameId).then(setGame).catch(() => {});
+            getGameAvailability(gameId).then(setRomAvailability).catch(() => {});
+          } else if (item.status === 'failed') {
+            setDownloadProgress(p => ({
+              ...p, error: item.error || 'Download failed',
+              messages: [...p.messages, `✗ ${item.filename}: ${item.error || 'failed'}`],
+              done: true,
+            }));
+            es.close();
+          }
+        },
+      });
     } catch (e) {
-      setDownloadMsg(e.message);
+      setDownloadProgress(p => ({ ...p, error: e.message, messages: [...p.messages, `✗ ${e.message}`], done: true }));
     }
   }
 
