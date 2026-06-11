@@ -68,7 +68,7 @@ export default function VersionManager({ collectionId, collection }) {
       {versions.length > 0 && (
         <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 2 }}>
           {versions.map(v => (
-            <Chip key={v.id} label={`${v.version} (${v.game_count || 0} games)`} size="small"
+            <Chip key={v.id} label={`${v.version} (${v.total_games || 0} games)`} size="small"
               onDelete={() => handleRemoveVersion(v.id, v.version)}
               color="primary" variant="outlined"
             />

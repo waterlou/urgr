@@ -35,7 +35,8 @@ router.get('/api/collections', async (req, res) => {
   try {
     const rows = all('SELECT c.* FROM collections c ORDER BY c.name');
     const result = rows.map(c => {
-      const versions = all(`SELECT sv.id, sv.source, sv.version, sv.dir, sv.created_at
+      const versions = all(`SELECT sv.id, sv.source, sv.version, sv.dir, sv.created_at,
+          (SELECT COUNT(*) FROM game_entries WHERE version_id = sv.id) as total_games
         FROM collection_versions cv
         JOIN set_versions sv ON sv.id = cv.version_id
         WHERE cv.collection_id = ?
