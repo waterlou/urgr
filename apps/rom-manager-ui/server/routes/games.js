@@ -155,7 +155,8 @@ router.get('/:id', async (req, res) => {
     if (!game) return res.status(404).json({ error: 'not found' });
     if (typeof game.synopsis === 'string') try { game.synopsis = JSON.parse(game.synopsis); } catch {}
     // Read covers/screenshots from game_media (shared across clones via cloneof)
-    const canonical = game.cloneof || game.name;
+    const canonical = game.cloneof && get('SELECT 1 FROM game_entries WHERE name = ? AND version_id = ? LIMIT 1', [game.cloneof, game.version_id])
+      ? game.cloneof : game.name;
     const mediaPlat = (game.platform || '').trim() || 'arcade';
     const media = get('SELECT covers, screenshots, synopsis as media_synopsis FROM game_media WHERE name = ? AND platform = ?', [canonical, mediaPlat]);
     let covers = [];
@@ -500,7 +501,14 @@ export async function scrapeSingleGame(gameId) {
   if (!game) return { scraped: false, error: 'Game not found', gameId };
 
   function mediaPlatform(p) { return (p || '').trim() || 'arcade'; }
-  function canonicalName(g) { return g.cloneof || g.name; }
+  function canonicalName(g) {
+    // Use cloneof only if it points to an actual game entry
+    if (g.cloneof) {
+      const exists = get('SELECT 1 FROM game_entries WHERE name = ? AND version_id = ? LIMIT 1', [g.cloneof, g.version_id]);
+      if (exists) return g.cloneof;
+    }
+    return g.name;
+  }
 
   // Check game_media first using canonical name
   const canonical = canonicalName(game);
@@ -853,9 +861,10 @@ router.post('/:id/play', async (req, res) => {
 router.get('/:id/cover', async (req, res) => {
   await dbReady;
   try {
-    const game = get('SELECT g.id, g.name, g.platform, g.cloneof FROM game_entries g WHERE g.id = ?', [req.params.id]);
+    const game = get('SELECT g.id, g.name, g.platform, g.cloneof, g.version_id FROM game_entries g WHERE g.id = ?', [req.params.id]);
     if (!game) return res.status(404).end();
-    const canonical = game.cloneof || game.name;
+    const canonical = game.cloneof && get('SELECT 1 FROM game_entries WHERE name = ? AND version_id = ? LIMIT 1', [game.cloneof, game.version_id])
+      ? game.cloneof : game.name;
     const mediaPlat = (game.platform || '').trim() || 'arcade';
     const media = get('SELECT covers FROM game_media WHERE name = ? AND platform = ?', [canonical, mediaPlat]);
     if (media?.covers) {
