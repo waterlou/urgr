@@ -40,6 +40,7 @@ router.get('/api/collections', async (req, res) => {
         JOIN set_versions sv ON sv.id = cv.version_id
         WHERE cv.collection_id = ?
         ORDER BY cv.version_id DESC`, [c.id]);
+      versions.sort((a, b) => sortVersions([a.version, b.version])[0] === a.version ? -1 : 1);
       const vids = versions.map(v => v.id);
       let total = 0;
       let available = 0;
