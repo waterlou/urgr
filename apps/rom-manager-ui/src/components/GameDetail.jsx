@@ -151,7 +151,7 @@ export default function GameDetail() {
     : null; // null = still loading, true = has ROMs, false = no ROMs
 
   const showDownload = game?.source === 'NPS'
-    ? romAvailability !== null && !game?.downloaded  // NPS: show after avail fetch if not downloaded
+    ? romAvailability !== null && !game?.available  // NPS: show after avail fetch if not downloaded
     : hasAvailableRoms === false;  // non-NPS: show only when explicitly no ROMs found
 
   return (
@@ -165,7 +165,7 @@ export default function GameDetail() {
               </Typography>
             <Box sx={{ flex: 1 }} />
             {showDownload && game?.source === 'NPS' ? (
-              game?.downloaded ? (
+              game?.available ? (
                 <Chip label="Downloaded" color="success" size="small" sx={{ mr: 1 }} />
               ) : (
                 <Button variant="contained" size="small" startIcon={<Download />} onClick={handleEnqueueDownload}
