@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import {
   getCollections, createCollection, updateCollection, deleteCollection,
-  getCollectionGames, getGameSetGames, addGameSetGames, removeGameSetGame,
+  getGameSets, getCollectionGames, getGameSetGames, addGameSetGames, removeGameSetGame,
   getVersions, getGames, addCollectionVersion, removeCollectionVersion,
   getDownloadQueue, getOperations,
 } from '../api.js';

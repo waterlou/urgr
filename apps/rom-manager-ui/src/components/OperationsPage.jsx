@@ -43,7 +43,7 @@ export default function OperationsPage() {
             {op.progress != null && (
               <LinearProgress variant="determinate" value={op.progress} sx={{ width: 100 }} />
             )}
-            {op.result && <Typography variant="caption">{op.result}</Typography>}
+            {op.result && <Typography variant="caption">{typeof op.result === 'string' ? op.result : JSON.stringify(op.result)}</Typography>}
             {(op.status === 'running' || op.status === 'pending') && (
               <Button size="small" color="error" startIcon={<CancelIcon />}
                 onClick={() => cancelOperation(op.id).catch(() => {})}>Cancel</Button>
