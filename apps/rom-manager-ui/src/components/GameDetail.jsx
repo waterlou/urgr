@@ -4,7 +4,7 @@ import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Paper, CircularProgress, ImageList, ImageListItem, Slide,
 } from '@mui/material';
-import { ArrowBack, PlayArrow, Download, CloudDownload } from '@mui/icons-material';
+import { ArrowBack, PlayArrow, Download, CloudDownload, Check, Close } from '@mui/icons-material';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getGame, coverUrl, playUrl, scrapeGameMetadata,
   downloadGameFromIA, getIaAuthStatus, enqueueDownload, getGameAvailability } from '../api.js';
@@ -206,7 +206,9 @@ export default function GameDetail() {
                               } />
                             </TableCell>
                             <TableCell>
-                              {romAvailability?.available?.[rom.id] ? <Chip label="Yes" size="small" color="success" /> : <Chip label="No" size="small" />}
+                              {romAvailability?.available?.[rom.id]
+                                ? <Check sx={{ color: 'success.main', fontSize: 20, display: 'block' }} />
+                                : <Close sx={{ color: 'text.disabled', fontSize: 20, display: 'block' }} />}
                             </TableCell>
                             <TableCell><Typography variant="caption" fontFamily="monospace">{rom.crc32 || ''}</Typography></TableCell>
                           </TableRow>
