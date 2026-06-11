@@ -206,7 +206,7 @@ export default function GameDetail() {
                               } />
                             </TableCell>
                             <TableCell>
-                              {romAvailability?.[rom.id] ? <Chip label="Yes" size="small" color="success" /> : <Chip label="No" size="small" />}
+                              {romAvailability?.available?.[rom.id] ? <Chip label="Yes" size="small" color="success" /> : <Chip label="No" size="small" />}
                             </TableCell>
                             <TableCell><Typography variant="caption" fontFamily="monospace">{rom.crc32 || ''}</Typography></TableCell>
                           </TableRow>
