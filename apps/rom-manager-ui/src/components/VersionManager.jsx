@@ -11,6 +11,7 @@ export default function VersionManager({ collectionId, collection }) {
   const [availableDats, setAvailableDats] = useState([]);
   const [importingVer, setImportingVer] = useState(null);
   const [versions, setVersions] = useState([]);
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     if (collectionId) getCollectionVersions(collectionId).then(setVersions).catch(() => {});
@@ -73,14 +74,22 @@ export default function VersionManager({ collectionId, collection }) {
       {(isMame || isFbneo) && (
         <Box sx={{ mb: 1 }}>
           <Typography variant="body2" sx={{ mb: 1 }}>{isMame ? 'MAME' : 'FBNeo'} versions:</Typography>
-          <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-            {Array.isArray(availableDats) && availableDats.slice(0, 10).map(d => (
-              <Chip key={d.id || d} label={d.version || d} size="small"
-                onClick={() => handleImport(d.id || d, isMame ? 'mame' : 'fbneo')}
-                disabled={importingVer === (d.id || d)}
-                icon={importingVer === (d.id || d) ? <CircularProgress size={12} /> : undefined}
+          <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
+            {Array.isArray(availableDats) && availableDats.slice(0, showAll ? undefined : 10).map(d => (
+              <Chip key={d.id || d.version || d} label={d.version || d} size="small"
+                onClick={() => {
+                  const ver = d.id || d.version || d.numeric || d;
+                  handleImport(ver, isMame ? 'mame' : 'fbneo');
+                }}
+                disabled={importingVer === (d.id || d.version || d.numeric || d)}
+                icon={importingVer === (d.id || d.version || d.numeric || d) ? <CircularProgress size={12} /> : undefined}
               />
             ))}
+            {availableDats.length > 10 && (
+              <Button size="small" onClick={() => setShowAll(!showAll)}>
+                {showAll ? 'Show less' : `Show all (${availableDats.length})`}
+              </Button>
+            )}
           </Box>
         </Box>
       )}
