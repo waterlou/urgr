@@ -99,14 +99,14 @@ export default function GameDetail() {
               game?.downloaded ? (
                 <Chip label="Downloaded" color="success" size="small" sx={{ mr: 1 }} />
               ) : (
-                <Button size="small" startIcon={<Download />} onClick={handleEnqueueDownload}
+                <Button variant="contained" size="small" startIcon={<Download />} onClick={handleEnqueueDownload}
                   sx={{ mr: 1 }}>
                   Download
                 </Button>
               )
             ) : (
               iaAuth?.authenticated ? (
-                <Button size="small" startIcon={<CloudDownload />} onClick={handleDownloadIA}
+                <Button variant="contained" size="small" startIcon={<CloudDownload />} onClick={handleDownloadIA}
                   disabled={iaDownloading} sx={{ mr: 1 }}>
                   {iaDownloading ? <CircularProgress size={14} /> : 'Get ROM'}
                 </Button>
