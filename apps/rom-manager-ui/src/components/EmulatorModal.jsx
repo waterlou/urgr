@@ -9,16 +9,6 @@ import { playUrl, recordPlay } from '../api.js';
 
 const EJS_CDN = 'https://cdn.emulatorjs.org/nightly/data/';
 
-function loadScript() {
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = EJS_CDN + 'loader.js';
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error('Failed to load EmulatorJS'));
-    document.head.appendChild(s);
-  });
-}
-
 export default function EmulatorModal({ game, onClose }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -36,6 +26,10 @@ export default function EmulatorModal({ game, onClose }) {
           return;
         }
 
+        // Remove any stale EmulatorJS scripts so the new one runs fresh
+        document.querySelectorAll(`script[src*="${EJS_CDN}loader.js"]`).forEach(s => s.remove());
+        delete window.EJS_emulator;
+
         window.EJS_player = '#emulator-game';
         window.EJS_core = core;
         window.EJS_gameName = game.name || game.title || 'Game';
@@ -47,35 +41,17 @@ export default function EmulatorModal({ game, onClose }) {
         window.EJS_lang = 'en';
         window.EJS_pathtodata = EJS_CDN;
 
-        await loadScript();
-
-        if (!destroyed) setLoading(false);
+        const s = document.createElement('script');
+        s.src = EJS_CDN + 'loader.js?_=' + Date.now();
+        s.onload = () => { if (!destroyed) setLoading(false); };
+        s.onerror = () => { if (!destroyed) { setError('Failed to load EmulatorJS'); setLoading(false); } };
+        document.head.appendChild(s);
       } catch (err) {
         if (!destroyed) { setError(err.message); setLoading(false); }
       }
     }
 
     init();
-
-    return () => {
-      destroyed = true;
-      try {
-        const emu = window.EJS_emulator;
-        if (emu) {
-          const al = emu.Module?.AL?.currentCtx;
-          if (al?.audioCtx) al.audioCtx.close().catch(() => {});
-          if (emu.Module?.pauseMainLoop) emu.Module.pauseMainLoop();
-        }
-      } catch {}
-      const el = document.getElementById('emulator-game');
-      if (el) el.innerHTML = '';
-      // Remove EmulatorJS globals so next mount reinitializes
-      delete window.EJS_emulator;
-      delete window.EJS_player;
-      ['EJS_core','EJS_gameName','EJS_gameUrl','EJS_color','EJS_startOnLoaded','EJS_pathtodata'].forEach(k => delete window[k]);
-      // Remove all script tags from this CDN to force reload on next mount
-      document.querySelectorAll(`script[src*="${EJS_CDN}"]`).forEach(s => s.remove());
-    };
   }, [game]);
 
   useEffect(() => {
