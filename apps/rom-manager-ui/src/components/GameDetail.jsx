@@ -84,8 +84,8 @@ export default function GameDetail() {
           }));
         },
         onResult: (data) => {
-          const msg = data?.ok ? '✓ Download complete!' : '⚠ Download finished with issues';
-          setDownloadProgress(p => ({ ...p, pct: 100, messages: [...p.messages, msg], done: true }));
+          const finalMsg = data?.ok ? '✓ Download complete!' : '⚠ Download finished with issues';
+          setDownloadProgress(p => ({ ...p, pct: 100, messages: [...p.messages, finalMsg], done: true }));
           getGame(gameId).then(setGame).catch(() => {});
           getGameAvailability(gameId).then(setRomAvailability).catch(() => {});
         },
@@ -93,6 +93,8 @@ export default function GameDetail() {
           setDownloadProgress(p => ({ ...p, error: err, messages: [...p.messages, `✗ ${err}`], done: true }));
         },
       });
+      // The SSE endpoint will send the current progress immediately on connect,
+      // which includes the "Searching..." message if the job is still running.
     } catch (e) {
       setDownloadProgress(p => ({ ...p, error: e.message, messages: [...p.messages, `✗ ${e.message}`], done: true }));
     }

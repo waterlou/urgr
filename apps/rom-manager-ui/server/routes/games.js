@@ -910,9 +910,11 @@ router.post('/:id/download-ia', async (req, res) => {
     const jobId = crypto.randomUUID();
     const job = createJob(jobId);
     job._abort = new AbortController();
+    job.progress = { pct: 0, msg: `Searching for ${game.name} on Internet Archive...` };
 
     setTimeout(async () => {
       try {
+        updateProgress(jobId, 0, `Searching for ${game.name} on Internet Archive...`);
         const baseRomDir = path.resolve(dataDir, 'roms', colFolder, game.version || '', 'roms');
         const outputDir = game.platform ? path.join(baseRomDir, game.platform) : baseRomDir;
         fs.mkdirSync(outputDir, { recursive: true });
@@ -982,7 +984,7 @@ router.post('/:id/download-ia', async (req, res) => {
         if (job._abort.signal.aborted) return;
         failJob(jobId, e.message);
       }
-    }, 0);
+    }, 1500);
 
     res.status(202).json({ jobId });
   } catch (e) { res.status(500).json({ error: e.message }); }
