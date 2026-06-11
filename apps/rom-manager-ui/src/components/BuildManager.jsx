@@ -65,6 +65,18 @@ export default function BuildManager({ collectionId, collection }) {
   }
 
   const versions = collection?.versions || [];
+  const sortedVersions = [...versions].sort((a, b) => {
+    if (a.version === 'nightly') return 1;
+    if (b.version === 'nightly') return -1;
+    const pa = (a.version || '').split('.').map(n => parseInt(n, 10) || 0);
+    const pb = (b.version || '').split('.').map(n => parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const va = pa[i] || 0;
+      const vb = pb[i] || 0;
+      if (va !== vb) return vb - va;
+    }
+    return 0;
+  });
 
   return (
     <Box sx={{ mb: 3 }}>
@@ -74,7 +86,7 @@ export default function BuildManager({ collectionId, collection }) {
           <InputLabel>Version</InputLabel>
           <Select value={buildVersion} onChange={e => setBuildVersion(e.target.value)} label="Version">
             <MenuItem value="">Select...</MenuItem>
-          {Array.isArray(versions) && versions.map(v => <MenuItem key={v.id} value={v.id}>{v.version}</MenuItem>)}
+          {Array.isArray(sortedVersions) && sortedVersions.map(v => <MenuItem key={v.id} value={v.id}>{v.version}</MenuItem>)}
           </Select>
         </FormControl>
         <TextField size="small" label="Import Directory" value={buildImportDir}
