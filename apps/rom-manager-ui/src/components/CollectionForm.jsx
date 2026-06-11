@@ -79,6 +79,9 @@ export default function CollectionForm() {
     setFormError('');
     try {
       const payload = { name: name.trim(), slug, platform, logo: logo || 'folder', folder: folder || slug };
+      if (datasetMode === 'preset' && selectedPreset) {
+        payload.dataset_preset = selectedPreset.slug;
+      }
       if (datasetMode === 'dataset' && datFile) {
         const text = await datFile.text();
         await importDat(text);
