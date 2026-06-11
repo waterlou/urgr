@@ -95,6 +95,23 @@ export default function GameDetail() {
                 {game?.description || game?.name || game?.title || 'Loading...'}
               </Typography>
             <Box sx={{ flex: 1 }} />
+            {game?.source === 'NPS' ? (
+              game?.downloaded ? (
+                <Chip label="Downloaded" color="success" size="small" sx={{ mr: 1 }} />
+              ) : (
+                <Button size="small" startIcon={<Download />} onClick={handleEnqueueDownload}
+                  sx={{ mr: 1 }}>
+                  Download
+                </Button>
+              )
+            ) : (
+              iaAuth?.authenticated ? (
+                <Button size="small" startIcon={<CloudDownload />} onClick={handleDownloadIA}
+                  disabled={iaDownloading} sx={{ mr: 1 }}>
+                  {iaDownloading ? <CircularProgress size={14} /> : 'Get ROM'}
+                </Button>
+              ) : null
+            )}
             <Button variant="contained" size="small" startIcon={<PlayArrow />}
               onClick={() => setShowEmulator(true)} disabled={!game}>
               Play
@@ -220,31 +237,6 @@ export default function GameDetail() {
                 </>
               )}
 
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                {game.source === 'NPS' ? (
-                  <>
-                    {game.downloaded ? (
-                      <Chip label="Downloaded" color="success" />
-                    ) : (
-                      <Button variant="contained" size="small" startIcon={<Download />}
-                        onClick={handleEnqueueDownload}>Download</Button>
-                    )}
-                    {game.dlc_count > 0 && <Chip label={`${game.dlc_count} DLC`} size="small" />}
-                    {game.update_count > 0 && <Chip label={`${game.update_count} Updates`} size="small" />}
-                  </>
-                ) : (
-                  <Box>
-                    {iaAuth?.authenticated ? (
-                      <Button variant="outlined" size="small" startIcon={<CloudDownload />}
-                        onClick={handleDownloadIA} disabled={iaDownloading}>
-                        {iaDownloading ? <CircularProgress size={14} /> : 'Download from IA'}
-                      </Button>
-                    ) : (
-                      <Typography variant="caption" color="text.secondary">Configure IA in Settings</Typography>
-                    )}
-                  </Box>
-                )}
-              </Box>
               {downloadMsg && <Typography variant="caption" sx={{ mt: 1, display: 'block' }}>{downloadMsg}</Typography>}
             </>
           )}
