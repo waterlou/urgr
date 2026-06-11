@@ -91,9 +91,9 @@ export default function GameDetail() {
         <AppBar position="static" color="inherit" sx={{ boxShadow: 1 }}>
           <Toolbar variant="dense">
             <IconButton edge="start" onClick={() => navigate(-1)}><ArrowBack /></IconButton>
-            <Typography variant="subtitle1" sx={{ ml: 1 }} noWrap>
-              {game?.name || game?.title || 'Loading...'}
-            </Typography>
+              <Typography variant="subtitle1" sx={{ ml: 1 }} noWrap>
+                {game?.description || game?.name || game?.title || 'Loading...'}
+              </Typography>
             <Box sx={{ flex: 1 }} />
             <Button variant="contained" size="small" startIcon={<PlayArrow />}
               onClick={() => setShowEmulator(true)} disabled={!game}>
@@ -123,7 +123,8 @@ export default function GameDetail() {
                   </Box>
                 </Box>
                 <Box sx={{ flex: 1, minWidth: 200 }}>
-                  <Typography variant="h5" fontWeight={600} sx={{ mb: 1 }}>{game.name}</Typography>
+                  <Typography variant="h5" fontWeight={600} sx={{ mb: 0.5 }}>{game.description || game.name}</Typography>
+                  {game.description && <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>{game.name}</Typography>}
                   <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
                     {game.source && <Chip label={game.source} size="small" />}
                     {game.region && <Chip label={game.region} size="small" variant="outlined" />}
