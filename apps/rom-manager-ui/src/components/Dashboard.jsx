@@ -94,7 +94,7 @@ export default function Dashboard() {
         </Box>
       )}
 
-      {emulatorGame && <EmulatorModal game={emulatorGame} onClose={() => setEmulatorGame(null)} />}
+      {emulatorGame && <EmulatorModal key={`emu-${emulatorGame.id}-${Date.now()}`} game={emulatorGame} onClose={() => setEmulatorGame(null)} />}
     </Box>
   );
 }
