@@ -4,6 +4,7 @@ use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rom_manager::builder::build_version;
+use rom_manager::models::MissingGame;
 use rom_manager::scanner::{scan_directory, ScanMatch};
 use rom_manager::verifier::{verify_version, GameStatus};
 use rom_manager::Database;
@@ -86,6 +87,7 @@ struct BuildOutput {
     missing: usize,
     cleaned: usize,
     missing_games: Vec<String>,
+    missing_reasons: Vec<MissingGame>,
 }
 
 fn db_path() -> String {
@@ -480,6 +482,7 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
                     missing: result.missing,
                     cleaned: result.cleaned,
                     missing_games: result.missing_games,
+                    missing_reasons: result.missing_reasons,
                 });
             } else {
                 if dry_run {

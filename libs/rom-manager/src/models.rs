@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone)]
 pub struct SetVersion {
     pub id: i64,
@@ -58,4 +60,16 @@ pub struct VersionDiff {
     pub removed: Vec<String>,
     pub changed: Vec<String>,
     pub unchanged: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissingGame {
+    pub name: String,
+    pub reason: MissingReason,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MissingReason {
+    FileNotFound,
+    CrcMismatch { matched: usize, expected: usize },
 }

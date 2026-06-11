@@ -14,3 +14,4 @@ pub use db::NpsRom;
 pub use scanner::{scan_directory, scan_nps_directory, extract_title_id, ScanMatch};
 pub use verifier::verify_version;
 pub use builder::{build_version, BuildProgress, BuildResult};
+pub use models::{MissingGame, MissingReason};

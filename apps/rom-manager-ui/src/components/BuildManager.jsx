@@ -123,7 +123,43 @@ export default function BuildManager({ collectionId, collection }) {
                   </Button>
                   <Collapse in={showMissing}>
                     <Box sx={{ maxHeight: 200, overflow: 'auto' }}>
-                      {buildResult.missing_games.map(g => <Typography key={g} variant="caption" display="block">{g}</Typography>)}
+                      {(function() {
+                        const reasons = buildResult.missing_reasons || [];
+                        const fileNotFound = reasons.filter(r => r.reason?.FileNotFound !== undefined);
+                        const crcMismatch = reasons.filter(r => r.reason?.CrcMismatch !== undefined);
+                        return (
+                          <>
+                            {fileNotFound.length > 0 && (
+                              <Box sx={{ mb: 1 }}>
+                                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+                                  File not found ({fileNotFound.length}):
+                                </Typography>
+                                {fileNotFound.map(r => (
+                                  <Typography key={r.name} variant="caption" display="block" sx={{ pl: 2 }}>
+                                    {r.name}
+                                  </Typography>
+                                ))}
+                              </Box>
+                            )}
+                            {crcMismatch.length > 0 && (
+                              <Box>
+                                <Typography variant="caption" color="warning.main" sx={{ fontWeight: 600 }}>
+                                  CRC mismatch ({crcMismatch.length}):
+                                </Typography>
+                                {crcMismatch.map(r => {
+                                  const m = r.reason.CrcMismatch.matched;
+                                  const e = r.reason.CrcMismatch.expected;
+                                  return (
+                                    <Typography key={r.name} variant="caption" display="block" sx={{ pl: 2 }}>
+                                      {r.name} — {m}/{e} ROMs verified
+                                    </Typography>
+                                  );
+                                })}
+                              </Box>
+                            )}
+                          </>
+                        );
+                      })()}
                     </Box>
                   </Collapse>
                 </>

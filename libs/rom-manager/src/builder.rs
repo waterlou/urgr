@@ -8,7 +8,7 @@ use tracing::info;
 
 use crate::db::Database;
 use crate::error::{Error, Result};
-use crate::models::{GameEntry, RomEntry, SetVersion};
+use crate::models::{GameEntry, MissingGame, MissingReason, RomEntry, SetVersion};
 use rom_scraper::compute_hashes_from_bytes;
 
 const STATUS_FILENAME: &str = "_build_status.json";
@@ -33,6 +33,8 @@ pub struct BuildStatus {
     pub unchanged: usize,
     pub missing: usize,
     pub missing_games: Vec<String>,
+    #[serde(default)]
+    pub missing_reasons: Vec<MissingGame>,
     #[serde(default)]
     pub cleaned: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -59,6 +61,7 @@ pub struct BuildResult {
     pub missing: usize,
     pub cleaned: usize,
     pub missing_games: Vec<String>,
+    pub missing_reasons: Vec<MissingGame>,
     pub mode: String,
     pub version: String,
     pub prev_version: Option<String>,
@@ -134,6 +137,28 @@ impl ImportIndex {
             }
         }
         if patches.is_empty() { None } else { Some((path.clone(), patches)) }
+    }
+
+    /// After find_match fails, determine the detailed reason
+    fn explain_missing(&self, game_name: &str, expected_roms: &[RomEntry]) -> MissingReason {
+        let path = self.name_to_path.get(game_name);
+        if path.is_none() {
+            return MissingReason::FileNotFound;
+        }
+        let zip_crc_set = match self.zip_crcs.get(game_name) {
+            Some(s) => s,
+            None => return MissingReason::CrcMismatch { matched: 0, expected: expected_roms.len() },
+        };
+        let non_merge: Vec<&RomEntry> = expected_roms.iter()
+            .filter(|r| r.merge_target.is_none())
+            .collect();
+        let expected_count = non_merge.len();
+        let matched = non_merge.iter()
+            .filter_map(|r| r.crc32.as_deref())
+            .filter(|c| !c.is_empty())
+            .filter(|ec| zip_crc_set.contains(*ec))
+            .count();
+        MissingReason::CrcMismatch { matched, expected: expected_count }
     }
 }
 
@@ -351,6 +376,7 @@ pub fn build_version(
             unchanged: 0,
             missing: 0,
             missing_games: Vec::new(),
+            missing_reasons: Vec::new(),
             cleaned: 0,
             last_run: None,
         },
@@ -500,7 +526,7 @@ pub fn build_version(
     let mut added = 0usize;
     let mut exists = 0usize;
     let mut reused = 0usize;
-    let mut missing = Vec::new();
+    let mut missing: Vec<MissingGame> = Vec::new();
 
     for game_name in &need_copy {
         // Determine platform subdirectory
@@ -565,8 +591,15 @@ pub fn build_version(
             }
             added += 1;
         } else {
-            if verbose { eprintln!("  {game_name}: missing (not found in import or prior versions)"); }
-            missing.push(game_name.clone());
+            let reason = index.explain_missing(game_name, &expected_roms);
+            if verbose {
+                match &reason {
+                    MissingReason::FileNotFound => eprintln!("  {game_name}: file not found in import"),
+                    MissingReason::CrcMismatch { matched, expected } =>
+                        eprintln!("  {game_name}: CRC mismatch ({matched}/{expected} ROMs verified)"),
+                }
+            }
+            missing.push(MissingGame { name: game_name.clone(), reason });
         }
     }
 
@@ -692,7 +725,8 @@ pub fn build_version(
 
     progress(on_progress, "saving", 98, "Saving status...", status.matched, missing.len(), need_copy.len() + unchanged, &progress_path);
     status.missing = missing.len();
-    status.missing_games = missing.clone();
+    status.missing_games = missing.iter().map(|m| m.name.clone()).collect();
+    status.missing_reasons = missing.clone();
     status.unchanged = unchanged;
     status.last_run = Some(chrono_now());
     if !dry_run {
@@ -707,7 +741,8 @@ pub fn build_version(
         reused,
         missing: missing.len(),
         cleaned: status.cleaned,
-        missing_games: missing,
+        missing_games: missing.iter().map(|m| m.name.clone()).collect(),
+        missing_reasons: missing,
         mode: status.mode.clone(),
         version: latest.version.clone(),
         prev_version: prev.map(|p| p.version.clone()),
