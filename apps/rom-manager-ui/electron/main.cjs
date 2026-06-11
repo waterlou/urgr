@@ -23,6 +23,7 @@ function startServer() {
       ELECTRON_RUN: '1',
       ELECTRON_USER_DATA: app.getPath('userData'),
       ELECTRON_APP_ROOT: path.join(__dirname, '..'),
+      ELECTRON_RESOURCES: process.resourcesPath,
       PORT: '0', // random available port
     };
 

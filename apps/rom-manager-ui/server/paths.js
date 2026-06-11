@@ -23,7 +23,7 @@ const distDir = isElectron
 
 // iconsDir: collection icons
 const iconsDir = isElectron
-  ? path.join(process.env.ELECTRON_APP_ROOT || __dirnameServer, '..', '..', '..', 'icons')
+  ? path.join(process.env.ELECTRON_RESOURCES || process.resourcesPath || '', 'icons')
   : path.resolve(__dirnameServer, '..', '..', '..', 'icons');
 
 // cliDir: Rust CLI binaries
