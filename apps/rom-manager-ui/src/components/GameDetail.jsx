@@ -85,6 +85,14 @@ export default function GameDetail() {
 
   if (!gameId) return null;
 
+  const hasAvailableRoms = romAvailability?.available
+    ? Object.values(romAvailability.available).some(v => v)
+    : null; // null = still loading, true = has ROMs, false = no ROMs
+
+  const showDownload = game?.source === 'NPS'
+    ? romAvailability !== null && !game?.downloaded  // NPS: show after avail fetch if not downloaded
+    : hasAvailableRoms === false;  // non-NPS: show only when explicitly no ROMs found
+
   return (
     <>
       <Dialog open fullScreen TransitionComponent={Transition} onClose={() => navigate(-1)}>
@@ -95,7 +103,7 @@ export default function GameDetail() {
                 {game?.description || game?.name || game?.title || 'Loading...'}
               </Typography>
             <Box sx={{ flex: 1 }} />
-            {game?.source === 'NPS' ? (
+            {showDownload && game?.source === 'NPS' ? (
               game?.downloaded ? (
                 <Chip label="Downloaded" color="success" size="small" sx={{ mr: 1 }} />
               ) : (
@@ -104,14 +112,13 @@ export default function GameDetail() {
                   Download
                 </Button>
               )
-            ) : (
-              iaAuth?.authenticated ? (
-                <Button variant="contained" size="small" startIcon={<CloudDownload />} onClick={handleDownloadIA}
-                  disabled={iaDownloading} sx={{ mr: 1 }}>
-                  {iaDownloading ? <CircularProgress size={14} /> : 'Get ROM'}
-                </Button>
-              ) : null
-            )}
+            ) : null}
+            {showDownload && game?.source !== 'NPS' && iaAuth?.authenticated ? (
+              <Button variant="contained" size="small" startIcon={<CloudDownload />} onClick={handleDownloadIA}
+                disabled={iaDownloading} sx={{ mr: 1 }}>
+                {iaDownloading ? <CircularProgress size={14} /> : 'Get ROM'}
+              </Button>
+            ) : null}
             <Button variant="contained" size="small" startIcon={<PlayArrow />}
               onClick={() => setShowEmulator(true)} disabled={!game}>
               Play
