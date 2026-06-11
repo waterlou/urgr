@@ -184,6 +184,7 @@ export default function GameDetail() {
                           <TableCell>Type</TableCell>
                           <TableCell>Size</TableCell>
                           <TableCell>Status</TableCell>
+                          <TableCell>Available</TableCell>
                           <TableCell>CRC</TableCell>
                         </TableRow>
                       </TableHead>
@@ -201,6 +202,9 @@ export default function GameDetail() {
                               <Chip label={rom.status || 'unknown'} size="small" color={
                                 rom.status === 'good' ? 'success' : rom.status === 'baddump' ? 'error' : 'default'
                               } />
+                            </TableCell>
+                            <TableCell>
+                              {rom.downloaded ? <Chip label="Yes" size="small" color="success" /> : <Chip label="No" size="small" />}
                             </TableCell>
                             <TableCell><Typography variant="caption" fontFamily="monospace">{rom.crc32 || ''}</Typography></TableCell>
                           </TableRow>
