@@ -173,7 +173,6 @@ router.get('/api/collections/:id/games', async (req, res) => {
 
     let games = all(`
       SELECT g.name, g.description, g.year, g.manufacturer, g.cloneof, g.platform, g.region,
-        (SELECT GROUP_CONCAT(region, '||') FROM (SELECT DISTINCT region FROM game_entries c WHERE c.cloneof = g.name AND c.version_id = g.version_id)) as clone_regions,
         MIN(g.id) as id, MIN(g.version_id) as version_id, MIN(sv.source) as source, MIN(sv.version) as version,
         GROUP_CONCAT(sv.source || '||' || sv.version, '||') as versions_tags,
         MAX(COALESCE(r.rating, 0)) as rating,
@@ -200,11 +199,7 @@ router.get('/api/collections/:id/games', async (req, res) => {
       try { screenshots = JSON.parse(g.screenshots_json) || []; } catch {}
       delete g.covers_json;
       delete g.screenshots_json;
-      const cloneRegions = g.clone_regions ? g.clone_regions.split('||').filter(Boolean) : [];
-      delete g.clone_regions;
-      const allRegions = g.cloneof ? [g.region] : [g.region, ...cloneRegions];
-      const regions = [...new Set(allRegions.filter(Boolean))];
-      return { ...g, versions, covers, screenshots, regions };
+      return { ...g, versions, covers, screenshots, regions: g.region ? [g.region] : [] };
     });
 
     const platforms = all(`SELECT DISTINCT sv.source as platform FROM set_versions sv WHERE sv.id IN (${ph})`, vids).map(p => p.platform);
