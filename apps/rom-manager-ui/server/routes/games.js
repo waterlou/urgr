@@ -593,8 +593,8 @@ export async function scrapeSingleGame(gameId) {
     const updates = [];
     const upParams = [];
     if (synopsis) { updates.push('synopsis = ?'); upParams.push(synopsis); }
-    if (year) { updates.push('year = ?'); upParams.push(year); }
-    if (manufacturer) { updates.push('manufacturer = ?'); upParams.push(manufacturer); }
+    if (year && !game.year) { updates.push('year = ?'); upParams.push(year); }
+    if (manufacturer && !game.manufacturer) { updates.push('manufacturer = ?'); upParams.push(manufacturer); }
     if (detailResult.covers?.length) {
       updates.push('covers = ?');
       upParams.push(JSON.stringify(upgradeCovers(detailResult.covers)));
