@@ -24,7 +24,7 @@ A retro game ROM collection manager. Import DAT files, scrape metadata from onli
 │                    SQLite roms.db                         │
 ├──────────────────────────────────────────────────────────┤
 │               rom-scraper (lib)                           │
-│  TGDB / IGDB / ScreenScraper APIs                        │
+│  TGDB / IGDB / ScreenScraper / VGMuseum / NoIntroPictures │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -194,8 +194,9 @@ Searches and scrapes game metadata from online providers. Outputs JSON to stdout
 | `search <query>` | Search games by name |
 | `scrape <file> [--download]` | Match a ROM, enrich via detail, optional media download |
 | `detail <game-id> --source <s>` | Full game details by provider ID |
+| `test` | Check connectivity to all configured providers |
 
-**Providers:** TheGamesDB (default, built-in key), IGDB (needs Client ID/Secret), ScreenScraper (untested, needs dev account).
+**Providers:** TheGamesDB (default, built-in key), IGDB (needs Client ID/Secret), ScreenScraper (untested, needs dev account), VGMuseum (always-on, screenshots only), NoIntroPictures (always-on, box art), SonyStore (always-on, PSN screenshots).
 
 **scrape flow:** hash → filename parse → hash search → name search → `get_game_detail` enrichment → optional download.
 
@@ -377,6 +378,9 @@ Game detail API (`GET /api/games/:id`) includes `downloaded: bool` per ROM entry
 | **TheGamesDB** | v1 REST | Built-in key | ✅ name + alias | ❌ | ❌ |
 | **IGDB (Twitch)** | v4 Apicalypse | OAuth Client Credentials | ✅ name + abbreviation | ✅ | ✅ |
 | **ScreenScraper** | API v2 | Dev ID + Password | Unknown | Unknown | Unknown |
+| **VGMuseum** | HTML scrape | None (browser UA) | ❌ | ❌ | ✅ ~13,766 games |
+| **NoIntroPictures** | GitHub raw | None | ❌ | ❌ | ✅ covers/screenshots |
+| **SonyStore** | PSN REST | None | ❌ | ❌ | ✅ screenshots |
 
 ### TGDB Details
 - Base URL: `https://api.thegamesdb.net/v1`
@@ -390,6 +394,16 @@ Game detail API (`GET /api/games/:id`) includes `downloaded: bool` per ROM entry
 - Cover URLs: `//images.igdb.com/...` → prepended with `https:`
 - Screenshots via `screenshots.url` field
 - Platform abbreviation via `platforms.abbreviation` (skipped if same as name)
+
+### VGMuseum Details
+- Base URL: `https://www.vgmuseum.com/images/`
+- Bot protection blocks requests with non-browser User-Agents — scraper uses `Mozilla/5.0 ... Chrome/120`
+- `search_by_name` scrapes platform index pages (`{platform}_b.html`) for `<li><a>` game entries
+- `get_game_detail` parses `<img>` tags from individual game pages (`{platform}/{dir}/{slug}.html`)
+- Images are `.png` or `.gif`, served from same directory as the HTML page
+- No metadata — screenshots only (endings screenshots, quality varies)
+- URL patterns vary by platform: NES/SNES use two-digit subdirectories (`nes/01/`), Genesis is flat (`genesis/`)
+- Some pages have missing `</a>` tags; parser uses `<br>` as fallback
 
 ---
 

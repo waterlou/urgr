@@ -332,12 +332,13 @@ ia-cli search "MAME 0.287 roms"
 | `search <query>` | Search games by name |
 | `scrape <file>` | Match a ROM file and return metadata |
 | `detail <game-id>` | Get full game details by ID |
+| `test` | Check connectivity to all configured providers |
 
 ### Options
 
 | Flag | Description |
 |------|-------------|
-| `--source <s>` | Provider: `thegamesdb` (default), `screenscraper`, `igdb` |
+| `--source <s>` | Provider: `thegamesdb` (default), `screenscraper`, `igdb`, `no-intro-pictures`, `sony-store`, `vgmuseum` |
 | `--platform <p>` | Platform filter (e.g., `nes`, `snes`, `arcade`) |
 | `--download` | Download cover/screenshot images to `data/media/` |
 
@@ -348,6 +349,9 @@ ia-cli search "MAME 0.287 roms"
 | **TheGamesDB** | ✅ Tested | None (built-in key) | Platform data, covers. No genres/descriptions for most games. |
 | **IGDB (Twitch)** | ✅ Tested | `IGDB_CLIENT_ID` + `IGDB_CLIENT_SECRET` | Full metadata: description, genres, publisher, developer, screenshots. |
 | **ScreenScraper** | ❌ Untested | `SS_DEVID` + `SS_DEVPASSWORD` | Requires dev account. |
+| **VGMuseum** | ✅ Tested | None | Screenshots only. ~13,766 games across 50+ retro platforms. Uses browser UA to bypass bot detection. |
+| **NoIntroPictures** | ✅ Tested | None | Box art from GitHub raw URLs. |
+| **SonyStore** | ✅ Tested | None | Screenshots from PlayStation Store API. |
 
 ### Environment
 

@@ -10,12 +10,13 @@ Retro game metadata scraper supporting multiple providers.
 | `search <query>` | Search games by name |
 | `scrape <file>` | Match a ROM file, return metadata + optional media download |
 | `detail <game-id>` | Get full game details by ID |
+| `test` | Check connectivity to all configured providers |
 
 ## Options
 
 | Flag | Description |
 |------|-------------|
-| `--source <s>` | Provider: `thegamesdb` (default), `screenscraper`, `igdb`, `no-intro-pictures` |
+| `--source <s>` | Provider: `thegamesdb` (default), `screenscraper`, `igdb`, `no-intro-pictures`, `sony-store`, `vgmuseum` |
 | `--platform <p>` | Platform filter (e.g. `nes`, `snes`, `arcade`) |
 | `--download` | Download cover/screenshot media to `data/media/<platform>-<year>-<title_slug>/` |
 
@@ -43,13 +44,14 @@ Credentials may be set in `.env` (CWD) or `data/.env`. The server **Settings UI*
 | **ScreenScraper** | ❌ | ❌ | ❌ | ❌ | Not tested — needs `SS_DEVID` + `SS_DEVPASSWORD` |
 | **no-intro-pictures** | ⬜ placeholder | ❌ | ✅ covers/screenshots | ❌ | No auth needed. Fetch box art from GitHub raw URLs by platform + game name. |
 | **sony-store** | ⬜ placeholder | ❌ | ✅ screenshots | ❌ | No auth needed. Fetch screenshots from PlayStation Store API via content_id. |
+| **vgmuseum** | ✅ real search | ❌ | ✅ screenshots | ❌ | No auth needed. ~13,766 games across 50+ retro platforms. Uses browser User-Agent to bypass bot detection. |
 
 ## scrape Flow
 
 1. Compute ROM hashes (CRC32, MD5, SHA1)
 2. Parse filename (title, region) — uses `rom-scraper::parse_filename()`
-3. Try hash-based lookup against the provider
-4. Fall back to filename-based search
+3. Try hash-based lookup against all providers (priority order)
+4. Fall back to filename-based search across all providers
 5. **Enrich:** call `get_game_detail()` for full metadata (description, genres, screenshots, etc.)
 6. If `--download`: download cover and screenshot images
 
@@ -96,9 +98,48 @@ scraper-cli detail 136 --source thegamesdb
 
 # Fetch box art from no-intro-pictures (free, no auth)
 scraper-cli detail "nes/1942 (Japan, USA)" --source no-intro-pictures
+
+# Fetch screenshots from VGMuseum (free, no auth, 50+ retro platforms)
+scraper-cli detail "snes/01/smw" --source vgmuseum
+
+# Test all providers
+scraper-cli test
+```
+
+## Examples: VGMuseum
+
+```bash
+# Search for Mario games on NES
+scraper-cli search "Mario" --source vgmuseum --platform nes
+
+# Get Super Mario World screenshots
+scraper-cli detail "snes/01/smw" --source vgmuseum
+
+# Get Dr. Mario screenshots
+scraper-cli detail "nes/01/drmario" --source vgmuseum
+
+# Get a Genesis game
+scraper-cli detail "genesis/1607" --source vgmuseum
 ```
 
 ## Output
+
+### `test`
+JSON object with `results` array:
+```json
+{
+  "results": [
+    {"name": "thegamesdb",       "status": "ok",      "message": "Search returned 20 games"},
+    {"name": "screenscraper",    "status": "skipped",  "message": "Not configured (SS_DEVID / SS_DEVPASSWORD)"},
+    {"name": "igdb",             "status": "ok",      "message": "Search returned 1 games"},
+    {"name": "no-intro-pictures","status": "ok",      "message": "GitHub raw reachable (HTTP 200)"},
+    {"name": "sony-store",       "status": "ok",      "message": "Store reachable (HTTP 200)"},
+    {"name": "vgmuseum",         "status": "ok",      "message": "Index page returned 982 game entries"}
+  ]
+}
+```
+
+Status values: `ok` (working), `skipped` (not configured), `error` (unreachable or failed).
 
 ### `search`
 JSON array of matches with `id`, `title`, `platform` (full name), `release_date`.
@@ -124,6 +165,12 @@ JSON with full game metadata including `synopsis` (truncated to 500 chars).
 - Platform "Arcade" abbreviation is "Arcade" (same as name) — short_name set to empty
 - Some games are associated with incorrect platforms in IGDB's database (e.g. Super Mario World showing as "Arcade")
 - Screenshots require the `get_game_detail` enrichment call; not available in basic search
+
+### VGMuseum
+- Bot detection on `/images/` path — scraper uses browser-like User-Agent to bypass
+- No metadata (descriptions, developer, etc.) — screenshots only
+- HTML-based parsing (no API) — may break if site layout changes
+- Some game pages are missing closing `</a>` tags — parser handles gracefully
 
 ### General
 - Hash-based ROM matching requires actual ROM content — empty/dummy files won't match
