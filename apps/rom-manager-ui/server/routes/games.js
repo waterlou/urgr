@@ -142,8 +142,25 @@ router.get('/:id', async (req, res) => {
     if (typeof game.synopsis === 'string') try { game.synopsis = JSON.parse(game.synopsis); } catch {}
     const roms = all('SELECT * FROM rom_entries WHERE game_entry_id = ?', [game.id]);
     const state = get('SELECT * FROM game_state WHERE game_entry_id = ?', [game.id]);
+    const clones = all(`SELECT id, name, description, cloneof, region FROM game_entries WHERE name = ? AND version_id = ? AND id != ?${game.cloneof ? ' AND cloneof IS NOT NULL' : ''} ORDER BY name`, [game.cloneof || game.name, game.version_id, game.id]);
+    let parent = null;
+    if (game.cloneof) {
+      parent = get('SELECT id, name, region FROM game_entries WHERE name = ? AND version_id = ? AND cloneof IS NULL', [game.cloneof, game.version_id]);
+    }
+    res.json({ ...game, roms, rating: state?.rating || 0, favourite: state?.favourite || 0, available: state?.available || 0, play_count: state?.play_count || 0, clones, parent });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
-    // Cache: read all CRC32 values from a zip once (runs unzip -v once per zip)
+// Check availability of ROM files for a game (real-time CRC check)
+router.get('/:id/availability', async (req, res) => {
+  await dbReady;
+  try {
+    const game = get('SELECT g.*, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [req.params.id]);
+    if (!game) return res.status(404).json({ error: 'not found' });
+
+    const roms = all('SELECT * FROM rom_entries WHERE game_entry_id = ?', [game.id]);
+    const available = {}; // rom_id → boolean
+
     const zipCrcCache = new Map();
     function getZipCrcs(zipPath) {
       if (!zipPath || !fs.existsSync(zipPath)) return null;
@@ -162,7 +179,6 @@ router.get('/:id', async (req, res) => {
       return crcs;
     }
 
-    // Find the game's zip file
     let gameZipPath = null;
     const col = get('SELECT c.folder, c.slug FROM collections c JOIN collection_versions cv ON cv.collection_id = c.id WHERE cv.version_id = ? LIMIT 1', [game.version_id]);
     const colFolder = col?.folder || col?.slug;
@@ -181,59 +197,47 @@ router.get('/:id', async (req, res) => {
       }
     }
 
-    // Collect all needed zips for CRC checking
-    const neededZips = new Map(); // zipPath → Set of expected CRCs to check
+    let parentPath = null;
     if (gameZipPath) {
       for (const rom of roms) {
-        if (!rom.crc32) continue;
         if (rom.merge_target) {
-          // Merge ROM — find parent zip via romof chain
-          if (!neededZips.has('_parent')) {
-            let parentZip = null;
-            let currentName = game.romof || game.cloneof;
-            while (currentName && !parentZip) {
-              const pDir = path.join(dataDir, 'roms', colFolder, game.version, 'roms');
-              const pDirs = game.platform ? [path.join(pDir, game.platform), pDir] : [pDir];
-              for (const d of pDirs) {
-                if (!fs.existsSync(d)) continue;
-                for (const entry of fs.readdirSync(d)) {
-                  if (entry.endsWith('.zip') && path.basename(entry, '.zip') === currentName) {
-                    parentZip = path.join(d, entry);
-                    break;
-                  }
+          let currentName = game.romof || game.cloneof;
+          while (currentName && !parentPath) {
+            const pDir = path.join(dataDir, 'roms', colFolder, game.version, 'roms');
+            const pDirs = game.platform ? [path.join(pDir, game.platform), pDir] : [pDir];
+            for (const d of pDirs) {
+              if (!fs.existsSync(d)) continue;
+              for (const entry of fs.readdirSync(d)) {
+                if (entry.endsWith('.zip') && path.basename(entry, '.zip') === currentName) {
+                  parentPath = path.join(d, entry);
+                  break;
                 }
-                if (parentZip) break;
               }
-              if (!parentZip) {
-                const parentGame = get('SELECT romof, cloneof FROM game_entries WHERE version_id = ? AND name = ?', [game.version_id, currentName]);
-                currentName = parentGame ? (parentGame.romof || parentGame.cloneof) : null;
-              }
+              if (parentPath) break;
             }
-            neededZips.set('_parent', parentZip);
+            if (!parentPath) {
+              const parentGame = get('SELECT romof, cloneof FROM game_entries WHERE version_id = ? AND name = ?', [game.version_id, currentName]);
+              currentName = parentGame ? (parentGame.romof || parentGame.cloneof) : null;
+            }
           }
+          break;
         }
       }
     }
 
-    // Read cached CRC sets
     const gameCrcs = gameZipPath ? getZipCrcs(gameZipPath) : null;
-    const parentPath = neededZips.get('_parent');
     const parentCrcs = parentPath ? getZipCrcs(parentPath) : null;
 
     for (const rom of roms) {
-      if (!rom.crc32) { rom.downloaded = false; continue; }
+      if (!rom.crc32) { available[rom.id] = false; continue; }
       if (rom.merge_target) {
-        rom.downloaded = gameZipPath && parentCrcs ? parentCrcs.has(rom.crc32.toUpperCase()) : false;
+        available[rom.id] = !!gameZipPath && !!parentCrcs && parentCrcs.has(rom.crc32.toUpperCase());
       } else {
-        rom.downloaded = gameCrcs ? gameCrcs.has(rom.crc32.toUpperCase()) : false;
+        available[rom.id] = !!gameCrcs && gameCrcs.has(rom.crc32.toUpperCase());
       }
     }
-    const clones = all(`SELECT id, name, description, cloneof, region FROM game_entries WHERE name = ? AND version_id = ? AND id != ?${game.cloneof ? ' AND cloneof IS NOT NULL' : ''} ORDER BY name`, [game.cloneof || game.name, game.version_id, game.id]);
-    let parent = null;
-    if (game.cloneof) {
-      parent = get('SELECT id, name, region FROM game_entries WHERE name = ? AND version_id = ? AND cloneof IS NULL', [game.cloneof, game.version_id]);
-    }
-    res.json({ ...game, roms, rating: state?.rating || 0, favourite: state?.favourite || 0, available: state?.available || 0, play_count: state?.play_count || 0, clones, parent });
+
+    res.json({ available });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -7,7 +7,7 @@ import {
 import { ArrowBack, PlayArrow, Download, CloudDownload } from '@mui/icons-material';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getGame, coverUrl, playUrl, scrapeGameMetadata,
-  downloadGameFromIA, getIaAuthStatus, enqueueDownload } from '../api.js';
+  downloadGameFromIA, getIaAuthStatus, enqueueDownload, getGameAvailability } from '../api.js';
 import EmulatorModal from './EmulatorModal.jsx';
 
 function Transition(props) {
@@ -28,6 +28,7 @@ export default function GameDetail() {
   const [iaAuth, setIaAuth] = useState(null);
   const [iaDownloading, setIaDownloading] = useState(false);
   const [downloadMsg, setDownloadMsg] = useState(null);
+  const [romAvailability, setRomAvailability] = useState(null);
   const dataLoadedRef = useRef(null);
 
   useEffect(() => {
@@ -38,6 +39,7 @@ export default function GameDetail() {
       dataLoadedRef.current = data;
     }).catch(() => {}).finally(() => setLoading(false));
     getIaAuthStatus().then(setIaAuth).catch(() => {});
+    getGameAvailability(gameId).then(setRomAvailability).catch(() => {});
   }, [gameId]);
 
   useEffect(() => {
@@ -204,7 +206,7 @@ export default function GameDetail() {
                               } />
                             </TableCell>
                             <TableCell>
-                              {rom.downloaded ? <Chip label="Yes" size="small" color="success" /> : <Chip label="No" size="small" />}
+                              {romAvailability?.[rom.id] ? <Chip label="Yes" size="small" color="success" /> : <Chip label="No" size="small" />}
                             </TableCell>
                             <TableCell><Typography variant="caption" fontFamily="monospace">{rom.crc32 || ''}</Typography></TableCell>
                           </TableRow>
