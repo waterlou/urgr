@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField,
   Tabs, Tab, Box, Typography, CircularProgress, Alert, Select, MenuItem,
-  FormControl, InputLabel, Divider,
+  FormControl, InputLabel, Divider, Link,
 } from '@mui/material';
 import {
   getSettings, saveSettings, testIgdbConnection, testTgdbConnection,
@@ -141,10 +141,22 @@ export default function Settings() {
                 <Typography variant="body2" sx={{ mb: 0.5 }}><strong>Version:</strong> 1.0.0</Typography>
                 <Typography variant="body2" sx={{ mb: 0.5 }}><strong>Tech:</strong> React 19, MUI v9, Node.js + Express 5, SQLite</Typography>
                 <Typography variant="body2" sx={{ mb: 0.5 }}><strong>CLI:</strong> parse-cli, build-cli, nps-cli, scraper-cli, ia-cli (Rust)</Typography>
-                <Typography variant="body2" sx={{ mb: 0.5 }}><strong>Emulator:</strong> EmulatorJS — FBNeo, MAME, NES, SNES, GB/GBA, and more</Typography>
+                <Typography variant="body2" sx={{ mb: 0.5 }}><strong>Emulator:</strong> <Link href="https://emulatorjs.org/" target="_blank" rel="noopener">EmulatorJS</Link> — FBNeo, MAME, NES, SNES, GB/GBA, and more</Typography>
                 <Divider sx={{ my: 2 }} />
-                <Typography variant="body2"><strong>Providers:</strong> TheGamesDB, IGDB, ScreenScraper, VGMuseum, NoIntroPictures, SonyStore</Typography>
-                <Typography variant="body2"><strong>Sources:</strong> MAME, FBNeo, OfflineList, DAT-O-MATIC, NoPayStation</Typography>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>Scraper Providers</Typography>
+                <Typography variant="body2" sx={{ mb: 0.5 }}>
+                  <Link href="https://thegamesdb.net/" target="_blank" rel="noopener">TheGamesDB</Link> · <Link href="https://www.igdb.com/" target="_blank" rel="noopener">IGDB</Link> · <Link href="https://www.screenscraper.fr/" target="_blank" rel="noopener">ScreenScraper</Link>
+                </Typography>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  <Link href="https://www.vgmuseum.com/" target="_blank" rel="noopener">VGMuseum</Link> · <Link href="https://github.com/teeedubb/no-intro-pictures" target="_blank" rel="noopener">NoIntroPictures</Link> · <Link href="https://store.playstation.com/" target="_blank" rel="noopener">SonyStore</Link>
+                </Typography>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>Data Sources</Typography>
+                <Typography variant="body2" sx={{ mb: 0.5 }}>
+                  <Link href="https://www.progettosnaps.net/" target="_blank" rel="noopener">MAME</Link> (DATs via progettosnaps.net) · <Link href="https://github.com/libretro/FBNeo" target="_blank" rel="noopener">FBNeo</Link> (via GitHub)
+                </Typography>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  <Link href="https://nopaystation.com/" target="_blank" rel="noopener">NoPayStation</Link> (PS Vita / PS3 / PSP) · <Link href="https://datomatic.no-intro.org/" target="_blank" rel="noopener">DAT-O-MATIC</Link> (No-Intro) · <Link href="https://nointro.free.fr/" target="_blank" rel="noopener">OfflineList</Link>
+                </Typography>
               </Box>
             )}
           </Box>
