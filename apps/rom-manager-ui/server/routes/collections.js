@@ -178,9 +178,7 @@ router.get('/api/collections/:id/games', async (req, res) => {
         GROUP_CONCAT(sv.source || '||' || sv.version, '||') as versions_tags,
         MAX(COALESCE(r.rating, 0)) as rating,
         MAX(COALESCE(r.favourite, 0)) as favourite,
-        MAX(COALESCE(r.play_count, 0)) as play_count,
-        MAX(CASE WHEN g.covers != '[]' THEN g.covers ELSE NULL END) as covers_json,
-        MAX(CASE WHEN g.screenshots != '[]' THEN g.screenshots ELSE NULL END) as screenshots_json
+        MAX(COALESCE(r.play_count, 0)) as play_count
       FROM game_entries g
       JOIN set_versions sv ON sv.id = g.version_id
       ${joinClause}
@@ -194,14 +192,23 @@ router.get('/api/collections/:id/games', async (req, res) => {
       const versions = [];
       for (let i = 0; i < tags.length; i += 2) versions.push(tags[i + 1]);
       delete g.versions_tags;
-      let covers = [];
-      let screenshots = [];
-      try { covers = JSON.parse(g.covers_json) || []; } catch {}
-      try { screenshots = JSON.parse(g.screenshots_json) || []; } catch {}
-      delete g.covers_json;
-      delete g.screenshots_json;
-      return { ...g, versions, covers, screenshots, regions: g.region ? [g.region] : [] };
+      return { ...g, versions, regions: g.region ? [g.region] : [] };
     });
+    // Attach covers/screenshots from game_media
+    const gameNames = [...new Set(games.map(g => g.name))];
+    if (gameNames.length > 0) {
+      const ph = gameNames.map(() => '?').join(',');
+      const mediaRows = all(`SELECT gm.name, gm.covers, gm.screenshots FROM game_media gm WHERE gm.name IN (${ph})`, gameNames);
+      const mediaMap = {};
+      for (const m of mediaRows) {
+        try { mediaMap[m.name] = { covers: JSON.parse(m.covers) || [], screenshots: JSON.parse(m.screenshots) || [] }; } catch {}
+      }
+      games = games.map(g => ({
+        ...g,
+        covers: mediaMap[g.name]?.covers || [],
+        screenshots: mediaMap[g.name]?.screenshots || [],
+      }));
+    }
 
     const platforms = all(`SELECT DISTINCT sv.source as platform FROM set_versions sv WHERE sv.id IN (${ph})`, vids).map(p => p.platform);
 

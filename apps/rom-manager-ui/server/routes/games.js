@@ -63,9 +63,7 @@ router.get('/', async (req, res) => {
         GROUP_CONCAT(sv.source || '||' || sv.version, '||') as versions_tags,
         MAX(COALESCE(r.rating, 0)) as rating,
         MAX(COALESCE(r.favourite, 0)) as favourite,
-        MAX(COALESCE(r.play_count, 0)) as play_count,
-        MAX(CASE WHEN g.covers != '[]' THEN g.covers ELSE NULL END) as covers_json,
-        MAX(CASE WHEN g.screenshots != '[]' THEN g.screenshots ELSE NULL END) as screenshots_json
+        MAX(COALESCE(r.play_count, 0)) as play_count
       FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id
       ${joinClause}
       ${whereClause} GROUP BY g.name ORDER BY ${sortCol2} ${sortDir} LIMIT ? OFFSET ?
@@ -75,14 +73,26 @@ router.get('/', async (req, res) => {
       const versions = [];
       for (let i = 0; i < tags.length; i += 2) versions.push(tags[i + 1]);
       delete g.versions_tags;
-      let covers = [];
-      let screenshots = [];
-      try { covers = JSON.parse(g.covers_json) || []; } catch {}
-      try { screenshots = JSON.parse(g.screenshots_json) || []; } catch {}
-      delete g.covers_json;
-      delete g.screenshots_json;
-      return { ...g, versions, covers, screenshots };
+      return { ...g, versions };
     });
+    // Attach covers/screenshots from game_media
+    const gameNames = [...new Set(games.map(g => g.name))];
+    if (gameNames.length > 0) {
+      const ph = gameNames.map(() => '?').join(',');
+      const mediaRows = all(`SELECT gm.name, gm.covers, gm.screenshots FROM game_media gm WHERE gm.name IN (${ph})`, gameNames);
+      const mediaMap = {};
+      for (const m of mediaRows) {
+        let covers = []; let screenshots = [];
+        try { covers = JSON.parse(m.covers) || []; } catch {}
+        try { screenshots = JSON.parse(m.screenshots) || []; } catch {}
+        mediaMap[m.name] = { covers, screenshots };
+      }
+      games = games.map(g => ({
+        ...g,
+        covers: mediaMap[g.name]?.covers || [],
+        screenshots: mediaMap[g.name]?.screenshots || [],
+      }));
+    }
 
     res.json({ games, total, limit: Number(limit), offset: Number(offset) });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -106,8 +116,6 @@ router.get('/recently-played', async (req, res) => {
       SELECT g.id, g.name, g.description, g.year, g.manufacturer, g.cloneof, g.platform,
         MIN(g.version_id) as version_id, MIN(sv.source) as source, MIN(sv.version) as version,
         GROUP_CONCAT(sv.source || '||' || sv.version, '||') as versions_tags,
-        MAX(CASE WHEN g.covers != '[]' THEN g.covers ELSE NULL END) as covers_json,
-        MAX(CASE WHEN g.screenshots != '[]' THEN g.screenshots ELSE NULL END) as screenshots_json,
         rp.played_at
       FROM recently_played rp
       JOIN game_entries g ON g.id = rp.game_entry_id
@@ -120,14 +128,22 @@ router.get('/recently-played', async (req, res) => {
       const versions = [];
       for (let i = 0; i < tags.length; i += 2) versions.push(tags[i + 1]);
       delete g.versions_tags;
-      let covers = [];
-      let screenshots = [];
-      try { covers = JSON.parse(g.covers_json) || []; } catch {}
-      try { screenshots = JSON.parse(g.screenshots_json) || []; } catch {}
-      delete g.covers_json;
-      delete g.screenshots_json;
-      return { ...g, versions, covers, screenshots };
+      return { ...g, versions };
     });
+    // Attach covers/screenshots from game_media
+    const names = [...new Set(games.map(g => g.name))];
+    if (names.length > 0) {
+      const ph = names.map(() => '?').join(',');
+      const mediaRows = all(`SELECT gm.name, gm.covers, gm.screenshots FROM game_media gm WHERE gm.name IN (${ph})`, names);
+      const mediaMap = {};
+      for (const m of mediaRows) {
+        try { mediaMap[m.name] = { covers: JSON.parse(m.covers) || [], screenshots: JSON.parse(m.screenshots) || [] }; } catch {}
+      }
+      games.forEach(g => {
+        g.covers = mediaMap[g.name]?.covers || [];
+        g.screenshots = mediaMap[g.name]?.screenshots || [];
+      });
+    }
     res.json({ games });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -137,9 +153,20 @@ router.get('/:id', async (req, res) => {
   try {
     const game = get('SELECT g.*, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [req.params.id]);
     if (!game) return res.status(404).json({ error: 'not found' });
-    if (typeof game.covers === 'string') try { game.covers = JSON.parse(game.covers); } catch { game.covers = []; }
-    if (typeof game.screenshots === 'string') try { game.screenshots = JSON.parse(game.screenshots); } catch { game.screenshots = []; }
     if (typeof game.synopsis === 'string') try { game.synopsis = JSON.parse(game.synopsis); } catch {}
+    // Read covers/screenshots from game_media (shared across clones + sources)
+    const canonical = game.romof || game.cloneof || game.name;
+    const mediaPlat = (game.platform || '').trim() || 'arcade';
+    const media = get('SELECT covers, screenshots, synopsis as media_synopsis FROM game_media WHERE name = ? AND platform = ?', [canonical, mediaPlat]);
+    let covers = [];
+    let screenshots = [];
+    if (media) {
+      try { covers = JSON.parse(media.covers) || []; } catch {}
+      try { screenshots = JSON.parse(media.screenshots) || []; } catch {}
+      if (!game.synopsis && media.media_synopsis) game.synopsis = media.media_synopsis;
+    }
+    delete game.covers;
+    delete game.screenshots;
     const roms = all('SELECT * FROM rom_entries WHERE game_entry_id = ?', [game.id]);
     const state = get('SELECT * FROM game_state WHERE game_entry_id = ?', [game.id]);
     const clones = all(`SELECT id, name, description, cloneof, region FROM game_entries WHERE name = ? AND version_id = ? AND id != ?${game.cloneof ? ' AND cloneof IS NOT NULL' : ''} ORDER BY name`, [game.cloneof || game.name, game.version_id, game.id]);
@@ -147,7 +174,7 @@ router.get('/:id', async (req, res) => {
     if (game.cloneof) {
       parent = get('SELECT id, name, region FROM game_entries WHERE name = ? AND version_id = ? AND cloneof IS NULL', [game.cloneof, game.version_id]);
     }
-    res.json({ ...game, roms, rating: state?.rating || 0, favourite: state?.favourite || 0, available: state?.available || 0, play_count: state?.play_count || 0, clones, parent });
+    res.json({ ...game, covers, screenshots, roms, rating: state?.rating || 0, favourite: state?.favourite || 0, available: state?.available || 0, play_count: state?.play_count || 0, clones, parent });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -472,6 +499,17 @@ export async function scrapeSingleGame(gameId) {
   const game = get('SELECT * FROM game_entries WHERE id = ?', [gameId]);
   if (!game) return { scraped: false, error: 'Game not found', gameId };
 
+  function mediaPlatform(p) { return (p || '').trim() || 'arcade'; }
+  function canonicalName(g) { return g.romof || g.cloneof || g.name; }
+
+  // Check game_media first using canonical name
+  const canonical = canonicalName(game);
+  const mediaPlat = mediaPlatform(game.platform);
+  const existingMedia = get('SELECT covers, screenshots FROM game_media WHERE name = ? AND platform = ?', [canonical, mediaPlat]);
+  if (existingMedia && (existingMedia.covers !== '[]' || existingMedia.screenshots !== '[]')) {
+    return { scraped: true, from_cache: true, canonical, gameId };
+  }
+
   function trySearch(query, platform) {
     const args = ['search', query];
     if (platform) args.push('--platform', platform);
@@ -589,74 +627,71 @@ export async function scrapeSingleGame(gameId) {
     });
   }
 
+  // Save to game_entries (synopsis, year, manufacturer only) and game_media (covers, screenshots)
   if (synopsis || year || manufacturer || detailResult.covers?.length || detailResult.screenshots?.length) {
     const updates = [];
     const upParams = [];
     if (synopsis) { updates.push('synopsis = ?'); upParams.push(synopsis); }
     if (year && !game.year) { updates.push('year = ?'); upParams.push(year); }
     if (manufacturer && !game.manufacturer) { updates.push('manufacturer = ?'); upParams.push(manufacturer); }
-    if (detailResult.covers?.length) {
-      updates.push('covers = ?');
-      upParams.push(JSON.stringify(upgradeCovers(detailResult.covers)));
+    if (updates.length > 0) {
+      upParams.push(game.id);
+      run(`UPDATE game_entries SET ${updates.join(', ')} WHERE id = ?`, upParams);
     }
-    if (detailResult.screenshots?.length) {
-      updates.push('screenshots = ?');
-      upParams.push(JSON.stringify(upgradeScreenshots(detailResult.screenshots)));
-    }
-    upParams.push(game.id);
-    run(`UPDATE game_entries SET ${updates.join(', ')} WHERE id = ?`, upParams);
+    // Save covers/screenshots to game_media (shared across clones + sources)
+    const covers = detailResult.covers?.length ? JSON.stringify(upgradeCovers(detailResult.covers)) : '[]';
+    const screenshots = detailResult.screenshots?.length ? JSON.stringify(upgradeScreenshots(detailResult.screenshots)) : '[]';
+    run('INSERT OR REPLACE INTO game_media (name, platform, synopsis, covers, screenshots, scraped_at) VALUES (?, ?, ?, ?, ?, datetime(\'now\'))',
+      [canonical, mediaPlat, synopsis || '', covers, screenshots]);
   }
 
-  const updated = get('SELECT g.*, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [game.id]);
-  if (typeof updated.covers === 'string') try { updated.covers = JSON.parse(updated.covers); } catch { updated.covers = []; }
-  if (typeof updated.screenshots === 'string') try { updated.screenshots = JSON.parse(updated.screenshots); } catch { updated.screenshots = []; }
-  updated.roms = all('SELECT * FROM rom_entries WHERE game_entry_id = ?', [game.id]);
-
   // For NPS/PlayStation games, try to get screenshots from Sony Store API via scraper-cli
-  if (updated.source === 'NPS' && (!updated.screenshots || updated.screenshots.length === 0)) {
+  if (game.source === 'NPS') {
     try {
-      const contentId = updated.content_id || updated.title_id;
+      const contentId = game.content_id || game.title_id;
       if (contentId) {
-        const detailResult = execCli(['detail', contentId, '--source', 'sony-store'], { binary: 'scraper' });
-        if (detailResult && detailResult.screenshots?.length > 0) {
-          run('UPDATE game_entries SET screenshots = ? WHERE id = ?', [JSON.stringify(detailResult.screenshots), game.id]);
-          updated.screenshots = detailResult.screenshots;
+        const sonyResult = execCli(['detail', contentId, '--source', 'sony-store'], { binary: 'scraper' });
+        if (sonyResult && sonyResult.screenshots?.length > 0) {
+          const screenshots = JSON.stringify(sonyResult.screenshots);
+          run('UPDATE game_media SET screenshots = ?, scraped_at = datetime(\'now\') WHERE name = ? AND platform = ?',
+            [screenshots, canonical, mediaPlat]);
         }
       }
     } catch {}
   }
 
   // For DAT-O-MATIC collections, try to get covers/screenshots from no-intro-pictures
-  if (!updated.covers?.length && !updated.screenshots?.length) {
+  if (!detailResult.covers?.length && !detailResult.screenshots?.length) {
     try {
       const colVersion = get(`SELECT c.dataset_preset FROM collections c
         JOIN collection_versions cv ON cv.collection_id = c.id
         WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
       if (colVersion?.dataset_preset === 'DATOMATIC') {
-        // Use description as game name (has full No-Intro naming with region)
         const gameNameForUrl = game.description || game.name;
-        const detailResult = execCli(['detail', `${game.platform || 'unknown'}/${gameNameForUrl}`, '--source', 'no-intro-pictures'], { binary: 'scraper' });
-        if (detailResult && !detailResult.error) {
-          const updates = [];
-          const upParams = [];
-          if (detailResult.covers?.length) {
-            updates.push('covers = ?');
-            upParams.push(JSON.stringify(detailResult.covers));
-          }
-          if (detailResult.screenshots?.length) {
-            updates.push('screenshots = ?');
-            upParams.push(JSON.stringify(detailResult.screenshots));
-          }
-          if (updates.length > 0) {
-            upParams.push(game.id);
-            run(`UPDATE game_entries SET ${updates.join(', ')} WHERE id = ?`, upParams);
-            if (detailResult.covers?.length) updated.covers = detailResult.covers;
-            if (detailResult.screenshots?.length) updated.screenshots = detailResult.screenshots;
+        const nidResult = execCli(['detail', `${game.platform || 'unknown'}/${gameNameForUrl}`, '--source', 'no-intro-pictures'], { binary: 'scraper' });
+        if (nidResult && !nidResult.error) {
+          const covers = nidResult.covers?.length ? JSON.stringify(nidResult.covers) : '[]';
+          const screenshots = nidResult.screenshots?.length ? JSON.stringify(nidResult.screenshots) : '[]';
+          if (covers !== '[]' || screenshots !== '[]') {
+            run('INSERT OR REPLACE INTO game_media (name, platform, covers, screenshots, scraped_at) VALUES (?, ?, ?, ?, datetime(\'now\'))',
+              [canonical, mediaPlat, covers, screenshots]);
           }
         }
       }
     } catch {}
   }
+
+  // Read back from game_media for the response
+  const mediaRow = get('SELECT covers, screenshots, synopsis as media_synopsis FROM game_media WHERE name = ? AND platform = ?', [canonical, mediaPlat]);
+  const mediaCovers = mediaRow?.covers ? (() => { try { return JSON.parse(mediaRow.covers); } catch { return []; } })() : [];
+  const mediaScreenshots = mediaRow?.screenshots ? (() => { try { return JSON.parse(mediaRow.screenshots); } catch { return []; } })() : [];
+  const mediaSynopsis = mediaRow?.media_synopsis || '';
+
+  const updated = get('SELECT g.*, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [game.id]);
+  updated.covers = mediaCovers;
+  updated.screenshots = mediaScreenshots;
+  if (!updated.synopsis && mediaSynopsis) updated.synopsis = mediaSynopsis;
+  updated.roms = all('SELECT * FROM rom_entries WHERE game_entry_id = ?', [game.id]);
 
   const hadData = synopsis || year || manufacturer || detailResult.covers?.length || detailResult.screenshots?.length;
   return { scraped: true, saved: !!hadData, title: matchedTitle || first.title, game: updated, gameId };
@@ -785,12 +820,14 @@ router.post('/:id/play', async (req, res) => {
 router.get('/:id/cover', async (req, res) => {
   await dbReady;
   try {
-    const game = get('SELECT id, name, covers FROM game_entries WHERE id = ?', [req.params.id]);
+    const game = get('SELECT g.id, g.name, g.platform, g.romof, g.cloneof FROM game_entries g WHERE g.id = ?', [req.params.id]);
     if (!game) return res.status(404).end();
-
-    if (game.covers) {
+    const canonical = game.romof || game.cloneof || game.name;
+    const mediaPlat = (game.platform || '').trim() || 'arcade';
+    const media = get('SELECT covers FROM game_media WHERE name = ? AND platform = ?', [canonical, mediaPlat]);
+    if (media?.covers) {
       try {
-        const urls = JSON.parse(game.covers);
+        const urls = JSON.parse(media.covers);
         if (urls.length > 0) {
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), 5000);

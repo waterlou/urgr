@@ -36,8 +36,6 @@ CREATE TABLE IF NOT EXISTS game_entries (
     title_id    TEXT,
     content_id  TEXT,
     region      TEXT DEFAULT '',
-    covers      TEXT DEFAULT '[]',
-    screenshots TEXT DEFAULT '[]',
     FOREIGN KEY (version_id) REFERENCES set_versions(id) ON DELETE CASCADE,
     UNIQUE(version_id, name, region)
 );
@@ -107,9 +105,17 @@ CREATE TABLE IF NOT EXISTS game_set_games (
     id            INTEGER PRIMARY KEY,
     game_set_id   INTEGER NOT NULL,
     game_entry_id INTEGER NOT NULL,
-    FOREIGN KEY (game_set_id) REFERENCES game_sets(id) ON DELETE CASCADE,
-    FOREIGN KEY (game_entry_id) REFERENCES game_entries(id),
-    UNIQUE(game_set_id, game_entry_id)
+    FOREIGN KEY (game_set_id) REFERENCES game_sets(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS game_media (
+    name        TEXT NOT NULL,
+    platform    TEXT NOT NULL DEFAULT '',
+    synopsis    TEXT DEFAULT '',
+    covers      TEXT DEFAULT '[]',
+    screenshots TEXT DEFAULT '[]',
+    scraped_at  TEXT,
+    PRIMARY KEY (name, platform)
 );
 
 CREATE TABLE IF NOT EXISTS game_state (
@@ -306,6 +312,55 @@ export function initDb(dbPath) {
     db.run("DELETE FROM game_entries WHERE id NOT IN (SELECT MAX(id) FROM game_entries GROUP BY version_id, name, region)");
     db.run("PRAGMA foreign_keys=ON");
   } catch (_) {}
+
+  // Migration: create game_media table, migrate covers/screenshots, drop columns
+  try {
+    db.run(`CREATE TABLE IF NOT EXISTS game_media (
+      name        TEXT NOT NULL,
+      platform    TEXT NOT NULL DEFAULT '',
+      synopsis    TEXT DEFAULT '',
+      covers      TEXT DEFAULT '[]',
+      screenshots TEXT DEFAULT '[]',
+      scraped_at  TEXT,
+      PRIMARY KEY (name, platform)
+    )`);
+    // Copy existing covers/screenshots to game_media
+    db.run(`INSERT OR IGNORE INTO game_media (name, platform, covers, screenshots, scraped_at)
+      SELECT name, COALESCE(NULLIF(platform, ''), 'arcade'),
+        CASE WHEN covers != '[]' THEN covers ELSE '[]' END,
+        CASE WHEN screenshots != '[]' THEN screenshots ELSE '[]' END,
+        datetime('now')
+      FROM game_entries
+      WHERE covers != '[]' OR screenshots != '[]'
+      GROUP BY name, COALESCE(NULLIF(platform, ''), 'arcade')`);
+  } catch (_) {}
+
+  // Migration: drop covers/screenshots from game_entries
+  try {
+    db.run("ALTER TABLE game_entries DROP COLUMN covers");
+    db.run("ALTER TABLE game_entries DROP COLUMN screenshots");
+  } catch (_) {
+    // Columns might not exist or sql.js doesn't support DROP COLUMN — recreate
+    try {
+      const cols = db.exec("PRAGMA table_info(game_entries)")[0]?.values?.map(v => v[1]) || [];
+      if (cols.includes('covers') || cols.includes('screenshots')) {
+        db.run('PRAGMA foreign_keys = OFF');
+        db.run(`CREATE TABLE game_entries_new (
+          id, version_id, name, description, synopsis, year, manufacturer,
+          cloneof, platform, title_id, content_id, region,
+          FOREIGN KEY (version_id) REFERENCES set_versions(id) ON DELETE CASCADE,
+          UNIQUE(version_id, name, region)
+        )`);
+        db.run(`INSERT INTO game_entries_new (id, version_id, name, description, synopsis, year, manufacturer, cloneof, platform, title_id, content_id, region)
+          SELECT id, version_id, name, description, synopsis, year, manufacturer, cloneof, platform, title_id, content_id, region FROM game_entries`);
+        db.run('DROP TABLE game_entries');
+        db.run('ALTER TABLE game_entries_new RENAME TO game_entries');
+        db.run('CREATE INDEX IF NOT EXISTS idx_game_entries_version ON game_entries(version_id)');
+        db.run('CREATE INDEX IF NOT EXISTS idx_game_entries_version_name_region ON game_entries(version_id, name, region)');
+        db.run('PRAGMA foreign_keys = ON');
+      }
+    } catch (_) {}
+  }
 
   // Startup: mark orphaned operations as failed
   try {
