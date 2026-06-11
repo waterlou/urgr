@@ -13,7 +13,14 @@ export default function BuildManager({ collectionId, collection }) {
   const [builds, setBuilds] = useState([]);
   const [buildProgress, setBuildProgress] = useState({});
   const [buildVersion, setBuildVersion] = useState('');
-  const [buildImportDir, setBuildImportDir] = useState('');
+  const [buildImportDir, setBuildImportDir] = useState(() => {
+    const key = `rom-manager-import-dir-${collectionId}`;
+    return localStorage.getItem(key) || '';
+  });
+
+  useEffect(() => {
+    localStorage.setItem(`rom-manager-import-dir-${collectionId}`, buildImportDir);
+  }, [buildImportDir, collectionId]);
   const [buildRunning, setBuildRunning] = useState(false);
   const [buildScanRunning, setBuildScanRunning] = useState(false);
   const [buildScanResult, setBuildScanResult] = useState(null);
