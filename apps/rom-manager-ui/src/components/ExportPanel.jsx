@@ -1,50 +1,43 @@
-import { useState } from 'react'
-import { exportCollection } from '../api.js'
+import { useState } from 'react';
+import {
+  Box, Typography, Button, Select, MenuItem, FormControl, InputLabel,
+} from '@mui/material';
+import { exportCollection } from '../api.js';
 
 export default function ExportPanel({ collectionId }) {
-  const [exportFormat, setExportFormat] = useState('split')
-  const [exportData, setExportData] = useState(null)
-  const [exporting, setExporting] = useState(false)
+  const [exportFormat, setExportFormat] = useState('split');
+  const [exportData, setExportData] = useState(null);
+  const [exporting, setExporting] = useState(false);
 
   async function handleExport() {
-    setExporting(true)
+    setExporting(true);
     try {
-      const data = await exportCollection(collectionId, { format: exportFormat })
-      setExportData(data)
+      const data = await exportCollection(collectionId, { format: exportFormat });
+      setExportData(data);
     } catch (e) {
-      console.error('Export failed:', e.message)
-    } finally {
-      setExporting(false)
-    }
+      console.error(e);
+    } finally { setExporting(false); }
   }
 
   return (
-    <section className="detail-section">
-      <h2 className="detail-section-title">Export</h2>
-      <p className="detail-section-desc">
-        Export the collection's ROM set. Select format and version, then download the manifest.
-      </p>
-
-      <div className="export-form">
-        <div className="build-form-row">
-          <select className="build-select" value={exportFormat} onChange={e => setExportFormat(e.target.value)}>
-            <option value="split">Split (each game in own ZIP)</option>
-            <option value="merged">Merged (clones merged into parent)</option>
-            <option value="non-merged">Non-merged (all ROMs in game ZIP)</option>
-          </select>
-          <button className="btn btn-primary" onClick={handleExport} disabled={exporting}>
-            {exporting ? 'Generating...' : 'Generate Export Manifest'}
-          </button>
-        </div>
-      </div>
-
+    <Box sx={{ mb: 3 }}>
+      <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>Export</Typography>
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>
+        <FormControl size="small" sx={{ minWidth: 120 }}>
+          <InputLabel>Format</InputLabel>
+          <Select value={exportFormat} onChange={e => setExportFormat(e.target.value)} label="Format">
+            <MenuItem value="split">Split</MenuItem>
+            <MenuItem value="merged">Merged</MenuItem>
+            <MenuItem value="non-merged">Non-merged</MenuItem>
+          </Select>
+        </FormControl>
+        <Button variant="contained" onClick={handleExport} disabled={exporting}>Generate</Button>
+      </Box>
       {exportData && (
-        <div className="export-result">
-          <h3>Export: {exportData.collection} — {exportData.version} ({exportData.format})</h3>
-          <p>{exportData.total_games} games, {exportData.total_roms} total ROM files</p>
-          <pre className="export-json">{JSON.stringify(exportData, null, 2).slice(0, 2000)}{exportData.games.length > 5 ? '\n...' : ''}</pre>
-        </div>
+        <Box component="pre" sx={{ mt: 1, p: 1, bgcolor: 'action.hover', borderRadius: 1, fontSize: 12, maxHeight: 200, overflow: 'auto' }}>
+          {JSON.stringify(exportData, null, 2)}
+        </Box>
       )}
-    </section>
-  )
+    </Box>
+  );
 }

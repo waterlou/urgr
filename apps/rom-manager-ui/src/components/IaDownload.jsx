@@ -1,83 +1,65 @@
-import { useState } from 'react'
-import { iaListFiles, iaDownloadEntry } from '../api.js'
-
-const IA_ZIP_URL = 'https://archive.org/download/fbneo/FBNeo/roms.zip'
+import { useState } from 'react';
+import {
+  Box, Typography, TextField, Button, List, ListItem, ListItemText,
+  ListItemSecondaryAction, CircularProgress, Alert,
+} from '@mui/material';
+import { Download } from '@mui/icons-material';
+import { iaListFiles, iaDownloadEntry } from '../api.js';
 
 export default function IaDownload({ collectionId }) {
-  const [iaSearchQuery, setIaSearchQuery] = useState('')
-  const [iaSearching, setIaSearching] = useState(false)
-  const [iaSearchResults, setIaSearchResults] = useState(null)
-  const [iaDownloadingRom, setIaDownloadingRom] = useState(null)
-  const [iaDownloadError, setIaDownloadError] = useState(null)
-  const [iaDownloadSuccess, setIaDownloadSuccess] = useState(null)
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState([]);
+  const [downloading, setDownloading] = useState(null);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
 
-  async function handleIaSearch() {
-    if (!iaSearchQuery.trim()) return
-    setIaSearching(true)
-    setIaSearchResults(null)
-    setIaDownloadError(null)
+  async function handleSearch() {
+    if (!query.trim()) return;
+    setSearching(true); setError(null);
     try {
-      const data = await iaListFiles(IA_ZIP_URL, iaSearchQuery.trim())
-      setIaSearchResults(data.files || [])
+      const data = await iaListFiles(query.trim());
+      setResults(data.results || data.files || []);
     } catch (e) {
-      setIaDownloadError(e.message)
-    } finally {
-      setIaSearching(false)
-    }
+      setError(e.message);
+    } finally { setSearching(false); }
   }
 
-  async function handleIaDownloadRom(entry) {
-    setIaDownloadingRom(entry)
-    setIaDownloadError(null)
-    setIaDownloadSuccess(null)
+  async function handleDownload(entry) {
+    setDownloading(entry.name || entry); setError(null); setSuccess(null);
     try {
-      const result = await iaDownloadEntry(IA_ZIP_URL, entry, collectionId)
-      if (result.ok) setIaDownloadSuccess({ name: entry.replace(/^roms\//, ''), path: result.path, size: result.size })
-      else setIaDownloadError('Download failed')
+      const r = await iaDownloadEntry(query.trim(), entry.name || entry, collectionId);
+      setSuccess(`Downloaded: ${r?.file || entry.name || entry}`);
     } catch (e) {
-      setIaDownloadError(e.message)
-    } finally {
-      setIaDownloadingRom(null)
-    }
+      setError(e.message);
+    } finally { setDownloading(null); }
   }
 
   return (
-    <section className="detail-section">
-      <h2 className="detail-section-title">Download ROM from Internet Archive</h2>
-      <p className="detail-section-desc">Download individual ROM files from archive.org by game name.</p>
-      <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
-        <input
-          type="text"
-          className="build-select"
-          placeholder="Game name (e.g. 1941)"
-          value={iaSearchQuery}
-          onChange={e => setIaSearchQuery(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleIaSearch()}
-          style={{flex:1, minWidth:200}}
-        />
-        <button className="btn btn-primary" onClick={handleIaSearch} disabled={iaSearching || !iaSearchQuery}>
-          <span className="icon">search</span> Search
-        </button>
-      </div>
-      {iaSearching && <div className="loading-inline" style={{marginTop:8}}><div className="loading-spinner-sm" /> Searching...</div>}
-      {iaSearchResults && iaSearchResults.length > 0 && (
-        <div className="ia-results" style={{marginTop:12}}>
-          {iaSearchResults.map(f => (
-            <div key={f.name} className="ia-result-item">
-              <span className="ia-result-name">{f.name.replace('roms/', '')}</span>
-              <span className="ia-result-size">{(f.size / 1024).toFixed(0)} KB</span>
-              <button className="btn btn-sm btn-primary" onClick={() => handleIaDownloadRom(f.name)} disabled={iaDownloadingRom === f.name}>
-                {iaDownloadingRom === f.name ? <span className="loading-spinner-sm" /> : <span className="icon">download</span>}
-              </button>
-            </div>
+    <Box sx={{ mb: 3 }}>
+      <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>Internet Archive</Typography>
+      <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+        <TextField size="small" fullWidth placeholder="Search IA items..." value={query}
+          onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} />
+        <Button variant="contained" onClick={handleSearch} disabled={searching}>
+          {searching ? <CircularProgress size={14} /> : 'Search'}
+        </Button>
+      </Box>
+      {error && <Alert severity="error" sx={{ mb: 1 }}>{error}</Alert>}
+      {success && <Alert severity="success" sx={{ mb: 1 }}>{success}</Alert>}
+      {results.length > 0 && (
+        <List dense>
+          {results.map((r, i) => (
+            <ListItem key={i} divider>
+              <ListItemText primary={r.name || r} secondary={r.size ? `${(r.size / 1024 / 1024).toFixed(1)}MB` : ''} />
+              <Button size="small" startIcon={<Download />} onClick={() => handleDownload(r)}
+                disabled={downloading === (r.name || r)}>
+                {downloading === (r.name || r) ? <CircularProgress size={14} /> : 'Download'}
+              </Button>
+            </ListItem>
           ))}
-        </div>
+        </List>
       )}
-      {iaSearchResults && iaSearchResults.length === 0 && !iaSearching && (
-        <p className="error-text" style={{marginTop:8}}>No matches found.</p>
-      )}
-      {iaDownloadError && <p className="error-text" style={{marginTop:8}}>{iaDownloadError}</p>}
-      {iaDownloadSuccess && <div className="info-box" style={{marginTop:8}}>Downloaded: <strong>{iaDownloadSuccess.name}</strong> → <code>{iaDownloadSuccess.path}</code> ({(iaDownloadSuccess.size / 1024).toFixed(0)} KB)</div>}
-    </section>
-  )
+    </Box>
+  );
 }

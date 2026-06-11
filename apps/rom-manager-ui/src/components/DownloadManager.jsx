@@ -1,119 +1,104 @@
-import { useState, useEffect } from 'react'
-import { getDownloadQueue, subscribeDownloadSSE, retryDownload, clearDownload, clearCompletedDownloads } from '../api.js'
+import { useState, useEffect, useRef } from 'react';
+import {
+  Box, Typography, Button, Table, TableBody, TableCell, TableContainer,
+  TableHead, TableRow, Paper, Chip, LinearProgress, IconButton,
+  Grid, Card, CardContent,
+} from '@mui/material';
+import { Refresh, Delete, Replay } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
+import { getDownloadQueue, subscribeDownloadSSE, retryDownload, clearDownload, clearCompletedDownloads } from '../api.js';
 
-export default function DownloadManager({ onBack }) {
-  const [queue, setQueue] = useState([])
-  const [loading, setLoading] = useState(true)
+export default function DownloadManager() {
+  const navigate = useNavigate();
+  const [queue, setQueue] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getDownloadQueue().then(data => {
-      setQueue(data.queue || [])
-      setLoading(false)
-    }).catch(() => setLoading(false))
-    const sse = subscribeDownloadSSE({
-      onQueue: q => setQueue(q || []),
-    })
-    return () => sse.close()
-  }, [])
+    getDownloadQueue().then(d => setQueue(d.queue || [])).catch(() => {}).finally(() => setLoading(false));
+    const es = subscribeDownloadSSE({
+      onQueue: (q) => setQueue(q || []),
+    });
+    return () => es.close();
+  }, []);
 
-  const pending = queue.filter(i => i.status === 'pending').length
-  const downloading = queue.filter(i => i.status === 'downloading').length
-  const failed = queue.filter(i => i.status === 'failed').length
-  const completed = queue.filter(i => i.status === 'completed').length
-
-  function formatSize(bytes) {
-    if (!bytes) return '-'
-    if (bytes < 1024) return `${bytes} B`
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  }
-
-  function statusBadge(item) {
-    if (item.status === 'pending') return <span className="badge" style={{background:'#666'}}>Pending</span>
-    if (item.status === 'downloading') return <span className="badge" style={{background:'#2196F3'}}>Downloading {item.progress}%</span>
-    if (item.status === 'completed') return <span className="badge" style={{background:'var(--accent)', color:'#fff'}}>Completed</span>
-    if (item.status === 'failed') return <span className="badge" style={{background:'#f44336'}} title={item.error}>Failed</span>
-    return <span className="badge">{item.status}</span>
-  }
+  const stats = {
+    pending: queue.filter(i => i.status === 'pending').length,
+    downloading: queue.filter(i => i.status === 'downloading').length,
+    completed: queue.filter(i => i.status === 'completed').length,
+    failed: queue.filter(i => i.status === 'failed').length,
+  };
 
   return (
-    <div className="detail-page">
-      <div className="detail-nav">
-        <button className="back-btn" onClick={onBack}>
-          <span className="icon">arrow_back</span>
-        </button>
-        <span className="detail-nav-title">Downloads</span>
-      </div>
-      <div className="detail-page-body">
-        <div style={{display:'flex', gap:16, marginBottom:16, flexWrap:'wrap'}}>
-          <div className="stat-card"><strong>Pending</strong><br/>{pending}</div>
-          <div className="stat-card"><strong>Downloading</strong><br/>{downloading}</div>
-          <div className="stat-card"><strong>Completed</strong><br/>{completed}</div>
-          <div className="stat-card"><strong>Failed</strong><br/>{failed}</div>
-        </div>
-
-        {completed + failed > 0 && (
-          <button className="btn btn-sm" onClick={clearCompletedDownloads} style={{marginBottom:12}}>
-            <span className="icon">clear_all</span> Clear Completed/Failed
-          </button>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Typography variant="h6" fontWeight={600}>Downloads</Typography>
+        <Box sx={{ flex: 1 }} />
+        <Button size="small" startIcon={<Refresh />} onClick={() => getDownloadQueue().then(d => setQueue(d.queue || []))}>Refresh</Button>
+        {stats.completed + stats.failed > 0 && (
+          <Button size="small" onClick={() => clearCompletedDownloads().then(() => getDownloadQueue().then(d => setQueue(d.queue || [])))}>Clear Completed</Button>
         )}
+      </Box>
 
-        {loading ? (
-          <p><em>Loading...</em></p>
-        ) : queue.length === 0 ? (
-          <p className="modal-description">No downloads in queue. Open an NPS game and click Download to add files.</p>
-        ) : (
-          <div className="rom-table-wrapper">
-            <table className="rom-table">
-              <thead>
-                <tr>
-                  <th>File</th>
-                  <th>Type</th>
-                  <th>Size</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {queue.map(item => (
-                  <tr key={item.id}>
-                    <td className="rom-filename">{(() => {
-                      const dot = item.filename.lastIndexOf('.')
-                      if (dot === -1 || dot === item.filename.length - 1) return item.filename
-                      return <><span className="rom-filename-body">{item.filename.slice(0, dot)}</span><span className="rom-filename-ext">{item.filename.slice(dot)}</span></>
-                    })()}</td>
-                    <td><span className="badge">{item.subtype}</span></td>
-                    <td>{formatSize(item.file_size)}</td>
-                    <td>
-                      {statusBadge(item)}
-                      {item.status === 'downloading' && (
-                        <div style={{width:100, height:6, background:'#333', borderRadius:3, marginTop:4, overflow:'hidden'}}>
-                          <div style={{width:`${item.progress}%`, height:'100%', background:'#2196F3', transition:'width 0.3s'}} />
-                        </div>
-                      )}
-                      {item.status === 'failed' && item.error && (
-                        <div style={{fontSize:11, color:'#f44336', marginTop:2, maxWidth:200, overflow:'hidden', textOverflow:'ellipsis'}}>{item.error}</div>
-                      )}
-                    </td>
-                    <td>
-                      {item.status === 'failed' && (
-                        <button className="btn btn-xs" onClick={() => retryDownload(item.id)} style={{marginRight:4}}>
-                          <span className="icon icon-xs">refresh</span>
-                        </button>
-                      )}
-                      {(item.status === 'completed' || item.status === 'failed') && (
-                        <button className="btn btn-xs" onClick={() => clearDownload(item.id)}>
-                          <span className="icon icon-xs">close</span>
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  )
+      <Box sx={{ px: 2, pb: 2 }}>
+        <Grid container spacing={2} sx={{ mb: 2 }}>
+          {[
+            { label: 'Pending', value: stats.pending, color: 'default' },
+            { label: 'Downloading', value: stats.downloading, color: 'primary' },
+            { label: 'Completed', value: stats.completed, color: 'success' },
+            { label: 'Failed', value: stats.failed, color: 'error' },
+          ].map(s => (
+            <Grid item key={s.label}>
+              <Card variant="outlined">
+                <CardContent sx={{ p: 2, textAlign: 'center', '&:last-child': { pb: 2 } }}>
+                  <Typography variant="h5">{s.value}</Typography>
+                  <Typography variant="caption" color="text.secondary">{s.label}</Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+
+        <TableContainer component={Paper} variant="outlined">
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>File</TableCell>
+                <TableCell>Type</TableCell>
+                <TableCell>Size</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell>Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {queue.length === 0 ? (
+                <TableRow><TableCell colSpan={5} align="center">No downloads</TableCell></TableRow>
+              ) : queue.map(item => (
+                <TableRow key={item.id}>
+                  <TableCell>{item.filename || item.name}</TableCell>
+                  <TableCell>{item.type}</TableCell>
+                  <TableCell>{item.size ? `${(item.size / 1024 / 1024).toFixed(1)}MB` : ''}</TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Chip label={item.status} size="small" color={
+                        item.status === 'completed' ? 'success' : item.status === 'failed' ? 'error' : 'default'
+                      } />
+                      {item.progress && <LinearProgress variant="determinate" value={item.progress} sx={{ width: 60 }} />}
+                    </Box>
+                  </TableCell>
+                  <TableCell>
+                    {item.status === 'failed' && (
+                      <IconButton size="small" onClick={() => retryDownload(item.id)}><Replay fontSize="small" /></IconButton>
+                    )}
+                    <IconButton size="small" onClick={() => clearDownload(item.id).then(() => {
+                      setQueue(p => p.filter(i => i.id !== item.id));
+                    })}><Delete fontSize="small" /></IconButton>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Box>
+    </Box>
+  );
 }

@@ -1,85 +1,70 @@
-import { useState } from 'react'
-import IconDisplay from './IconDisplay.jsx'
+import { useState } from 'react';
+import {
+  Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button,
+  Chip, Box, Typography, Autocomplete,
+} from '@mui/material';
+import { useUI } from '../contexts/UIContext.jsx';
+import { useCollections } from '../contexts/CollectionContext.jsx';
+import { usePlatforms } from '../contexts/PlatformContext.jsx';
+import IconDisplay from './IconDisplay.jsx';
 
-export default function GameSetForm({ platforms, editTarget, onSave, onClose }) {
-  const isEdit = !!editTarget
-  const [name, setName] = useState(editTarget?.name || '')
-  const [description, setDescription] = useState(editTarget?.description || '')
+const LOGO_ICONS = ['fc', 'sfc', 'n64', 'gb', 'gba', 'psx', 'genesis', 'dc', 'ng', 'tg16', 'arcade', 'mame'];
+
+export default function GameSetForm() {
+  const { editTarget, closeGameSetForm } = useUI();
+  const { saveGameSet } = useCollections();
+  const platforms = usePlatforms();
+
+  const isEdit = editTarget?.id;
+  const [name, setName] = useState(editTarget?.name || '');
+  const [description, setDescription] = useState(editTarget?.description || '');
   const [selectedPlatforms, setSelectedPlatforms] = useState(
-    editTarget?.platforms ? editTarget.platforms.split(',').filter(Boolean) : []
-  )
-  const [icon, setIcon] = useState(editTarget?.icon || '')
+    editTarget?.platforms ? editTarget.platforms.split(',') : []
+  );
+  const [icon, setIcon] = useState(editTarget?.icon || '');
 
-  function togglePlatform(p) {
-    setSelectedPlatforms(prev =>
-      prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]
-    )
-  }
-
-  function handleSubmit(e) {
-    e.preventDefault()
-    if (!name) return
-    onSave({
-      name,
-      description,
+  async function handleSave() {
+    await saveGameSet({
+      name, description, icon: icon || 'inventory_2',
       platforms: selectedPlatforms.join(','),
-      icon: icon || 'inventory_2',
-    })
+    }, isEdit ? editTarget.id : null);
+    closeGameSetForm();
   }
-
-  const ICON_OPTIONS = ['inventory_2', 'ads_click', 'emoji_events', 'star', 'diamond', 'local_fire_department', 'diversity_3', 'palette', 'playing_cards', 'rainbow', 'sports_esports', 'videogame_asset', 'stadia_controller', 'smart_toy', 'toys', 'rocket', 'auto_awesome', 'psychiatry', 'flutter_dash', 'fort', 'park', 'celebration', 'whatshot', 'spa', 'music_note', 'arcade', 'mame', 'fc', 'sfc', 'n64', 'gb', 'gba', 'md', 'ps', 'neogeo', 'dc']
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-content form-modal" onClick={e => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}><span className="icon">close</span></button>
-        <h2 className="form-title">{isEdit ? 'Edit Game Set' : 'New Game Set'}</h2>
-        <form onSubmit={handleSubmit} className="collection-form">
-          <div className="form-group">
-            <label>Game Set Name</label>
-            <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Best of Arcade" required />
-          </div>
+    <Dialog open maxWidth="sm" fullWidth onClose={closeGameSetForm}>
+      <DialogTitle>{isEdit ? 'Edit Game Set' : 'New Game Set'}</DialogTitle>
+      <DialogContent>
+        <TextField label="Name" fullWidth value={name} onChange={e => setName(e.target.value)} sx={{ mb: 2 }} required />
+        <TextField label="Description" fullWidth multiline rows={2} value={description}
+          onChange={e => setDescription(e.target.value)} sx={{ mb: 2 }} />
 
-          <div className="form-group">
-            <label>Description</label>
-            <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Optional description" rows={3} />
-          </div>
+        <Typography variant="subtitle2" sx={{ mb: 1 }}>Platforms</Typography>
+        <Autocomplete multiple options={platforms.map(p => p.name || p)}
+          value={selectedPlatforms} onChange={(e, v) => setSelectedPlatforms(v)}
+          renderInput={(params) => <TextField {...params} size="small" placeholder="Select platforms" />}
+          renderTags={(value, getTagProps) => value.map((option, index) => (
+            <Chip key={option} label={option} size="small" {...getTagProps({ index })} />
+          ))}
+          sx={{ mb: 2 }}
+        />
 
-          <div className="form-group">
-            <label>Platforms</label>
-            <div className="platform-picker">
-              {platforms.map(p => (
-                <button
-                  type="button"
-                  key={p}
-                  className={`platform-chip ${selectedPlatforms.includes(p) ? 'active' : ''}`}
-                  onClick={() => togglePlatform(p)}
-                >{p}</button>
-              ))}
-              {selectedPlatforms.length === 0 && <span className="form-hint">Select the platforms this game set supports</span>}
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label>Icon</label>
-            <div className="logo-picker">
-              {ICON_OPTIONS.map(ic => (
-                <button
-                  type="button"
-                  key={ic}
-                  className={`logo-option ${icon === ic ? 'active' : ''}`}
-                  onClick={() => setIcon(ic)}
-                ><IconDisplay name={ic} className="" /></button>
-              ))}
-            </div>
-          </div>
-
-          <div className="form-actions">
-            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary">{isEdit ? 'Save' : 'Create Game Set'}</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
+        <Typography variant="subtitle2" sx={{ mb: 1 }}>Icon</Typography>
+        <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+          {LOGO_ICONS.map(ic => (
+            <Chip key={ic} icon={<IconDisplay name={ic} size={20} />} label=""
+              onClick={() => setIcon(ic)}
+              color={icon === ic ? 'primary' : 'default'}
+              variant={icon === ic ? 'filled' : 'outlined'}
+              sx={{ minWidth: 40, justifyContent: 'center' }}
+            />
+          ))}
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={closeGameSetForm}>Cancel</Button>
+        <Button variant="contained" onClick={handleSave}>Save</Button>
+      </DialogActions>
+    </Dialog>
+  );
 }

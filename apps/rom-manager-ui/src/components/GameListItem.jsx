@@ -1,87 +1,72 @@
-import { useState, useEffect, useRef } from 'react'
-import { coverUrl } from '../api.js'
-import IconDisplay from './IconDisplay.jsx'
+import { useState } from 'react';
+import {
+  TableRow, TableCell, Box, Typography, IconButton, Rating, Chip, Avatar,
+  Menu, MenuItem, ListItemIcon, ListItemText,
+} from '@mui/material';
+import { Star, StarBorder, MoreVert, PlaylistAdd, PlaylistRemove } from '@mui/icons-material';
+import { updateGameRating } from '../api.js';
 
 export default function GameListItem({ game, onSelect, onRating, onFavourite, onAddToGameSet, onRemoveFromGameSet, gameSets, gameSetId, listImageMode }) {
-  const [showSetMenu, setShowSetMenu] = useState(false)
-  const menuRef = useRef(null)
+  const [anchorEl, setAnchorEl] = useState(null);
 
-  useEffect(() => {
-    if (!showSetMenu) return
-    function handleClick(e) {
-      if (menuRef.current && !menuRef.current.contains(e.target)) setShowSetMenu(false)
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [showSetMenu])
-
-  function handleClickStars(e) {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const star = Math.ceil((x / rect.width) * 5);
-    onRating(Math.min(star, 5));
+  async function handleRating(e, v) {
+    const newRating = v === null ? 0 : Math.round(v * 2);
+    await updateGameRating(game.id, { rating: newRating, favourite: game.favourite }).catch(() => {});
+    onRating?.(game.id, { rating: newRating });
   }
 
-  const isGameSetView = gameSetId != null
-
-  const useScreenshot = listImageMode === 'screenshot' && game.screenshots?.length > 0
-  function getGameImage() {
-    if (listImageMode === 'none') return null
-    if (useScreenshot) {
-      let url = game.screenshots[0]
-      if (url.startsWith('//')) url = 'https:' + url
-      return url
-    }
-    return coverUrl(game.id)
+  function handleFav() {
+    const newFav = game.favourite ? 0 : 1;
+    updateGameRating(game.id, { favourite: newFav, rating: game.rating || 0 }).catch(() => {});
+    onFavourite?.(game.id, { favourite: newFav });
   }
-  const imgUrl = getGameImage()
 
   return (
-    <div className="list-item" onClick={() => onSelect(game)}>
-      <span className="list-col-name">
-        {imgUrl && <img src={imgUrl} alt="" className={`list-thumb${useScreenshot ? ' list-thumb-screenshot' : ''}`} loading="lazy" onError={e => { e.target.style.display = 'none' }} />}
-        <span className="list-name-text">{game.name}</span>
-        {game.description && <span className="list-desc">{game.description}</span>}
-      </span>
-      <span className="list-col-platform">
-        {game.versions && game.versions.length > 0
-          ? game.versions.map(v => <span key={v} className="version-tag">{v}</span>)
-          : <span className="version-tag">{game.source || '-'}</span>}
-        {game.regions ? game.regions.map(r => <span key={r} className="version-tag">{r}</span>) : game.region && <span className="version-tag">{game.region}</span>}
-      </span>
-      <span className="list-col-year">{game.year || '-'}</span>
-      <span className="list-col-rating" onClick={e => e.stopPropagation()}>
-        <div className="stars stars-sm" onClick={handleClickStars}>
-          {[1, 2, 3, 4, 5].map(i => (
-            <span key={i} className={`icon star ${i <= (game.rating || 0) ? 'icon-fill' : ''}`}>star</span>
-          ))}
-        </div>
-      </span>
-      <span className="list-col-fav" onClick={e => { e.stopPropagation(); onFavourite() }}>
-        <span className={`icon fav-star ${game.favourite ? 'active icon-fill' : ''}`}>star</span>
-      </span>
-      {gameSets.length > 0 && (
-        <span className="list-col-addset" onClick={e => e.stopPropagation()}>
-          <div className="list-add-to-set-wrapper" ref={menuRef}>
-            <button className="list-add-set-btn" onClick={() => setShowSetMenu(v => !v)} title={isGameSetView ? 'Remove from Set' : 'Add to Game Set'}><span className="icon icon-sm">playlist_add</span></button>
-            {showSetMenu && (
-              <div className="list-add-to-set-menu">
-                {isGameSetView ? (
-                  <button className="remove-from-set-btn" onClick={() => { onRemoveFromGameSet(game.id, gameSetId); setShowSetMenu(false) }}>
-                    <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:4}}>remove_circle</span> Remove
-                  </button>
-                ) : (
-                  gameSets.map(gs => (
-                    <button key={gs.id} onClick={() => { onAddToGameSet?.(game.id, gs.id); setShowSetMenu(false) }}>
-                      <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:4}}><IconDisplay name={gs.icon} fallback="inventory_2" /></span> {gs.name}
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-        </span>
+    <TableRow hover sx={{ cursor: 'pointer' }} onClick={() => onSelect?.(game)}>
+      <TableCell sx={{ width: 50 }}>
+        {listImageMode !== 'none' && game.cover_url ? (
+          <Avatar src={game.cover_url} variant="rounded" sx={{ width: 40, height: 40 }} />
+        ) : (
+          <Avatar variant="rounded" sx={{ width: 40, height: 40, bgcolor: 'action.hover' }}>?</Avatar>
+        )}
+      </TableCell>
+      <TableCell>
+        <Typography variant="body2" fontWeight={600}>{game.name}</Typography>
+        <Typography variant="caption" color="text.secondary" noWrap sx={{ maxWidth: 300, display: 'block' }}>
+          {game.description || ''}
+        </Typography>
+      </TableCell>
+      <TableCell>
+        <Chip label={game.platform} size="small" variant="outlined" />
+      </TableCell>
+      <TableCell>{game.year || ''}</TableCell>
+      <TableCell>
+        <Rating value={(game.rating || 0) / 2} precision={0.5} size="small" onChange={handleRating}
+          onClick={(e) => e.stopPropagation()} />
+      </TableCell>
+      <TableCell sx={{ width: 40 }}>
+        <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleFav(); }}>
+          {game.favourite ? <Star fontSize="small" color="warning" /> : <StarBorder fontSize="small" />}
+        </IconButton>
+      </TableCell>
+      {gameSets?.length > 0 && (
+        <TableCell sx={{ width: 40 }}>
+          <IconButton size="small" onClick={(e) => { e.stopPropagation(); setAnchorEl(e.currentTarget); }}>
+            <MoreVert fontSize="small" />
+          </IconButton>
+          <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={() => setAnchorEl(null)}>
+            {gameSets.map(gs => (
+              <MenuItem key={gs.id} onClick={() => {
+                setAnchorEl(null);
+                gameSetId ? onRemoveFromGameSet?.(game.id, gs.id) : onAddToGameSet?.(game.id, gs.id);
+              }}>
+                <ListItemIcon>{gameSetId ? <PlaylistRemove fontSize="small" /> : <PlaylistAdd fontSize="small" />}</ListItemIcon>
+                <ListItemText>{gs.name}</ListItemText>
+              </MenuItem>
+            ))}
+          </Menu>
+        </TableCell>
       )}
-    </div>
-  )
+    </TableRow>
+  );
 }

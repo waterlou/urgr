@@ -1,86 +1,88 @@
-import { useState, useEffect, useRef } from 'react'
-import { coverUrl } from '../api.js'
-import IconDisplay from './IconDisplay.jsx'
+import { useState } from 'react';
+import {
+  Card, CardMedia, CardContent, Typography, Box, IconButton, Rating, Chip,
+  Menu, MenuItem, ListItemIcon, ListItemText,
+} from '@mui/material';
+import {
+  Star, StarBorder, MoreVert, PlaylistAdd, PlaylistRemove,
+} from '@mui/icons-material';
+import { updateGameRating } from '../api.js';
+import { coverUrl } from '../api.js';
 
-export default function GameGridCard({ game, onSelect, onRating, onFavourite, onAddToGameSet, onRemoveFromGameSet, gameSets, gameSetId, listImageMode }) {
-  const [showMenu, setShowMenu] = useState(false)
-  const menuRef = useRef(null)
+export default function GameGridCard({ game, onSelect, onRating, onFavourite, onAddToGameSet, onRemoveFromGameSet, gameSets, gameSetId, listImageMode, onPlay }) {
+  const [anchorEl, setAnchorEl] = useState(null);
 
-  useEffect(() => {
-    if (!showMenu) return
-    function handleClick(e) {
-      if (menuRef.current && !menuRef.current.contains(e.target)) setShowMenu(false)
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [showMenu])
-
-  function handleClickStars(e) {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const star = Math.ceil((x / rect.width) * 5);
-    onRating(Math.min(star, 5));
+  async function handleRating(e, v) {
+    const newRating = v === null ? 0 : Math.round(v * 2);
+    await updateGameRating(game.id, { rating: newRating, favourite: game.favourite }).catch(() => {});
+    onRating?.(game.id, { rating: newRating });
   }
 
-  const isGameSetView = gameSetId != null
-
-  const useScreenshot = listImageMode === 'screenshot' && game.screenshots?.length > 0
-  const imgUrl = listImageMode === 'none' ? null : useScreenshot ? (() => { let u = game.screenshots[0]; if (u.startsWith('//')) u = 'https:' + u; return u; })() : coverUrl(game.id)
+  function handleFav(e) {
+    e.stopPropagation();
+    const newFav = game.favourite ? 0 : 1;
+    updateGameRating(game.id, { favourite: newFav, rating: game.rating || 0 }).catch(() => {});
+    onFavourite?.(game.id, { favourite: newFav });
+  }
 
   return (
-    <div className="grid-card" onClick={() => onSelect(game)}>
-      <div className={`grid-card-image${listImageMode === 'screenshot' ? ' grid-card-image-screenshot' : ''}`}>
-        {imgUrl ? <img src={imgUrl} alt={game.name} loading="lazy" /> : <div className="grid-card-no-image"><span className="icon">image_not_supported</span></div>}
-        <div className="grid-card-overlay">
-          <div className="grid-card-actions" onClick={e => e.stopPropagation()}>
-            <button
-              className={`fav-btn ${game.favourite ? 'active' : ''}`}
-              onClick={onFavourite}
-              title={game.favourite ? 'Unfavourite' : 'Favourite'}
-            >
-              <span className={`icon ${game.favourite ? 'icon-fill' : ''}`}>star</span>
-            </button>
-            {gameSets.length > 0 && (
-              <div className="add-to-set-wrapper" ref={menuRef}>
-                <button className="add-set-btn" onClick={() => setShowMenu(v => !v)} title={isGameSetView ? 'Remove from Set' : 'Add to Game Set'}><span className="icon">playlist_add</span></button>
-                {showMenu && (
-                  <div className="add-to-set-menu">
-                    {isGameSetView ? (
-                      <button className="remove-from-set-btn" onClick={() => { onRemoveFromGameSet(game.id, gameSetId); setShowMenu(false) }}>
-                        <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:4}}>remove_circle</span> Remove
-                      </button>
-                    ) : (
-                      gameSets.map(gs => (
-                        <button key={gs.id} onClick={() => { onAddToGameSet(game.id, gs.id); setShowMenu(false) }}>
-                          <span className="icon icon-sm" style={{verticalAlign:'middle',marginRight:4}}><IconDisplay name={gs.icon} fallback="inventory_2" /></span> {gs.name}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-      <div className="grid-card-info">
-        <div className="grid-card-name">{game.name}</div>
-        {game.description && <div className="grid-card-sub">{game.description}</div>}
-        <div className="grid-card-sub">
-          {game.regions ? game.regions.map(r => <span key={r} className="version-tag">{r}</span>) : game.region && <span className="version-tag">{game.region}</span>}
-          {(game.versions && game.versions.length > 0
-            ? game.versions
-            : game.source ? [game.source] : []
-          ).map(v => <span key={v} className="version-tag">{v}</span>)}
-        </div>
-        <div className="grid-card-rating" onClick={e => e.stopPropagation()}>
-          <div className="stars" onClick={handleClickStars}>
-            {[1, 2, 3, 4, 5].map(i => (
-              <span key={i} className={`icon star ${i <= (game.rating || 0) ? 'icon-fill' : ''}`}>star</span>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
+    <Card sx={{ position: 'relative', cursor: 'pointer', '&:hover': { boxShadow: 6 } }} onClick={() => onSelect?.(game)}>
+      <Box sx={{ position: 'relative', aspectRatio: '4/3', bgcolor: '#111', overflow: 'hidden' }}>
+        {listImageMode !== 'none' && game.cover_url ? (
+          <CardMedia component="img" image={game.cover_url} sx={{ height: '100%', objectFit: 'cover' }}
+            onError={(e) => { e.target.style.display = 'none'; }}
+          />
+        ) : listImageMode === 'screenshot' && game.screenshots?.[0] ? (
+          <CardMedia component="img" image={game.screenshots[0]} sx={{ height: '100%', objectFit: 'cover' }} />
+        ) : (
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'text.secondary' }}>
+            <Typography variant="h3">?</Typography>
+          </Box>
+        )}
+        <Box sx={{ position: 'absolute', top: 4, right: 4, display: 'flex', gap: 0.5 }}>
+          <IconButton size="small" sx={{ bgcolor: 'rgba(0,0,0,0.5)', color: game.favourite ? 'warning.main' : '#fff' }}
+            onClick={handleFav}>
+            {game.favourite ? <Star fontSize="small" /> : <StarBorder fontSize="small" />}
+          </IconButton>
+          {gameSets?.length > 0 && (
+            <>
+              <IconButton size="small" sx={{ bgcolor: 'rgba(0,0,0,0.5)', color: '#fff' }}
+                onClick={(e) => { e.stopPropagation(); setAnchorEl(e.currentTarget); }}>
+                <MoreVert fontSize="small" />
+              </IconButton>
+              <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={() => setAnchorEl(null)}>
+                {gameSets.map(gs => (
+                  <MenuItem key={gs.id} onClick={(e) => {
+                    e.stopPropagation();
+                    setAnchorEl(null);
+                    if (gameSetId) {
+                      onRemoveFromGameSet?.(game.id, gs.id);
+                    } else {
+                      onAddToGameSet?.(game.id, gs.id);
+                    }
+                  }}>
+                    <ListItemIcon>{gameSetId ? <PlaylistRemove fontSize="small" /> : <PlaylistAdd fontSize="small" />}</ListItemIcon>
+                    <ListItemText>{gs.name}</ListItemText>
+                  </MenuItem>
+                ))}
+              </Menu>
+            </>
+          )}
+        </Box>
+        {game.source && (
+          <Chip label={game.source} size="small" sx={{ position: 'absolute', bottom: 4, left: 4, height: 18, fontSize: 10 }} />
+        )}
+      </Box>
+      <CardContent sx={{ p: 1, '&:last-child': { pb: 1 } }}>
+        <Typography variant="body2" noWrap fontWeight={600}>{game.name}</Typography>
+        <Typography variant="caption" color="text.secondary" noWrap>
+          {game.platform} {game.year && `· ${game.year}`}
+        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Rating value={(game.rating || 0) / 2} precision={0.5} size="small" onChange={handleRating}
+            onClick={(e) => e.stopPropagation()} />
+        </Box>
+      </CardContent>
+    </Card>
+  );
 }

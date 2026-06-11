@@ -1,133 +1,46 @@
+import { Box, Icon, Avatar } from '@mui/material';
+
 const ICON_MAP = {
-  arcade: 'arcade.png',
-  mame: 'mame.png',
-  'final burn neo': 'mame.png',
-  gameplay: 'arcade.png',
-  nintendo: 'fc.png',
-  'nintendo entertainment system': 'fc.png',
-  'nintendo - nintendo entertainment system': 'fc.png',
-  fc: 'fc.png',
-  famicom: 'fc.png',
-  'super nintendo': 'sfc.png',
-  'super nintendo entertainment system': 'sfc.png',
-  'super famicom': 'sfc.png',
-  snes: 'sfc.png',
-  sfc: 'sfc.png',
-  'nintendo 64': 'n64.png',
-  n64: 'n64.png',
-  'game boy': 'gb.png',
-  gb: 'gb.png',
-  'game boy color': 'gbc.png',
-  gbc: 'gbc.png',
-  'game boy advance': 'gba.png',
-  gba: 'gba.png',
-  'nintendo ds': 'nds.png',
-  nds: 'nds.png',
-  'nintendo 3ds': 'nds.png',
-  'nintendo dsi': 'nds.png',
-  'virtual boy': 'vb.png',
-  vb: 'vb.png',
-  'family computer disk system': 'fds.png',
-  fds: 'fds.png',
-  'nintendo 64dd': 'n64.png',
-  'pokemon mini': 'poke.png',
-  'game & watch': 'gw.png',
-  'sega': 'md.png',
-  'sega genesis': 'md.png',
-  'mega drive': 'md.png',
-  md: 'md.png',
-  genesis: 'md.png',
-  'master system': 'ms.png',
-  ms: 'ms.png',
-  'game gear': 'gg.png',
-  gg: 'gg.png',
-  'sega 32x': '32X.png',
-  '32x': '32X.png',
-  'sega cd': 'segacd.png',
-  'mega cd': 'segacd.png',
-  'sega sg-1000': 'segasgone.png',
-  'dreamcast': 'dc.png',
-  dc: 'dc.png',
-  playstation: 'ps.png',
-  ps: 'ps.png',
-  'playstation portable': 'psp.png',
-  psp: 'psp.png',
-  'playstation vita': 'psp.png',
-  'playstation 3': 'ps.png',
-  'playstation mobile': 'ps.png',
-  'neo geo': 'neogeo.png',
-  neogeo: 'neogeo.png',
-  'neo geo cd': 'neocd.png',
-  'neo geo pocket': 'ngp.png',
-  ngp: 'ngp.png',
-  'neo geo pocket color': 'ngpc.png',
-  ngpc: 'ngpc.png',
-  'pc engine': 'pce.png',
-  'turbografx-16': 'pce.png',
-  pce: 'pce.png',
-  'pc engine cd': 'pcecd.png',
-  'supergrafx': 'sgfx.png',
-  sgfx: 'sgfx.png',
-  wonderswan: 'ws.png',
-  ws: 'ws.png',
-  'wonderswan color': 'wsc.png',
-  wsc: 'wsc.png',
-  atari: 'atari.png',
-  'atari 2600': 'atari.png',
-  'atari 5200': '5200.png',
-  'atari 7800': '7800.png',
-  'atari lynx': 'lynx.png',
-  lynx: 'lynx.png',
-  'atari jaguar': 'atari.png',
-  vectrex: 'vectrex.png',
-  coleco: 'col.png',
-  col: 'col.png',
-  'coleco vision': 'col.png',
-  'amstrad cpc': 'cpc.png',
-  msx: 'msx.png',
-  'commodore': 'c64.png',
-  'commodore 64': 'c64.png',
-  c64: 'c64.png',
-  amiga: 'amiga.png',
-  'zx spectrum': 'zxs.png',
-  zxs: 'zxs.png',
-  x68000: 'x68000.png',
-  'magnavox': 'ody.png',
-  'odyssey 2': 'ody.png',
-  supervision: 'supervision.png',
-  'mattel': 'itv.png',
-  intellivision: 'itv.png',
-  'fairchild': 'fairchild.png',
-  'channel f': 'fairchild.png',
-  'mega duck': 'megaduck.png',
-  dos: 'dos.png',
-  'cps-1': 'cps1.png',
-  'cps-2': 'cps2.png',
-  'cps-3': 'cps3.png',
-  'arduboy': 'arduboy.png',
-  'pico-8': 'pico.png',
-  'tic-80': 'tic.png',
-  'easyrpg': 'easyrpg.png',
-  'scummvm': 'scummvm.png',
-}
+  arcade: 'arcade.png', mame: 'mame.png', 'final burn neo': 'mame.png',
+  fc: 'fc.png', sfc: 'sfc.png', nes: 'fc.png', snes: 'sfc.png', n64: 'n64.png',
+  gb: 'gb.png', gbc: 'gbc.png', gba: 'gba.png', nds: 'nds.png',
+  psx: 'psx.png', ps1: 'psx.png', ps2: 'ps2.png', psp: 'psp.png',
+  gen: 'genesis.png', genesis: 'genesis.png', megadrive: 'genesis.png',
+  saturn: 'saturn.png', dc: 'dc.png', dreamcast: 'dc.png',
+  gg: 'gg.png', gamegear: 'gg.png', sms: 'sms.png',
+  ng: 'ng.png', neogeo: 'ng.png',
+  tg16: 'tg16.png', pcengine: 'tg16.png',
+  atari: 'atari.png', jaguar: 'jaguar.png', lynx: 'lynx.png',
+  c64: 'c64.png', amiga: 'amiga.png', msx: 'msx.png',
+  '32X': '32X.png', vb: 'vb.png', wonderswan: 'ws.png', wsc: 'wsc.png',
+  ngp: 'ngp.png', ngpc: 'ngpc.png', sg1000: 'sg1000.png',
+  coleco: 'coleco.png', vectrex: 'vectrex.png', intellivision: 'intellivision.png',
+  '3do': '3do.png', cdi: 'cdi.png', fm7: 'fm7.png', pc88: 'pc88.png', pc98: 'pc98.png',
+  x68000: 'x68000.png', zx: 'zx.png', zxspectrum: 'zx.png',
+  pokemon: 'pokemon.png', sega: 'sega.png', sony: 'sony.png', nintendo: 'nintendo.png',
+};
 
-const BASE = '/icons'
-
-export default function IconDisplay({ name, fallback = 'folder', className = '', size = 24 }) {
-  const icon = name || fallback
-  const filename = ICON_MAP[icon.toLowerCase()]
+export default function IconDisplay({ name, fallback = 'folder', size = 24 }) {
+  const icon = name || fallback;
+  const filename = ICON_MAP[icon.toLowerCase()];
   if (filename) {
-    return <img src={`${BASE}/${filename}`} alt="" className={className} style={{width:size,height:size,verticalAlign:'middle'}} />
+    return (
+      <Box component="img" src={`/icons/${filename}`} alt=""
+        sx={{ width: size, height: size, verticalAlign: 'middle', objectFit: 'contain' }}
+      />
+    );
   }
-  // Check if name contains a platform we know
-  const match = Object.entries(ICON_MAP).find(([key]) => icon.toLowerCase().includes(key))
+  const match = Object.entries(ICON_MAP).find(([key]) => icon.toLowerCase().includes(key));
   if (match) {
-    return <img src={`${BASE}/${match[1]}`} alt="" className={className} style={{width:size,height:size,verticalAlign:'middle'}} />
+    return (
+      <Box component="img" src={`/icons/${match[1]}`} alt=""
+        sx={{ width: size, height: size, verticalAlign: 'middle', objectFit: 'contain' }}
+      />
+    );
   }
-  // Fallback to Material Icon
-  const isIconName = /^[a-z][a-z0-9_]*$/i.test(icon)
+  const isIconName = /^[a-z][a-z0-9_]*$/i.test(icon);
   if (isIconName) {
-    return <span className={`icon ${className}`}>{icon}</span>
+    return <Icon sx={{ fontSize: size }}>{icon}</Icon>;
   }
-  return <span className={className}>{icon}</span>
+  return <Avatar sx={{ width: size, height: size, fontSize: size * 0.5 }}>{icon[0]}</Avatar>;
 }

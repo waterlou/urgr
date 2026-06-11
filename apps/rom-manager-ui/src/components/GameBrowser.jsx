@@ -1,393 +1,272 @@
-import { useState, useEffect, useRef } from 'react'
-import GameGridCard from './GameGridCard.jsx'
-import GameListItem from './GameListItem.jsx'
-import IconDisplay from './IconDisplay.jsx'
-import { getGames, coverUrl, updateGameRating, batchScrapeGameMetadata, subscribeJobSSE, cancelJob, getScrapeJobs } from '../api.js'
+import { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  Box, Typography, TextField, InputAdornment, IconButton, ToggleButtonGroup,
+  ToggleButton, Chip, Select, MenuItem, FormControl, Table, TableBody,
+  TableContainer, TableHead, TableRow, TableCell, Paper, Grid, Tooltip,
+  Button, CircularProgress, Checkbox, FormControlLabel,
+} from '@mui/material';
+import {
+  GridView, ViewList, ViewModule, Search, ArrowUpward, ArrowDownward,
+  FilterList, Star, CropOriginal, Close, PlayArrow,
+} from '@mui/icons-material';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useCollections } from '../contexts/CollectionContext.jsx';
+import { useUI } from '../contexts/UIContext.jsx';
+import {
+  batchScrapeGameMetadata, scrapeAllCollectionGames, coverUrl, playUrl,
+} from '../api.js';
+import GameGridCard from './GameGridCard.jsx';
+import GameListItem from './GameListItem.jsx';
+import IconDisplay from './IconDisplay.jsx';
+import EmulatorModal from './EmulatorModal.jsx';
 
-export default function GameBrowser({
-  games, loading, hasMore, onLoadMore, activeView, activeMeta, totalGames, platforms,
-  viewMode, sortField, sortOrder, searchQuery,
-  onViewModeChange, onSortFieldChange, onSortOrderChange,
-  onSearchQueryChange, onSelectGame, onAddToGameSet, onRemoveFromGameSet, onUpdateGame, gameSets, activeId,
-  showBackToDetail, onBackToDetail,
-  parentsOnly, onParentsOnlyChange,
-  favouritesOnly, onFavouritesOnlyChange,
-  romsOnly, onRomsOnlyChange,
-  listImageMode, onListImageModeChange,
-  onToggleSidebar,
-  selectedVersionId, onSelectedVersionChange, collectionVersions,
-  onOpenSettings,
-}) {
-  const [searchOpen, setSearchOpen] = useState(false)
-  const [searchResults, setSearchResults] = useState([])
-  const [localQuery, setLocalQuery] = useState('')
-  const sentinelRef = useRef(null)
-  const [batchShow, setBatchShow] = useState(false)
-  const [batchOverwrite, setBatchOverwrite] = useState(false)
-  const [batchRunning, setBatchRunning] = useState(false)
-  const [batchProgress, setBatchProgress] = useState('')
-  const [batchResult, setBatchResult] = useState(null)
-  const [batchJobId, setBatchJobId] = useState(null)
-  const eventSourceRef = useRef(null)
+export default function GameBrowser() {
+  const navigate = useNavigate();
+  const { id: paramId } = useParams();
+  const location = useLocation();
+  const {
+    games, loading, hasMore, activeMeta, totalGames, collectionVersions,
+    selectedVersionId, setSelectedVersionId,
+    loadGames, loadMore, addToGameSet, removeFromGameSet, updateGame, gameSets,
+  } = useCollections();
+  const { showSnackbar } = useUI();
+
+  const activeView = location.pathname.startsWith('/collections') ? 'collection'
+    : location.pathname.startsWith('/game-sets') ? 'game-set' : 'browse';
+  const activeId = paramId;
+
+  const [viewMode, setViewMode] = useState('grid');
+  const [sortField, setSortField] = useState('name');
+  const [sortOrder, setSortOrder] = useState('asc');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [parentsOnly, setParentsOnly] = useState(() => localStorage.getItem('rom-manager-parents-only') === 'true');
+  const [favouritesOnly, setFavouritesOnly] = useState(() => localStorage.getItem('rom-manager-favourites-only') === 'true');
+  const [romsOnly, setRomsOnly] = useState(() => localStorage.getItem('rom-manager-roms-only') === 'true');
+  const [listImageMode, setListImageMode] = useState(() => localStorage.getItem('rom-manager-list-image') || 'cover');
+  const [batchShow, setBatchShow] = useState(false);
+  const [batchOverwrite, setBatchOverwrite] = useState(false);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState(null);
+  const [batchResult, setBatchResult] = useState(null);
+  const [emulatorGame, setEmulatorGame] = useState(null);
+  const sentinelRef = useRef(null);
+
+  function handleArr(field) {
+    if (sortField === field) setSortOrder(p => p === 'asc' ? 'desc' : 'asc');
+    else { setSortField(field); setSortOrder('asc'); }
+  }
 
   useEffect(() => {
-    return () => { if (eventSourceRef.current) eventSourceRef.current.close(); }
-  }, [])
+    loadGames(activeView, activeId, sortField, sortOrder, searchQuery,
+      parentsOnly, favouritesOnly, romsOnly, selectedVersionId, activeView === 'collection' ? 'games' : undefined);
+  }, [activeView, activeId, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, romsOnly, selectedVersionId, loadGames]);
 
-  // Reset batch UI on navigation + reconnect to active scrape jobs
   useEffect(() => {
-    setBatchShow(false)
-    setBatchRunning(false)
-    setBatchProgress('')
-    setBatchResult(null)
-    setBatchJobId(null)
-    if (eventSourceRef.current) { eventSourceRef.current.close(); eventSourceRef.current = null }
-
-    getScrapeJobs().then(jobs => {
-      if (!jobs || jobs.length === 0) return
-      const running = jobs.find(j => j.status === 'running')
-      if (running) {
-        setBatchRunning(true)
-        setBatchProgress(running.progress_msg || 'Running...')
-        setBatchJobId(running.id)
-        eventSourceRef.current = subscribeJobSSE(running.id, {
-          onProgress: (msg) => setBatchProgress(msg.msg || `Progress: ${msg.pct}%`),
-          onResult: (data) => { setBatchResult(data); setBatchRunning(false); setBatchJobId(null) },
-          onError: (err) => { setBatchResult({ error: err }); setBatchRunning(false); setBatchJobId(null) },
-        })
-      }
-    }).catch(() => {})
-  }, [activeView, activeId])
-
-  // Infinite scroll via IntersectionObserver
-  useEffect(() => {
-    if (!hasMore || loading) return
-    const el = sentinelRef.current
-    if (!el) return
+    if (!sentinelRef.current) return;
     const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) onLoadMore?.()
-    }, { rootMargin: '200px' })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [hasMore, loading, onLoadMore])
+      if (entry.isIntersecting && hasMore && !loading) {
+        loadMore(activeView, activeId, sortField, sortOrder, searchQuery,
+          parentsOnly, favouritesOnly, romsOnly, selectedVersionId);
+      }
+    }, { rootMargin: '200px' });
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [hasMore, loading, activeView, activeId, sortField, sortOrder, searchQuery,
+    parentsOnly, favouritesOnly, romsOnly, selectedVersionId, loadMore]);
 
-  async function handleSearch(e) {
-    const q = e.target.value
-    setLocalQuery(q)
-    if (q.length < 2) {
-      setSearchResults([])
-      setSearchOpen(false)
-      return
-    }
-    const { games: results } = await getGames({ q, limit: 50 })
-    setSearchResults(results)
-    setSearchOpen(true)
-  }
-
-  function handleViewChange(mode) {
-    onViewModeChange(mode)
-  }
-
-  function handleSortToggle(field) {
-    if (sortField === field) {
-      onSortOrderChange(sortOrder === 'asc' ? 'desc' : 'asc')
-    } else {
-      onSortFieldChange(field)
-      onSortOrderChange('asc')
-    }
-  }
-
-  async function handleRating(game, rating) {
-    onUpdateGame(game.id, { rating })
-    await updateGameRating(game.id, { rating })
-  }
-
-  async function handleFavourite(game) {
-    const newFav = game.favourite ? 0 : 1
-    onUpdateGame(game.id, { favourite: newFav })
-    await updateGameRating(game.id, { favourite: newFav })
-  }
-
-  async function handleBatchScrape() {
-    if (games.length === 0) return
-    setBatchRunning(true)
-    setBatchProgress('Starting...')
-    setBatchResult(null)
+  // Batch scrape
+  async function startBatchScrape() {
+    setBatchRunning(true);
+    setBatchProgress(null);
+    setBatchResult(null);
     try {
-      const gameIds = games.map(g => g.id)
-      const { jobId } = await batchScrapeGameMetadata(gameIds, batchOverwrite)
-      setBatchJobId(jobId)
-      eventSourceRef.current = subscribeJobSSE(jobId, {
-        onProgress: (msg) => setBatchProgress(msg.msg || `Progress: ${msg.pct}%`),
-        onResult: (data) => {
-          setBatchResult(data)
-          setBatchRunning(false)
-          setBatchJobId(null)
-        },
-        onError: (err) => {
-          setBatchResult({ error: err })
-          setBatchRunning(false)
-          setBatchJobId(null)
-        },
-      })
+      let data;
+      if (activeView === 'collection') {
+        data = await scrapeAllCollectionGames(activeId);
+      } else {
+        const ids = games.filter(g => !g.synopsis || batchOverwrite).map(g => g.id);
+        data = await batchScrapeGameMetadata(ids, batchOverwrite);
+      }
+      setBatchResult(data);
+      showSnackbar(`Scraped ${data.scraped || 0} games`, 'success');
     } catch (e) {
-      setBatchResult({ error: e.message })
-      setBatchRunning(false)
+      showSnackbar(`Scrape failed: ${e.message}`, 'error');
+    } finally {
+      setBatchRunning(false);
     }
   }
 
-  async function handleCancelBatch() {
-    if (!batchJobId) return
-    try {
-      await cancelJob(batchJobId)
-      if (eventSourceRef.current) { eventSourceRef.current.close(); eventSourceRef.current = null }
-    } catch (e) { console.error('Cancel error:', e) }
-    setBatchRunning(false)
-    setBatchResult({ cancelled: true })
-    setBatchJobId(null)
+  function playGame(game) {
+    setEmulatorGame({
+      id: game.id, name: game.name, platform: game.platform, source: game.source,
+    });
   }
-
-  const title = !activeMeta
-    ? 'All Games'
-    : activeView === 'collection'
-    ? activeMeta.name
-    : activeMeta.name
-
-  const isList = viewMode === 'list'
-  const isGrid = viewMode === 'grid'
-  const isLarge = viewMode === 'large'
-  const gameSetId = activeView === 'game-set' ? activeId : null
-
-  const SORT_OPTIONS = [
-    { field: 'name', label: 'Name' },
-    { field: 'rating', label: 'Rating' },
-  ]
 
   return (
-    <div className="browser">
-      <div className="browser-header">
-        <div className="browser-title-row">
-          <button className="hamburger-btn" onClick={onToggleSidebar} title="Menu"><span className="icon">menu</span></button>
-          {showBackToDetail && activeMeta && <IconDisplay name={activeMeta.logo} fallback="folder" size={24} />}
-          <h1 className="browser-title">{title}</h1>
-          <span className="browser-count">{totalGames} games</span>
-          {platforms.length > 0 && (
-            <div className="browser-platforms">
-              {platforms.map(p => <span key={p} className="platform-badge">{p}</span>)}
-            </div>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ p: 2, pb: 0 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          {activeView === 'collection' && (
+            <IconButton onClick={() => navigate(`/collections/${activeId}`)}><Close /></IconButton>
           )}
-          {showBackToDetail && onOpenSettings && (
-            <button className="btn btn-sm" onClick={onOpenSettings} title="Collection settings" style={{marginLeft:'auto'}}>
-              <span className="icon">settings</span>
-            </button>
+          <Box>
+            <Typography variant="h6" fontWeight={600}>
+              {activeMeta?.name || (activeView === 'browse' ? 'All Games' : '')}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {totalGames} game{totalGames !== 1 ? 's' : ''}
+            </Typography>
+          </Box>
+          <Box sx={{ flex: 1 }} />
+          {activeMeta?.platforms && activeMeta.platforms.length > 0 && (
+            <Box sx={{ display: 'flex', gap: 0.5 }}>
+              {activeMeta.platforms.map(p => <Chip key={p} label={p} size="small" icon={<IconDisplay name={p} size={16} />} />)}
+            </Box>
           )}
-        </div>
+        </Box>
 
-        <div className="browser-toolbar">
-          <div className="toolbar-left">
-            {onParentsOnlyChange && (activeView === 'collection' || activeView === 'browse') && (
-              <button
-                className={`btn btn-sm ${parentsOnly ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => onParentsOnlyChange(!parentsOnly)}
-                title="Show parent games only"
-                style={{marginRight:8}}
-              >
-                <span className="icon icon-sm">account_tree</span> {parentsOnly ? 'Parents' : 'All'}
-              </button>
-            )}
-            {onFavouritesOnlyChange && (activeView === 'collection' || activeView === 'browse') && (
-              <button
-                className={`btn btn-sm ${favouritesOnly ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => onFavouritesOnlyChange(!favouritesOnly)}
-                title="Show favourites only"
-                style={{marginRight:8}}
-              >
-                <span className="icon icon-sm">star</span> {favouritesOnly ? 'Favs' : 'All'}
-              </button>
-            )}
-            {onRomsOnlyChange && (activeView === 'collection' || activeView === 'browse') && (
-              <button
-                className={`btn btn-sm ${romsOnly ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => onRomsOnlyChange(!romsOnly)}
-                title="Show only games with ROM files available"
-                style={{marginRight:8}}
-              >
-                <span className="icon icon-sm">inventory_2</span> {romsOnly ? 'ROMs' : 'All'}
-              </button>
-            )}
-            <div className="view-mode-toggle">
-              <button className={`view-btn ${isList ? 'active' : ''}`} onClick={() => handleViewChange('list')} title="List"><span className="icon">view_headline</span></button>
-              <button className={`view-btn ${isGrid ? 'active' : ''}`} onClick={() => handleViewChange('grid')} title="Grid"><span className="icon">grid_view</span></button>
-              <button className={`view-btn ${isLarge ? 'active' : ''}`} onClick={() => handleViewChange('large')} title="Large Icons"><span className="icon">view_module</span></button>
-            </div>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+          <ToggleButtonGroup value={viewMode} exclusive onChange={(e, v) => v && setViewMode(v)} size="small">
+            <ToggleButton value="grid"><GridView fontSize="small" /></ToggleButton>
+            <ToggleButton value="list"><ViewList fontSize="small" /></ToggleButton>
+            <ToggleButton value="large"><ViewModule fontSize="small" /></ToggleButton>
+          </ToggleButtonGroup>
 
-            {onListImageModeChange && (
-              <>
-                <span className="sort-label" style={{marginLeft:8}}>Images:</span>
-                <div className="view-mode-toggle">
-                  <button
-                    className={`view-btn ${listImageMode === 'cover' ? 'active' : ''}`}
-                    onClick={() => onListImageModeChange('cover')}
-                    title="Show cover in list"
-                  ><span className="icon">image</span></button>
-                  <button
-                    className={`view-btn ${listImageMode === 'screenshot' ? 'active' : ''}`}
-                    onClick={() => onListImageModeChange('screenshot')}
-                    title="Show screenshot in list"
-                  ><span className="icon">photo_library</span></button>
-                  <button
-                    className={`view-btn ${listImageMode === 'none' ? 'active' : ''}`}
-                    onClick={() => onListImageModeChange('none')}
-                    title="Hide images in list"
-                  ><span className="icon">visibility_off</span></button>
-                </div>
-              </>
-            )}
+          <FormControl size="small" sx={{ minWidth: 80 }}>
+            <Select value={`${sortField}-${sortOrder}`} onChange={e => {
+              const [f, o] = e.target.value.split('-');
+              setSortField(f); setSortOrder(o);
+            }}>
+              <MenuItem value="name-asc">Name ↑</MenuItem>
+              <MenuItem value="name-desc">Name ↓</MenuItem>
+              <MenuItem value="rating-desc">Rating ↓</MenuItem>
+              <MenuItem value="rating-asc">Rating ↑</MenuItem>
+              <MenuItem value="year-desc">Year ↓</MenuItem>
+              <MenuItem value="year-asc">Year ↑</MenuItem>
+            </Select>
+          </FormControl>
 
-            <div className="sort-controls">
-              <span className="sort-label">Sort:</span>
-              {SORT_OPTIONS.map(opt => (
-                <button
-                  key={opt.field}
-                  className={`sort-btn ${sortField === opt.field ? 'active' : ''}`}
-                  onClick={() => handleSortToggle(opt.field)}
-                >
-                  {opt.label}
-                  {sortField === opt.field && <span className="icon icon-xs sort-arrow">{sortOrder === 'asc' ? 'arrow_upward' : 'arrow_downward'}</span>}
-                </button>
-              ))}
-            </div>
-          </div>
+          <Tooltip title={parentsOnly ? 'Showing parents only' : 'Showing all'}>
+            <Chip label="Parents" size="small" color={parentsOnly ? 'primary' : 'default'}
+              onClick={() => { const v = !parentsOnly; setParentsOnly(v); localStorage.setItem('rom-manager-parents-only', v); }} />
+          </Tooltip>
+          <Tooltip title={favouritesOnly ? 'Favourites only' : 'All games'}>
+            <Chip icon={<Star fontSize="small" />} label="Fav" size="small" color={favouritesOnly ? 'warning' : 'default'}
+              onClick={() => { const v = !favouritesOnly; setFavouritesOnly(v); localStorage.setItem('rom-manager-favourites-only', v); }} />
+          </Tooltip>
+          <Tooltip title={romsOnly ? 'ROMs only' : 'All entries'}>
+            <Chip label="ROMs" size="small" color={romsOnly ? 'primary' : 'default'}
+              onClick={() => { const v = !romsOnly; setRomsOnly(v); localStorage.setItem('rom-manager-roms-only', v); }} />
+          </Tooltip>
 
-          <div className="toolbar-right">
-            {activeView === 'collection' && games.length > 0 && !batchShow && !batchRunning && (
-              <button className="btn btn-sm btn-secondary" onClick={() => setBatchShow(true)} style={{marginRight:8}}>
-                <span className="icon icon-sm">auto_awesome</span> Scrape
-              </button>
-            )}
-            {batchShow && !batchRunning && (
-              <div className="batch-scrape-form" style={{display:'flex',alignItems:'center',gap:8,marginRight:8}}>
-                <span className="text-muted" style={{fontSize:12,whiteSpace:'nowrap'}}>{games.length} game{games.length !== 1 ? 's' : ''}</span>
-                <label className="batch-overwrite-label" style={{fontSize:12,display:'flex',alignItems:'center',gap:4,cursor:'pointer',whiteSpace:'nowrap'}}>
-                  <input type="checkbox" checked={batchOverwrite} onChange={e => setBatchOverwrite(e.target.checked)} />
-                  Overwrite
-                </label>
-                <button className="btn btn-sm btn-primary" onClick={handleBatchScrape}><span className="icon icon-sm">auto_awesome</span> Start</button>
-                <button className="btn btn-sm btn-secondary" onClick={() => setBatchShow(false)}>Cancel</button>
-              </div>
-            )}
-            {batchRunning && (
-              <div className="batch-scrape-progress" style={{display:'flex',alignItems:'center',gap:6,marginRight:8}}>
-                <div className="loading-spinner-sm" />
-                <span className="text-muted" style={{fontSize:12,whiteSpace:'nowrap',maxWidth:300,overflow:'hidden',textOverflow:'ellipsis'}}>{batchProgress}</span>
-                <button className="btn btn-sm btn-danger" onClick={handleCancelBatch} title="Cancel">✕</button>
-              </div>
-            )}
-            {batchResult && !batchRunning && (
-              <div className="batch-scrape-result" style={{display:'flex',alignItems:'center',gap:6,marginRight:8}}>
-                {batchResult.error ? (
-                  <span className="scrape-error" style={{fontSize:12,whiteSpace:'nowrap'}}>Failed: {batchResult.error}</span>
-                ) : batchResult.cancelled ? (
-                  <span className="text-muted" style={{fontSize:12,whiteSpace:'nowrap'}}>Cancelled</span>
-                ) : (
-                  <span className="text-muted" style={{fontSize:12,whiteSpace:'nowrap'}}>
-                    ✓ {batchResult.scraped} · ⏭ {batchResult.skipped} · ✗ {batchResult.failed}
-                  </span>
-                )}
-                <button className="btn btn-sm btn-secondary" onClick={() => { setBatchShow(false); setBatchResult(null); setBatchJobId(null); }}>OK</button>
-              </div>
-            )}
-            <div className="browser-search">
-              <input
-                type="text"
-                placeholder="Filter games..."
-                value={searchQuery}
-                onChange={e => onSearchQueryChange(e.target.value)}
-                className="search-input"
-              />
-            </div>
-          </div>
-        </div>
-      </div>
+          <Select size="small" value={listImageMode} onChange={e => { setListImageMode(e.target.value); localStorage.setItem('rom-manager-list-image', e.target.value); }}
+            sx={{ minWidth: 80 }}>
+            <MenuItem value="cover">Cover</MenuItem>
+            <MenuItem value="screenshot">Screenshot</MenuItem>
+            <MenuItem value="none">None</MenuItem>
+          </Select>
 
-      {activeView === 'collection' && collectionVersions?.length > 1 && (
-        <div className="version-chips">
-          <button
-            className={`version-chip ${!selectedVersionId ? 'active' : ''}`}
-            onClick={() => onSelectedVersionChange(null)}
-          >
-            All Versions
-          </button>
-          {collectionVersions.map(v => (
-            <button
-              key={v.id}
-              className={`version-chip ${selectedVersionId === v.id ? 'active' : ''}`}
-              onClick={() => onSelectedVersionChange(v.id)}
-            >
-              {v.source} {v.version}
-              <span className="version-chip-count">{v.total_games}</span>
-            </button>
-          ))}
-        </div>
-      )}
+          <Box sx={{ flex: 1 }} />
+          {searchOpen ? (
+            <TextField size="small" variant="outlined" placeholder="Search..." autoFocus
+              value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+              InputProps={{ endAdornment: <InputAdornment position="end"><IconButton size="small" onClick={() => { setSearchOpen(false); setSearchQuery(''); }}><Close /></IconButton></InputAdornment> }}
+            />
+          ) : (
+            <IconButton onClick={() => setSearchOpen(true)}><Search /></IconButton>
+          )}
 
-      <div className="browser-content">
-        {loading && games.length === 0 ? (
-          <div className="loading-screen"><div className="loading-spinner" /></div>
-        ) : games.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon"><span className="icon icon-xl">inbox</span></div>
-            <h2>No games found</h2>
-            {activeView === 'collection' && <p>Import a DAT file to populate this collection, or add games manually.</p>}
-            {activeView === 'game-set' && <p>Add games from a collection or search to start building your set.</p>}
-          </div>
-        ) : isList ? (
-          <div className="game-list">
-            <div className="list-header">
-              <span className="list-col-name">Name</span>
-              <span className="list-col-platform">Platform</span>
-              <span className="list-col-year">Year</span>
-              <span className="list-col-rating">Rating</span>
-              <span className="list-col-fav">Fav</span>
-              {(gameSets.length > 0 || gameSetId) && <span className="list-col-addset-header"></span>}
-            </div>
-            {games.map(game => (
-              <GameListItem
-                key={game.id}
-                game={game}
-                onSelect={onSelectGame}
-                onRating={r => handleRating(game, r)}
-                onFavourite={() => handleFavourite(game)}
-                onAddToGameSet={onAddToGameSet}
-                onRemoveFromGameSet={gameSetId ? onRemoveFromGameSet : undefined}
-                gameSets={gameSets}
-                gameSetId={gameSetId}
-                listImageMode={listImageMode}
-              />
+          <Button size="small" variant="outlined" onClick={() => setBatchShow(!batchShow)}>
+            {batchShow ? 'Hide Scrape' : 'Batch Scrape'}
+          </Button>
+        </Box>
+
+        {collectionVersions?.length > 1 && (
+          <Box sx={{ display: 'flex', gap: 0.5, mt: 1, flexWrap: 'wrap' }}>
+            <Chip label="All versions" size="small" color={!selectedVersionId ? 'primary' : 'default'}
+              onClick={() => setSelectedVersionId(null)} />
+            {collectionVersions.map(v => (
+              <Chip key={v.id} label={`${v.version} (${v.game_count})`} size="small"
+                color={selectedVersionId === v.id ? 'primary' : 'default'}
+                onClick={() => setSelectedVersionId(v.id)} />
             ))}
-          </div>
-        ) : (
-          <div className={`game-grid ${isLarge ? 'game-grid-large' : ''}`}>
-            {games.map(game => (
-              <GameGridCard
-                key={game.id}
-                game={game}
-                onSelect={onSelectGame}
-                onRating={r => handleRating(game, r)}
-                onFavourite={() => handleFavourite(game)}
-                onAddToGameSet={onAddToGameSet}
-                onRemoveFromGameSet={gameSetId ? onRemoveFromGameSet : undefined}
-                gameSets={gameSets}
-                gameSetId={gameSetId}
-                viewMode={viewMode}
-                listImageMode={listImageMode}
-              />
-            ))}
-          </div>
+          </Box>
         )}
-        {hasMore && <div ref={sentinelRef} className="scroll-sentinel" />}
-        {loading && games.length > 0 && <div className="loading-more"><div className="loading-spinner" /></div>}
-      </div>
-    </div>
-  )
+
+        {batchShow && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1, p: 1, bgcolor: 'action.hover', borderRadius: 1 }}>
+            <Typography variant="body2">{activeView === 'collection' ? 'Scrape all unscraped' : `Scrape ${games.filter(g => !g.synopsis || batchOverwrite).length} games`}</Typography>
+            <FormControlLabel control={<Checkbox checked={batchOverwrite} onChange={e => setBatchOverwrite(e.target.checked)} />} label="Overwrite" />
+            <Button size="small" variant="contained" onClick={startBatchScrape} disabled={batchRunning}>
+              {batchRunning ? <CircularProgress size={16} /> : 'Scrape'}
+            </Button>
+            {batchResult && (
+              <Typography variant="caption">✓ {batchResult.scraped} · ⏭ {batchResult.skipped} · ✗ {batchResult.failed}</Typography>
+            )}
+          </Box>
+        )}
+      </Box>
+
+      <Box sx={{ flex: 1, overflow: 'auto', px: 2, pb: 2 }}>
+        {loading && games.length === 0 ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>
+        ) : games.length === 0 ? (
+          <Box sx={{ textAlign: 'center', py: 8, color: 'text.secondary' }}>
+            <Typography variant="h5">No games found</Typography>
+          </Box>
+        ) : viewMode === 'list' ? (
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ width: 50 }}></TableCell>
+                  <TableCell sx={{ cursor: 'pointer' }} onClick={() => handleArr('name')}>
+                    Name {sortField === 'name' && (sortOrder === 'asc' ? <ArrowUpward fontSize="inherit" /> : <ArrowDownward fontSize="inherit" />)}
+                  </TableCell>
+                  <TableCell>Platform</TableCell>
+                  <TableCell sx={{ cursor: 'pointer' }} onClick={() => handleArr('year')}>
+                    Year {sortField === 'year' && (sortOrder === 'asc' ? <ArrowUpward fontSize="inherit" /> : <ArrowDownward fontSize="inherit" />)}
+                  </TableCell>
+                  <TableCell>Rating</TableCell>
+                  <TableCell>Fav</TableCell>
+                  {gameSets?.length > 0 && <TableCell>Set</TableCell>}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {games.map(g => (
+                  <GameListItem key={g.id} game={g} onSelect={(game) => navigate(`${location.pathname}/game/${game.id}`)}
+                    onRating={(id, patch) => updateGame(id, patch)}
+                    onFavourite={(id, patch) => updateGame(id, patch)}
+                    onAddToGameSet={addToGameSet} onRemoveFromGameSet={removeFromGameSet}
+                    gameSets={gameSets} listImageMode={listImageMode} />
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        ) : (
+          <Grid container spacing={1.5}>
+            {games.map(g => (
+              <Grid item key={g.id}
+                xs={viewMode === 'large' ? 6 : 4} sm={viewMode === 'large' ? 4 : 3}
+                md={viewMode === 'large' ? 3 : 2} lg={viewMode === 'large' ? 2 : 1.5}>
+                <GameGridCard game={g} onSelect={(game) => navigate(`${location.pathname}/game/${game.id}`)}
+                  onRating={(id, patch) => updateGame(id, patch)}
+                  onFavourite={(id, patch) => updateGame(id, patch)}
+                  onAddToGameSet={addToGameSet} onRemoveFromGameSet={removeFromGameSet}
+                  gameSets={gameSets} listImageMode={listImageMode} onPlay={playGame} />
+              </Grid>
+            ))}
+          </Grid>
+        )}
+
+        <div ref={sentinelRef} />
+        {loading && games.length > 0 && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', p: 2 }}><CircularProgress size={24} /></Box>
+        )}
+      </Box>
+
+      {emulatorGame && <EmulatorModal game={emulatorGame} onClose={() => setEmulatorGame(null)} />}
+    </Box>
+  );
 }

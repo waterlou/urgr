@@ -1,117 +1,56 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import {
+  Box, Typography, Chip, Button, LinearProgress, Select, MenuItem,
+  FormControl, InputLabel,
+} from '@mui/material';
+import { Cancel as CancelIcon } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 import { useOperations } from '../hooks/useOperations.js';
-import { cancelOperation, getOperations, getCollections } from '../api.js';
-
-function getAge(dateStr) {
-  if (!dateStr) return '';
-  const d = new Date(dateStr.replace(' ', 'T'));
-  const now = new Date();
-  const seconds = Math.floor((now - d) / 1000);
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
-
-const TYPE_ICONS = {
-  build: 'build',
-  scan: 'search',
-  scrape: 'auto_awesome',
-  import: 'download',
-  export: 'upload',
-  verify: 'check_circle',
-};
-
-const TYPE_LABELS = {
-  build: 'Build',
-  scan: 'Scan',
-  scrape: 'Scrape',
-  import: 'Import',
-  export: 'Export',
-  verify: 'Verify',
-};
-
-function statusBadge(status) {
-  const cls = status === 'running' ? 'badge-warn' : status === 'done' ? 'badge-ok' : status === 'failed' ? 'badge-err' : 'badge-muted';
-  return <span className={`rom-status rom-status-${cls.replace('badge-', '')}`}>{status}</span>;
-}
+import { cancelOperation } from '../api.js';
+import { useCollections } from '../contexts/CollectionContext.jsx';
 
 export default function OperationsPage() {
-  const operations = useOperations();
-  const [collections, setCollections] = useState([]);
+  const navigate = useNavigate();
+  const { collections } = useCollections();
   const [filter, setFilter] = useState('');
-
-  useEffect(() => {
-    getCollections().then(setCollections).catch(() => {});
-  }, []);
-
-  const colMap = Object.fromEntries(collections.map(c => [c.id, c.name]));
-  const filtered = filter ? operations.filter(o => o.collection_id === parseInt(filter)) : operations;
-  const running = operations.filter(o => o.status === 'running' || o.status === 'pending');
-  const completed = operations.filter(o => o.status === 'done');
-  const failed = operations.filter(o => o.status === 'failed' || o.status === 'cancelled');
+  const operations = useOperations(filter || undefined);
 
   return (
-    <div className="browser">
-      <div className="browser-header">
-        <div className="browser-title-row">
-          <h1 className="browser-title">Operations</h1>
-          <span className="browser-count">{running.length} running</span>
-        </div>
-      </div>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', p: 2 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+        <Typography variant="h6" fontWeight={600}>Operations</Typography>
+        <FormControl size="small" sx={{ minWidth: 200 }}>
+          <InputLabel>Collection</InputLabel>
+          <Select value={filter} onChange={e => setFilter(e.target.value)} label="Collection">
+            <MenuItem value="">All</MenuItem>
+            {collections.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
+          </Select>
+        </FormControl>
+      </Box>
 
-      <div className="browser-content">
-        <div style={{display:'flex', gap:8, marginBottom:16, flexWrap:'wrap'}}>
-          <select className="build-select" value={filter} onChange={e => setFilter(e.target.value)}>
-            <option value="">All collections</option>
-            {collections.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-        </div>
-
+      <Box sx={{ flex: 1, overflow: 'auto' }}>
         {operations.length === 0 ? (
-          <div className="info-box">No operations</div>
-        ) : (
-          <div style={{display:'flex', flexDirection:'column', gap:8}}>
-            {filtered.map(op => (
-              <div key={op.id} className="info-box" style={{display:'flex', alignItems:'center', gap:12, padding:'12px 16px'}}>
-                <span className="icon" style={{fontSize:20, opacity:0.6}}>{TYPE_ICONS[op.type] || 'settings'}</span>
-                <div style={{flex:1, minWidth:0}}>
-                  <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:4}}>
-                    <strong>{TYPE_LABELS[op.type] || op.type}</strong>
-                    {op.collection_id && <span className="text-muted" style={{fontSize:12}}>{colMap[op.collection_id] || `Collection #${op.collection_id}`}</span>}
-                    {statusBadge(op.status)}
-                    <span className="text-muted" style={{fontSize:11}}>{getAge(op.created_at)}</span>
-                  </div>
-                  {(op.status === 'running' || op.status === 'pending') && (
-                    <div className="progress-bar-wrapper" style={{minWidth:120, height:16}}>
-                      <div className="progress-bar" style={{width:`${op.progress_pct}%`}} />
-                      <span className="progress-label">{op.progress_msg || `${op.progress_pct}%`}</span>
-                    </div>
-                  )}
-                  {op.error && <div style={{color:'#f44336', fontSize:12, marginTop:2}}>{op.error}</div>}
-                  {op.status === 'done' && op.result && (
-                    <div style={{fontSize:12, color:'var(--text-muted)', marginTop:2}}>
-                      {op.type === 'build' && `${op.result.matched || 0} matched, ${op.result.missing || 0} missing`}
-                      {op.type === 'scrape' && `${op.result.scraped || 0} scraped, ${op.result.skipped || 0} skipped, ${op.result.failed || 0} failed`}
-                      {op.type === 'import' && `${op.result.total_games || 0} games imported`}
-                      {op.type === 'scan' && `${op.result.exists || 0} exist, ${op.result.missing || 0} missing`}
-                    </div>
-                  )}
-                </div>
-                {(op.status === 'running' || op.status === 'pending') && (
-                  <button className="btn btn-sm btn-danger" onClick={() => cancelOperation(op.id)} title="Cancel">
-                    <span className="icon icon-sm">close</span>
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+          <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>No operations</Typography>
+        ) : operations.map(op => (
+          <Box key={op.id} sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 1.5, mb: 1, borderRadius: 1, bgcolor: 'action.hover' }}>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="body2" fontWeight={600}>{op.type}</Typography>
+              <Typography variant="caption" color="text.secondary">{op.collection_name || ''} · {op.age || ''}</Typography>
+            </Box>
+            <Chip label={op.status} size="small" color={
+              op.status === 'running' ? 'primary' : op.status === 'completed' ? 'success' : op.status === 'failed' ? 'error' : 'default'
+            } />
+            {op.progress != null && (
+              <LinearProgress variant="determinate" value={op.progress} sx={{ width: 100 }} />
+            )}
+            {op.result && <Typography variant="caption">{op.result}</Typography>}
+            {(op.status === 'running' || op.status === 'pending') && (
+              <Button size="small" color="error" startIcon={<CancelIcon />}
+                onClick={() => cancelOperation(op.id).catch(() => {})}>Cancel</Button>
+            )}
+          </Box>
+        ))}
+      </Box>
+    </Box>
   );
 }

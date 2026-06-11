@@ -1,111 +1,79 @@
-import { useState, useEffect } from 'react'
-import { createPortal } from 'react-dom'
-import { getEmulatorCore } from '../platformEmulator.js'
-import { playUrl } from '../api.js'
-
-const EJS_CDN = 'https://cdn.emulatorjs.org/nightly/data/'
-
-let scriptEl = null
-
-function loadScript() {
-  return new Promise((resolve, reject) => {
-    if (scriptEl) { resolve(); return }
-    const s = document.createElement('script')
-    s.src = EJS_CDN + 'loader.js'
-    s.onload = () => resolve()
-    s.onerror = () => reject(new Error('Failed to load EmulatorJS'))
-    document.head.appendChild(s)
-    scriptEl = s
-  })
-}
+import { useState, useEffect, useRef } from 'react';
+import {
+  Dialog, AppBar, Toolbar, IconButton, Typography, Box, CircularProgress,
+} from '@mui/material';
+import { Close as CloseIcon, ArrowBack } from '@mui/icons-material';
+import { createPortal } from 'react-dom';
+import { getEmulatorCore, isEmulatorSupported } from '../platformEmulator.js';
+import { recordPlay } from '../api.js';
 
 export default function EmulatorModal({ game, onClose }) {
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const emuRef = useRef(null);
+  const scriptRef = useRef(null);
+  const recordedRef = useRef(false);
+
+  const core = getEmulatorCore(game.platform, game.source);
+  const supported = isEmulatorSupported(game.platform, game.source);
 
   useEffect(() => {
-    let destroyed = false
+    if (!supported || !core) { setError(true); setLoading(false); return; }
+    if (typeof window.EJS_player !== 'undefined') return;
 
-    async function init() {
-      try {
-        const core = getEmulatorCore(game.platform, game.source)
-        if (!core) {
-          setError(`Platform "${game.platform}" is not supported by EmulatorJS`)
-          setLoading(false)
-          return
-        }
+    recordedRef.current = false;
+    const script = document.createElement('script');
+    script.src = `https://www.emulatorjs.com/emulator.js`;
+    script.async = true;
+    script.onload = () => { setLoading(false); };
+    script.onerror = () => { setError(true); setLoading(false); };
+    document.body.appendChild(script);
+    scriptRef.current = script;
 
-        window.EJS_player = '#emulator-game'
-        window.EJS_core = core
-        window.EJS_gameName = game.name
-        window.EJS_gameUrl = playUrl(game.id)
-        window.EJS_color = '#1a1a2e'
-        window.EJS_fullscreenOnExit = false
-        window.EJS_startOnLoaded = true
-        window.EJS_volume = 1.0
-        window.EJS_lang = 'en'
-        window.EJS_pathtodata = EJS_CDN
-
-        await loadScript()
-
-        if (!destroyed) setLoading(false)
-      } catch (err) {
-        if (!destroyed) { setError(err.message); setLoading(false) }
+    window.ejsOnLoad = () => {
+      if (emuRef.current) {
+        const ejs = new window.EJS_player(emuRef.current);
+        ejs.gameUrl = `/api/games/${game.id}/play`;
+        ejs.core = core;
+        ejs.start();
       }
-    }
-
-    init()
+    };
 
     return () => {
-      destroyed = true
-      // Stop emulator audio and pause main loop
-      try {
-        const emu = window.EJS_emulator
-        if (emu) {
-          const al = emu.Module?.AL?.currentCtx
-          if (al?.audioCtx) al.audioCtx.close().catch(() => {})
-          if (emu.Module?.pauseMainLoop) emu.Module.pauseMainLoop()
-        }
-      } catch {}
-      const el = document.getElementById('emulator-game')
-      if (el) el.innerHTML = ''
-    }
-  }, [game])
+      if (scriptRef.current?.parentNode) scriptRef.current.parentNode.removeChild(scriptRef.current);
+      const ejsEl = emuRef.current;
+      if (ejsEl) ejsEl.innerHTML = '';
+    };
+  }, [game?.id, core, supported]);
 
   useEffect(() => {
-    function handleKey(e) {
-      if (e.key === 'Escape') onClose?.()
+    if (!loading && !error && !recordedRef.current) {
+      recordedRef.current = true;
+      recordPlay(game.id).catch(() => {});
     }
-    window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
-  }, [onClose])
+  }, [loading, error, game?.id]);
+
+  const title = game?.name || game?.title || 'Game';
 
   return createPortal(
-    <div className="emulator-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose?.() }}>
-      <div className="emulator-modal">
-        <div className="emulator-header">
-          <span className="emulator-title">{game.name}</span>
-          <button className="emulator-close" onClick={onClose}>
-            <span className="icon">close</span>
-          </button>
-        </div>
-        <div className="emulator-body">
-          {loading && !error && (
-            <div className="emulator-loading">
-              <div className="loading-spinner" />
-              <p>Loading emulator...</p>
-            </div>
-          )}
-          {error && (
-            <div className="emulator-error">
-              <span className="icon" style={{ fontSize: 48, opacity: 0.3 }}>error</span>
-              <p>{error}</p>
-            </div>
-          )}
-          <div id="emulator-game" className="emulator-game-container" />
-        </div>
-      </div>
-    </div>,
+    <Dialog open fullScreen onClose={onClose}>
+      <AppBar position="static" color="primary" sx={{ height: 48 }}>
+        <Toolbar variant="dense">
+          <IconButton edge="start" color="inherit" onClick={onClose}><ArrowBack /></IconButton>
+          <Typography sx={{ ml: 2, flex: 1 }} noWrap>{title}</Typography>
+          <IconButton color="inherit" onClick={onClose}><CloseIcon /></IconButton>
+        </Toolbar>
+      </AppBar>
+      <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#000', position: 'relative' }}>
+        {loading && <CircularProgress color="primary" />}
+        {error && (
+          <Typography color="error">
+            {supported ? 'Failed to load emulator' : `Emulator not supported for ${game.platform || 'this platform'}`}
+          </Typography>
+        )}
+        <Box ref={emuRef} id="emulator-game" sx={{ width: '100%', height: '100%', display: loading || error ? 'none' : 'block' }} />
+      </Box>
+    </Dialog>,
     document.body
-  )
+  );
 }

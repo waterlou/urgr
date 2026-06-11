@@ -1,207 +1,127 @@
-import { useState, useEffect } from 'react'
-import { getSettings, saveSettings, testIgdbConnection, testTgdbConnection } from '../api.js'
+import { useState, useEffect } from 'react';
+import {
+  Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField,
+  Tabs, Tab, Box, Typography, CircularProgress, Alert, Select, MenuItem,
+  FormControl, InputLabel,
+} from '@mui/material';
+import {
+  getSettings, saveSettings, testIgdbConnection, testTgdbConnection,
+} from '../api.js';
+import { useUI } from '../contexts/UIContext.jsx';
 
-const PROVIDER_TABS = [
-  {
-    id: 'screenscraper',
-    label: 'ScreenScraper',
-    fields: [
-      { key: 'SS_DEVID', label: 'Dev ID', type: 'text', required: true },
-      { key: 'SS_DEVPASSWORD', label: 'Dev Password', type: 'password', required: true },
-      { key: 'SS_USERNAME', label: 'Username', type: 'text' },
-      { key: 'SS_PASSWORD', label: 'Password', type: 'password' },
-    ],
-  },
-  {
-    id: 'igdb',
-    label: 'IGDB (Twitch)',
-    fields: [
-      { key: 'IGDB_CLIENT_ID', label: 'Client ID', type: 'text', required: true },
-      { key: 'IGDB_CLIENT_SECRET', label: 'Client Secret', type: 'password', required: true },
-    ],
-    instructions: (
-      <p className="settings-hint">
-        Get your credentials from the{' '}
-        <a href="https://dev.twitch.tv/console/apps" target="_blank" rel="noopener noreferrer">Twitch Developer Portal</a>.
-        Create an app, then copy the <strong>Client ID</strong> and generate a <strong>Client Secret</strong>.
-      </p>
-    ),
-  },
-  {
-    id: 'thegamesdb',
-    label: 'TheGamesDB',
-    fields: [
-      { key: 'TGDB_API_KEY', label: 'API Key', type: 'password', placeholder: 'Default key active — enter to override' },
-    ],
-  },
-  {
-    id: 'ia',
-    label: 'Internet Archive',
-    fields: [
-      { key: 'IA_USERNAME', label: 'Email', type: 'text', required: true },
-      { key: 'IA_PASSWORD', label: 'Password', type: 'password', required: true },
-    ],
-    instructions: (
-      <p className="settings-hint">
-        Required for downloading access-restricted ROM files from Internet Archive.
-        Enter your <strong>archive.org</strong> email and password.
-        Saved credentials are loaded on server startup.
-      </p>
-    ),
-  },
-]
-
-const SOURCE_OPTIONS = [
-  { value: '', label: 'All providers (no default)' },
-  { value: 'thegamesdb', label: 'TheGamesDB' },
-  { value: 'screenscraper', label: 'ScreenScraper' },
-  { value: 'igdb', label: 'IGDB' },
-]
-
-export default function Settings({ onClose }) {
-  const [values, setValues] = useState({ SCRAPER_SOURCE: 'thegamesdb' })
-  const [saving, setSaving] = useState(false)
-  const [message, setMessage] = useState(null)
-  const [activeTab, setActiveTab] = useState('screenscraper')
-  const [testResults, setTestResults] = useState({})
+export default function Settings() {
+  const { closeSettings } = useUI();
+  const [activeTab, setActiveTab] = useState(0);
+  const [values, setValues] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState(null);
+  const [testResults, setTestResults] = useState({});
 
   useEffect(() => {
-    getSettings().then(data => {
-      setValues(prev => ({ ...prev, ...data }))
-    }).catch(e => {
-      console.error('Settings load error:', e)
-      setMessage({ type: 'error', text: 'Failed to load settings. Make sure the server is running with the latest code. (' + e.message + ')' })
-    })
-  }, [])
+    getSettings().then(setValues).catch(() => {});
+  }, []);
 
-  function setValue(key, val) {
-    setValues(prev => ({ ...prev, [key]: val }))
-  }
-
-  async function handleTest() {
-    setTestResults(prev => ({ ...prev, [activeTab]: { testing: true } }))
-    try {
-      let result
-      if (activeTab === 'igdb') {
-        result = await testIgdbConnection(values.IGDB_CLIENT_ID, values.IGDB_CLIENT_SECRET)
-      } else if (activeTab === 'thegamesdb') {
-        result = await testTgdbConnection(values.TGDB_API_KEY)
-      }
-      setTestResults(prev => ({ ...prev, [activeTab]: { ok: result.ok, error: result.error || null } }))
-    } catch (e) {
-      setTestResults(prev => ({ ...prev, [activeTab]: { ok: false, error: e.message } }))
-    }
+  function set(field, v) {
+    setValues(p => ({ ...p, [field]: v }));
   }
 
   async function handleSave() {
-    setSaving(true)
-    setMessage(null)
+    setSaving(true); setMessage(null);
     try {
-      await saveSettings(values)
-      setMessage({ type: 'success', text: 'Settings saved.' })
+      await saveSettings(values);
+      setMessage({ severity: 'success', text: 'Settings saved' });
     } catch (e) {
-      setMessage({ type: 'error', text: 'Failed to save: ' + e.message })
-    } finally {
-      setSaving(false)
+      setMessage({ severity: 'error', text: e.message });
+    } finally { setSaving(false); }
+  }
+
+  async function testIGDB() {
+    try {
+      await testIgdbConnection(values.IGDB_CLIENT_ID, values.IGDB_CLIENT_SECRET);
+      setTestResults(p => ({ ...p, igdb: 'ok' }));
+    } catch (e) {
+      setTestResults(p => ({ ...p, igdb: e.message }));
     }
   }
 
-  const activeProvider = PROVIDER_TABS.find(t => t.id === activeTab)
-  const testResult = testResults[activeTab]
+  async function testTGDB() {
+    try {
+      await testTgdbConnection(values.TGDB_API_KEY);
+      setTestResults(p => ({ ...p, tgdb: 'ok' }));
+    } catch (e) {
+      setTestResults(p => ({ ...p, tgdb: e.message }));
+    }
+  }
 
   return (
-    <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-panel" onClick={e => e.stopPropagation()}>
-        <div className="settings-header">
-          <h2>Settings</h2>
-          <button className="settings-close-btn" onClick={onClose}><span className="icon">close</span></button>
-        </div>
+    <Dialog open maxWidth="sm" fullWidth onClose={closeSettings}>
+      <DialogTitle>Settings</DialogTitle>
+      <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)} sx={{ px: 2 }}>
+        <Tab label="ScreenScraper" />
+        <Tab label="IGDB" />
+        <Tab label="TheGamesDB" />
+        <Tab label="Internet Archive" />
+      </Tabs>
+      <DialogContent>
+        {message && <Alert severity={message.severity} sx={{ mb: 2 }}>{message.text}</Alert>}
 
-        <div className="settings-tabs">
-          {PROVIDER_TABS.map(tab => (
-            <button
-              key={tab.id}
-              className={`settings-tab ${activeTab === tab.id ? 'active' : ''}`}
-              onClick={() => { setActiveTab(tab.id); setTestResults(prev => ({ ...prev, [tab.id]: undefined })) }}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        {activeTab === 0 && (
+          <Box>
+            <TextField label="Dev ID" fullWidth value={values.SS_DEVID || ''} onChange={e => set('SS_DEVID', e.target.value)} sx={{ mb: 2 }} />
+            <TextField label="Dev Password" fullWidth type="password" value={values.SS_DEVPASSWORD || ''} onChange={e => set('SS_DEVPASSWORD', e.target.value)} sx={{ mb: 2 }} />
+            <TextField label="Username (optional)" fullWidth value={values.SS_USERNAME || ''} onChange={e => set('SS_USERNAME', e.target.value)} sx={{ mb: 2 }} />
+            <TextField label="Password (optional)" fullWidth type="password" value={values.SS_PASSWORD || ''} onChange={e => set('SS_PASSWORD', e.target.value)} sx={{ mb: 2 }} />
+          </Box>
+        )}
 
-        <div className="settings-body">
-          {activeProvider && (
-            <div className="settings-provider-fields">
-              {activeProvider.instructions}
-              {activeProvider.fields.map(field => (
-                <label key={field.key} className="settings-field">
-                  <span className="settings-field-label">
-                    {field.label}
-                    {field.required && <span className="settings-required">*</span>}
-                  </span>
-                  <input
-                    type={field.type}
-                    value={values[field.key] || ''}
-                    onChange={e => setValue(field.key, e.target.value)}
-                    placeholder={field.placeholder || (field.required ? `Enter ${field.label}` : `Optional: ${field.label}`)}
-                    className="settings-input"
-                  />
-                </label>
-              ))}
-              {(activeTab === 'igdb' || activeTab === 'thegamesdb') && (
-                <div className="settings-test-row">
-                  <button className="settings-btn settings-btn-secondary" onClick={handleTest} disabled={testResult?.testing}>
-                    {testResult?.testing ? 'Testing...' : 'Test Connection'}
-                  </button>
-                  {testResult && !testResult.testing && (
-                    <span className={`settings-test-result ${testResult.ok ? 'success' : 'error'}`}>
-                      {testResult.ok ? <><span className="icon">check_circle</span> Connected</> : <><span className="icon">error</span> {testResult.error}</>}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+        {activeTab === 1 && (
+          <Box>
+            <TextField label="Client ID" fullWidth value={values.IGDB_CLIENT_ID || ''} onChange={e => set('IGDB_CLIENT_ID', e.target.value)} sx={{ mb: 2 }} />
+            <TextField label="Client Secret" fullWidth type="password" value={values.IGDB_CLIENT_SECRET || ''} onChange={e => set('IGDB_CLIENT_SECRET', e.target.value)} sx={{ mb: 2 }} />
+            <Button variant="outlined" onClick={testIGDB}>Test Connection</Button>
+            {testResults.igdb && (
+              <Typography variant="caption" color={testResults.igdb === 'ok' ? 'success.main' : 'error'} sx={{ ml: 1 }}>
+                {testResults.igdb === 'ok' ? 'Connected' : testResults.igdb}
+              </Typography>
+            )}
+          </Box>
+        )}
 
-          {activeTab !== 'ia' && (
-            <div className="settings-section">
-              <h3>Default Scraper Source</h3>
-              <p className="settings-hint">
-                Sets the <code>SCRAPER_SOURCE</code> environment variable used by scraper-cli
-                when <code>--source</code> is not provided.
-              </p>
-              <select
-                className="settings-select"
-                value={values['SCRAPER_SOURCE'] || ''}
-                onChange={e => setValue('SCRAPER_SOURCE', e.target.value)}
-              >
-                {SOURCE_OPTIONS.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </div>
-          )}
+        {activeTab === 2 && (
+          <Box>
+            <TextField label="API Key" fullWidth value={values.TGDB_API_KEY || ''} onChange={e => set('TGDB_API_KEY', e.target.value)} sx={{ mb: 2 }} />
+            <Button variant="outlined" onClick={testTGDB}>Test Connection</Button>
+            {testResults.tgdb && (
+              <Typography variant="caption" color={testResults.tgdb === 'ok' ? 'success.main' : 'error'} sx={{ ml: 1 }}>
+                {testResults.tgdb === 'ok' ? 'Connected' : testResults.tgdb}
+              </Typography>
+            )}
+          </Box>
+        )}
 
-          {message && (
-            <div className={`settings-message ${message.type}`}>
-              {message.text}
-            </div>
-          )}
-        </div>
+        {activeTab === 3 && (
+          <Box>
+            <TextField label="Email" fullWidth value={values.IA_EMAIL || ''} onChange={e => set('IA_EMAIL', e.target.value)} sx={{ mb: 2 }} />
+            <TextField label="Password" fullWidth type="password" value={values.IA_PASSWORD || ''} onChange={e => set('IA_PASSWORD', e.target.value)} sx={{ mb: 2 }} />
+          </Box>
+        )}
 
-        <div className="settings-footer">
-          <button className="settings-btn settings-btn-secondary" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            className="settings-btn settings-btn-primary"
-            onClick={handleSave}
-            disabled={saving}
-          >
-            {saving ? 'Saving...' : 'Save'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
+        <FormControl fullWidth sx={{ mt: 2 }}>
+          <InputLabel>Default Scraper</InputLabel>
+          <Select value={values.SCRAPER_SOURCE || ''} onChange={e => set('SCRAPER_SOURCE', e.target.value)} label="Default Scraper">
+            <MenuItem value="">All</MenuItem>
+            <MenuItem value="thegamesdb">TheGamesDB</MenuItem>
+            <MenuItem value="screenscraper">ScreenScraper</MenuItem>
+            <MenuItem value="igdb">IGDB</MenuItem>
+          </Select>
+        </FormControl>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={closeSettings}>Cancel</Button>
+        <Button variant="contained" onClick={handleSave} disabled={saving}>
+          {saving ? <CircularProgress size={16} /> : 'Save'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
 }
