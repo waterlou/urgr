@@ -8,7 +8,7 @@ import {
 
 const CollectionContext = createContext(null);
 
-const PAGE_SIZE = 500;
+const PAGE_SIZE = 120;
 
 export function CollectionProvider({ children }) {
   const [collections, setCollections] = useState([]);

@@ -28,6 +28,7 @@
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.17.0",
+    "react-window": "^2.2.7",
     "sql.js": "^1.11.0"
   },
   "devDependencies": {

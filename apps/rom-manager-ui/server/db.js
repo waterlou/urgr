@@ -64,8 +64,11 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 
 CREATE INDEX IF NOT EXISTS idx_game_entries_version ON game_entries(version_id);
+CREATE INDEX IF NOT EXISTS idx_game_entries_version_name_region ON game_entries(version_id, name, region);
+CREATE INDEX IF NOT EXISTS idx_game_entries_cloneof ON game_entries(cloneof);
 CREATE INDEX IF NOT EXISTS idx_rom_entries_game ON rom_entries(game_entry_id);
 CREATE INDEX IF NOT EXISTS idx_rom_entries_sha1 ON rom_entries(sha1);
+CREATE INDEX IF NOT EXISTS idx_rom_entries_crc32 ON rom_entries(crc32);
 
 CREATE TABLE IF NOT EXISTS collections (
     id          INTEGER PRIMARY KEY,
@@ -121,6 +124,7 @@ CREATE TABLE IF NOT EXISTS game_state (
 
 CREATE INDEX IF NOT EXISTS idx_game_state_favourite ON game_state(favourite);
 CREATE INDEX IF NOT EXISTS idx_game_state_available ON game_state(available);
+CREATE INDEX IF NOT EXISTS idx_game_state_entry ON game_state(game_entry_id);
 
 CREATE TABLE IF NOT EXISTS scrape_jobs (
     id              TEXT PRIMARY KEY,

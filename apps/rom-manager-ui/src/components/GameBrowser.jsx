@@ -251,7 +251,7 @@ export default function GameBrowser() {
             </Table>
           </TableContainer>
         ) : (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, contentVisibility: 'auto', containIntrinsicSize: 220 }}>
             {games.map(g => (
               <Box key={g.id} sx={{
                 width: viewMode === 'large' ? 240 : 180,
