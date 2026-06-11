@@ -560,6 +560,11 @@ export async function scrapeSingleGame(gameId) {
     const stripped = game.description.replace(/\s*\([^)]*\)\s*/g, '').trim();
     if (stripped && !candidates.includes(stripped)) candidates.push(stripped);
     if (!candidates.includes(game.description)) candidates.push(game.description);
+    // Split description on common separators (e.g., "A / B", "A ~ B")
+    const parts = game.description.split(/\s*[\/~]\s*/).map(s => s.trim()).filter(Boolean);
+    for (const part of parts) {
+      if (part.length > 2 && !candidates.includes(part)) candidates.push(part);
+    }
   }
 
   if (game.name) {
