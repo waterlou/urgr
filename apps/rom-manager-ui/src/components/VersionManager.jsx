@@ -93,7 +93,7 @@ export default function VersionManager({ collectionId, collection }) {
                 return (
                   <Chip key={ver} label={d.version || d} size="small"
                     sx={isKey ? { fontWeight: 700 } : undefined}
-                    onClick={() => handleImport(ver, isMame ? 'mame' : 'fbneo')}
+                    onClick={() => handleImport(ver, isMame ? 'MAME' : 'FBNeo')}
                     disabled={importingVer === ver}
                     icon={importingVer === ver ? <CircularProgress size={12} /> : undefined}
                   />
