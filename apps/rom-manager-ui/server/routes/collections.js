@@ -35,8 +35,12 @@ router.get('/api/collections', async (req, res) => {
   try {
     const rows = all('SELECT c.* FROM collections c ORDER BY c.name');
     const result = rows.map(c => {
-      const versions = all('SELECT version_id FROM collection_versions WHERE collection_id = ? ORDER BY version_id DESC LIMIT 1', [c.id]);
-      const vids = versions.map(v => v.version_id);
+      const versions = all(`SELECT sv.id, sv.source, sv.version, sv.dir, sv.created_at
+        FROM collection_versions cv
+        JOIN set_versions sv ON sv.id = cv.version_id
+        WHERE cv.collection_id = ?
+        ORDER BY cv.version_id DESC`, [c.id]);
+      const vids = versions.map(v => v.id);
       let total = 0;
       let available = 0;
       if (vids.length) {
@@ -44,7 +48,7 @@ router.get('/api/collections', async (req, res) => {
         total = get(`SELECT COUNT(*) as c FROM game_entries WHERE version_id IN (${ph})`, vids).c;
         available = get(`SELECT COUNT(*) as c FROM game_entries ge JOIN game_state gs ON gs.game_entry_id = ge.id WHERE ge.version_id IN (${ph}) AND gs.available = 1`, vids).c;
       }
-      return { ...c, total_games: total, available_games: available };
+      return { ...c, total_games: total, available_games: available, versions };
     });
     res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }

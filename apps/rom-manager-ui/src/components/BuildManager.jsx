@@ -9,7 +9,7 @@ import {
   subscribeJobSSE, cancelJob,
 } from '../api.js';
 
-export default function BuildManager({ collectionId, collection, versions = [] }) {
+export default function BuildManager({ collectionId, collection }) {
   const [builds, setBuilds] = useState([]);
   const [buildProgress, setBuildProgress] = useState({});
   const [buildVersion, setBuildVersion] = useState('');
@@ -64,6 +64,8 @@ export default function BuildManager({ collectionId, collection, versions = [] }
     }
   }
 
+  const versions = collection?.versions || [];
+
   return (
     <Box sx={{ mb: 3 }}>
       <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>Build</Typography>
@@ -72,7 +74,7 @@ export default function BuildManager({ collectionId, collection, versions = [] }
           <InputLabel>Version</InputLabel>
           <Select value={buildVersion} onChange={e => setBuildVersion(e.target.value)} label="Version">
             <MenuItem value="">Select...</MenuItem>
-            {versions.map(v => <MenuItem key={v.id} value={v.id}>{v.version}</MenuItem>)}
+          {Array.isArray(versions) && versions.map(v => <MenuItem key={v.id} value={v.id}>{v.version}</MenuItem>)}
           </Select>
         </FormControl>
         <Button variant="contained" onClick={handleBuild} disabled={!buildVersion || buildRunning}>

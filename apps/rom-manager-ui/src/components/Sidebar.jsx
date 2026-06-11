@@ -78,12 +78,12 @@ export default function Sidebar() {
               <ListItemIcon><Add fontSize="small" /></ListItemIcon>
               <ListItemText primary="New Collection" primaryTypographyProps={{ variant: 'body2' }} />
             </ListItemButton>
-            {collections.length === 0 && (
+            {Array.isArray(collections) && collections.length === 0 && (
               <ListItem sx={{ pl: 4 }}>
                 <ListItemText primary="No collections" primaryTypographyProps={{ variant: 'caption', color: 'text.secondary' }} />
               </ListItem>
             )}
-            {collections.map(col => (
+            {Array.isArray(collections) && collections.map(col => (
               <ListItem key={col.id} disablePadding secondaryAction={
                 <Box>
                   <IconButton size="small" onClick={() => openCollectionForm(col)}><Edit fontSize="small" /></IconButton>
@@ -112,12 +112,12 @@ export default function Sidebar() {
               <ListItemIcon><Add fontSize="small" /></ListItemIcon>
               <ListItemText primary="New Game Set" primaryTypographyProps={{ variant: 'body2' }} />
             </ListItemButton>
-            {gameSets.length === 0 && (
+            {(!Array.isArray(gameSets) || gameSets.length === 0) && (
               <ListItem sx={{ pl: 4 }}>
                 <ListItemText primary="No game sets" primaryTypographyProps={{ variant: 'caption', color: 'text.secondary' }} />
               </ListItem>
             )}
-            {gameSets.map(gs => (
+            {Array.isArray(gameSets) && gameSets.map(gs => (
               <ListItem key={gs.id} disablePadding secondaryAction={
                 <Box>
                   <IconButton size="small" onClick={() => openGameSetForm(gs)}><Edit fontSize="small" /></IconButton>
