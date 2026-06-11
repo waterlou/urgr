@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Box, Typography, TextField, InputAdornment, IconButton, ToggleButtonGroup,
   ToggleButton, Chip, Select, MenuItem, FormControl, Table, TableBody,
-  TableContainer, TableHead, TableRow, TableCell, Paper, Grid, Tooltip,
+  TableContainer, TableHead, TableRow, TableCell, Paper, Tooltip,
   Button, CircularProgress, Checkbox, FormControlLabel,
 } from '@mui/material';
 import {
@@ -245,19 +245,20 @@ export default function GameBrowser() {
             </Table>
           </TableContainer>
         ) : (
-          <Grid container spacing={1.5}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
             {games.map(g => (
-              <Grid item key={g.id}
-                xs={viewMode === 'large' ? 6 : 4} sm={viewMode === 'large' ? 4 : 3}
-                md={viewMode === 'large' ? 3 : 2} lg={viewMode === 'large' ? 2 : 1.5}>
+              <Box key={g.id} sx={{
+                width: viewMode === 'large' ? 240 : 180,
+                flexShrink: 0,
+              }}>
                 <GameGridCard game={g} onSelect={(game) => navigate(`${location.pathname}/game/${game.id}`)}
                   onRating={(id, patch) => updateGame(id, patch)}
                   onFavourite={(id, patch) => updateGame(id, patch)}
                   onAddToGameSet={addToGameSet} onRemoveFromGameSet={removeFromGameSet}
                   gameSets={gameSets} listImageMode={listImageMode} onPlay={playGame} />
-              </Grid>
+              </Box>
             ))}
-          </Grid>
+          </Box>
         )}
 
         <div ref={sentinelRef} />

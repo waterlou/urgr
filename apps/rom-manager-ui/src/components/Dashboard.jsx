@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Box, Typography, Card, CardContent, Grid, CardMedia, LinearProgress, Chip,
+  Box, Typography, Card, CardContent, CardMedia, LinearProgress, Chip,
 } from '@mui/material';
 import { useCollections } from '../contexts/CollectionContext.jsx';
 import { getRecentlyPlayed } from '../api.js';
@@ -66,13 +66,13 @@ export default function Dashboard() {
           <Typography>Create a collection to get started</Typography>
         </Box>
       ) : (
-        <Grid container spacing={2}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
           {collections.map(col => {
             const total = col.total_games || 0;
             const scanned = col.scanned_games || 0;
             const pct = total > 0 ? Math.round((scanned / total) * 100) : 0;
             return (
-              <Grid item xs={12} sm={6} md={4} lg={3} key={col.id}>
+              <Box key={col.id} sx={{ width: 280, flexShrink: 0 }}>
                 <Card sx={{ cursor: 'pointer' }} onClick={() => navigate(`/collections/${col.id}`)}>
                   <CardContent>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
@@ -90,10 +90,10 @@ export default function Dashboard() {
                     <Typography variant="caption" color="text.secondary">{pct}% available</Typography>
                   </CardContent>
                 </Card>
-              </Grid>
+              </Box>
             );
           })}
-        </Grid>
+        </Box>
       )}
 
       {emulatorGame && <EmulatorModal game={emulatorGame} onClose={() => setEmulatorGame(null)} />}

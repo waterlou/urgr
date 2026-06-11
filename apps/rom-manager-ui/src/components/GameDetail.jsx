@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  Dialog, AppBar, Toolbar, IconButton, Typography, Box, Grid, Chip, Button,
+  Dialog, AppBar, Toolbar, IconButton, Typography, Box, Chip, Button,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Paper, CircularProgress, ImageList, ImageListItem, Slide,
 } from '@mui/material';
@@ -107,8 +107,8 @@ export default function GameDetail() {
             <Typography color="error">Game not found</Typography>
           ) : (
             <>
-              <Grid container spacing={2} sx={{ mb: 2 }}>
-                <Grid item xs={12} sm={4} md={3}>
+              <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+                <Box sx={{ width: { xs: '100%', sm: 200 }, flexShrink: 0 }}>
                   <Box sx={{ position: 'relative', borderRadius: 1, overflow: 'hidden', bgcolor: 'action.hover' }}>
                     {!coverFailed && (game.covers?.[0] || game.cover_url) ? (
                       <img src={coverUrl(game.id)} alt="" style={{ width: '100%', display: 'block', cursor: 'pointer' }}
@@ -119,8 +119,8 @@ export default function GameDetail() {
                       </Box>
                     )}
                   </Box>
-                </Grid>
-                <Grid item xs={12} sm={8} md={9}>
+                </Box>
+                <Box sx={{ flex: 1, minWidth: 200 }}>
                   <Typography variant="h5" fontWeight={600} sx={{ mb: 1 }}>{game.name}</Typography>
                   <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
                     {game.source && <Chip label={game.source} size="small" />}
@@ -141,8 +141,8 @@ export default function GameDetail() {
                   {game.synopsis && (
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{game.synopsis}</Typography>
                   )}
-                </Grid>
-              </Grid>
+                </Box>
+              </Box>
 
               {game.screenshots?.length > 0 && (
                 <>
