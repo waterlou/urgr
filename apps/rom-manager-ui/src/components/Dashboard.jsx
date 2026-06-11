@@ -17,11 +17,9 @@ export default function Dashboard() {
   const [emulatorGame, setEmulatorGame] = useState(null);
 
   useEffect(() => {
-    Promise.all([
-      getRecentlyPlayed().catch(() => []),
-    ]).then(([recent]) => {
-      setRecentGames(recent || []);
-    }).catch(() => {}).finally(() => setLoading(false));
+    getRecentlyPlayed()
+      .then(data => setRecentGames(data.games || []))
+      .catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   function handleOrientation(id, w, h) {
