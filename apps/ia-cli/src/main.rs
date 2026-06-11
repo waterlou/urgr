@@ -4,7 +4,7 @@ use std::path::Path;
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|a| a == "--version") {
+    if args.len() > 1 && args[1] == "--version" {
         println!("ia-cli {}", env!("CARGO_PKG_VERSION"));
         return;
     }
