@@ -9,6 +9,7 @@ import {
 
 export default function VersionManager({ collectionId, collection }) {
   const [availableDats, setAvailableDats] = useState([]);
+  const [latestVer, setLatestVer] = useState('');
   const [importingVer, setImportingVer] = useState(null);
   const [versions, setVersions] = useState([]);
   const [showAll, setShowAll] = useState(false);
@@ -23,6 +24,7 @@ export default function VersionManager({ collectionId, collection }) {
     const slug = collection?.dataset_preset;
     if (slug) getAvailableVersions(slug).then(data => {
       setAvailableDats(data.available || []);
+      setLatestVer(data.latest || '');
     }).catch(() => {});
   }, [collection?.dataset_preset]);
 
@@ -81,25 +83,23 @@ export default function VersionManager({ collectionId, collection }) {
             {(function() {
               let items = Array.isArray(availableDats) ? availableDats : [];
               if (isMame && !showAll && items.length > 0) {
-                const latest = items.find(d => d.version === items[0]?.version);
-                const milestones = items.filter(d => MAME_MILESTONES.has(d.version));
-                const seen = new Set();
-                [...milestones, ...(latest ? [latest] : [])].forEach(d => { if (d) seen.add(d.numeric || d.version); });
-                items = items.filter(d => seen.has(d.numeric || d.version));
+                const keyVers = new Set(MAME_MILESTONES);
+                if (latestVer) keyVers.add(latestVer);
+                items = items.filter(d => keyVers.has(d.version));
               }
-              return items;
-            })().slice(0, showAll ? undefined : 10).map(d => {
-              const ver = d.id || d.version || d.numeric || d;
-              const isMilestone = MAME_MILESTONES.has(d.version);
-              return (
-              <Chip key={ver} label={d.version || d} size="small"
-                sx={isMilestone ? { fontWeight: 700 } : undefined}
-                onClick={() => handleImport(ver, isMame ? 'mame' : 'fbneo')}
-                disabled={importingVer === ver}
-                icon={importingVer === ver ? <CircularProgress size={12} /> : undefined}
-              />
-              );
-            })}
+              return items.slice(0, showAll ? undefined : 10).map(d => {
+                const ver = d.id || d.version || d.numeric || d;
+                const isKey = showAll && (MAME_MILESTONES.has(d.version) || d.version === latestVer);
+                return (
+                  <Chip key={ver} label={d.version || d} size="small"
+                    sx={isKey ? { fontWeight: 700 } : undefined}
+                    onClick={() => handleImport(ver, isMame ? 'mame' : 'fbneo')}
+                    disabled={importingVer === ver}
+                    icon={importingVer === ver ? <CircularProgress size={12} /> : undefined}
+                  />
+                );
+              });
+            })()}
             {Array.isArray(availableDats) && availableDats.length > 10 && (
               <Button size="small" onClick={() => setShowAll(!showAll)}>
                 {showAll ? 'Show less' : `Show all (${availableDats.length})`}
