@@ -58,7 +58,7 @@ router.get('/api/game-sets/:id/games', async (req, res) => {
       SELECT g.*, sv.source, sv.version, COALESCE(r.rating, 0) as rating, COALESCE(r.favourite, 0) as favourite, COALESCE(r.play_count, 0) as play_count
       FROM game_set_games gsg JOIN game_entries g ON g.id = gsg.game_entry_id
       JOIN set_versions sv ON sv.id = g.version_id
-      LEFT JOIN game_ratings r ON r.game_entry_id = g.id
+      LEFT JOIN game_state r ON r.game_entry_id = g.id
       WHERE gsg.game_set_id = ?
       ORDER BY ${sortCol} ${sortDir}, g.name LIMIT ? OFFSET ?
     `, [id, Number(limit), Number(offset)]);

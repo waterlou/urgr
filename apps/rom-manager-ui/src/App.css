@@ -1532,6 +1532,111 @@ html, body, #root {
   transition: width 0.3s;
 }
 
+/* Recently Played */
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text);
+}
+
+.recently-played {
+  margin-bottom: 28px;
+}
+
+.recently-played-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-auto-flow: dense;
+  gap: 8px;
+}
+
+.recently-played-card {
+  position: relative;
+  background: #111;
+  border: none;
+  border-left: 6px solid #000;
+  border-right: 6px solid #000;
+  cursor: pointer;
+  transition: transform 0.15s;
+  min-height: 120px;
+  border-radius: 50% / 10%;
+  overflow: visible;
+}
+
+.recently-played-card::after {
+  content: '';
+  position: absolute;
+  top: 10%;
+  bottom: 10%;
+  right: -5%;
+  left: -5%;
+  border-radius: 5% / 50%;
+  background: inherit;
+  z-index: 0;
+}
+
+.recently-played-card.landscape {
+  grid-column: span 2;
+  aspect-ratio: 13/9;
+}
+
+.recently-played-card.portrait {
+  grid-column: span 1;
+  aspect-ratio: 9/13;
+}
+
+.recently-played-card:hover {
+  transform: translateY(-2px);
+}
+
+.recently-played-img {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  z-index: 1;
+}
+
+.recently-played-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.recently-played-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 28px;
+}
+
+.recently-played-play {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.recently-played-play .icon {
+  font-size: 18px;
+}
+
 .modal-body { padding: 24px 40px 40px; }
 
 .modal-description {
@@ -1933,6 +2038,8 @@ html, body, #root {
 .ia-result-size { font-size: 11px; color: var(--text-secondary); width: 60px; text-align: right; }
 
 .btn-sm { padding: 5px 12px; font-size: 11px; }
+.btn-xs { padding: 3px 8px; font-size: 10px; }
+.btn-xs .icon { font-size: 12px; }
 
 /* Responsive */
 /* Sidebar Settings Button */

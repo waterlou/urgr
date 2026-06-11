@@ -22,6 +22,14 @@ impl RemoteZip {
         }
     }
 
+    /// Create a RemoteZip with an authenticated client (cookie jar included)
+    pub fn new_with_client(url: &str, client: reqwest::Client) -> Self {
+        Self {
+            url: url.to_string(),
+            client,
+        }
+    }
+
     /// Fetch a byte range from the remote file, following IA redirects
     async fn fetch_range(&mut self, start: u64, end: u64) -> Result<Vec<u8>, String> {
         for _ in 0..5 {

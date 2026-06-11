@@ -113,6 +113,7 @@ mod tests {
                 year: None,
                 manufacturer: None,
                 cloneof: None,
+                romof: None,
                 platform: String::new(),
                 region: None,
             },

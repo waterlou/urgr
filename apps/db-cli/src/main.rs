@@ -204,6 +204,10 @@ fn cmd_roms(db: Database, _db_path: String) -> ExitCode {
 }
 
 fn main() -> ExitCode {
+    if std::env::args().any(|a| a == "--version") {
+        println!("db-cli {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         print_usage();

@@ -2,11 +2,15 @@ import { Router } from 'express';
 import crypto, { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 import { getDb } from '../db.js';
 import { execCli } from '../cli.js';
 import { createJob, updateProgress, doneJob, failJob } from '../jobs.js';
 import { all, get, run, runNow, dbReady } from '../helpers.js';
+import { getAuth } from '../ia-auth.js';
+import { getCachedId, setCachedId } from '../ia-cache.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -97,6 +101,39 @@ router.get('/scrape-jobs', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.get('/recently-played', async (req, res) => {
+  await dbReady;
+  try {
+    const games = all(`
+      SELECT g.id, g.name, g.description, g.year, g.manufacturer, g.cloneof, g.platform,
+        MIN(g.version_id) as version_id, MIN(sv.source) as source, MIN(sv.version) as version,
+        GROUP_CONCAT(sv.source || '||' || sv.version, '||') as versions_tags,
+        MAX(CASE WHEN g.covers != '[]' THEN g.covers ELSE NULL END) as covers_json,
+        MAX(CASE WHEN g.screenshots != '[]' THEN g.screenshots ELSE NULL END) as screenshots_json,
+        rp.played_at
+      FROM recently_played rp
+      JOIN game_entries g ON g.id = rp.game_entry_id
+      JOIN set_versions sv ON sv.id = g.version_id
+      GROUP BY g.name
+      ORDER BY rp.played_at DESC
+      LIMIT 6
+    `).map(g => {
+      const tags = g.versions_tags ? g.versions_tags.split('||') : [];
+      const versions = [];
+      for (let i = 0; i < tags.length; i += 2) versions.push(tags[i + 1]);
+      delete g.versions_tags;
+      let covers = [];
+      let screenshots = [];
+      try { covers = JSON.parse(g.covers_json) || []; } catch {}
+      try { screenshots = JSON.parse(g.screenshots_json) || []; } catch {}
+      delete g.covers_json;
+      delete g.screenshots_json;
+      return { ...g, versions, covers, screenshots };
+    });
+    res.json({ games });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/:id', async (req, res) => {
   await dbReady;
   try {
@@ -107,12 +144,92 @@ router.get('/:id', async (req, res) => {
     if (typeof game.synopsis === 'string') try { game.synopsis = JSON.parse(game.synopsis); } catch {}
     const roms = all('SELECT * FROM rom_entries WHERE game_entry_id = ?', [game.id]);
     const state = get('SELECT * FROM game_state WHERE game_entry_id = ?', [game.id]);
-    // Mark which ROMs are available: downloaded via queue, or imported (game_state.available)
-    const completedDownloads = new Set(
-      all('SELECT filename FROM download_queue WHERE game_entry_id = ? AND status = ?', [game.id, 'completed']).map(r => r.filename)
-    );
+
+    // Cache: read all CRC32 values from a zip once (runs unzip -v once per zip)
+    const zipCrcCache = new Map();
+    function getZipCrcs(zipPath) {
+      if (!zipPath || !fs.existsSync(zipPath)) return null;
+      if (zipCrcCache.has(zipPath)) return zipCrcCache.get(zipPath);
+      const crcs = new Set();
+      try {
+        const output = execSync(`unzip -v "${zipPath}"`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+        for (const line of output.split('\n')) {
+          const parts = line.trim().split(/\s+/);
+          if (parts.length >= 7 && parts[6].length === 8 && /^[0-9a-f]{8}$/i.test(parts[6])) {
+            crcs.add(parts[6].toUpperCase());
+          }
+        }
+      } catch {}
+      zipCrcCache.set(zipPath, crcs);
+      return crcs;
+    }
+
+    // Find the game's zip file
+    let gameZipPath = null;
+    const dataDir = path.resolve(__dirname, '..', '..', '..', '..', 'data');
+    const col = get('SELECT c.folder, c.slug FROM collections c JOIN collection_versions cv ON cv.collection_id = c.id WHERE cv.version_id = ? LIMIT 1', [game.version_id]);
+    const colFolder = col?.folder || col?.slug;
+    if (colFolder) {
+      const romsDir = path.join(dataDir, 'roms', colFolder, game.version || '', 'roms');
+      const dirs = game.platform ? [path.join(romsDir, game.platform), romsDir] : [romsDir];
+      for (const d of dirs) {
+        if (!fs.existsSync(d)) continue;
+        for (const entry of fs.readdirSync(d)) {
+          if (entry.endsWith('.zip') && path.basename(entry, '.zip') === game.name) {
+            gameZipPath = path.join(d, entry);
+            break;
+          }
+        }
+        if (gameZipPath) break;
+      }
+    }
+
+    // Collect all needed zips for CRC checking
+    const neededZips = new Map(); // zipPath → Set of expected CRCs to check
+    if (gameZipPath) {
+      for (const rom of roms) {
+        if (!rom.crc32) continue;
+        if (rom.merge_target) {
+          // Merge ROM — find parent zip via romof chain
+          if (!neededZips.has('_parent')) {
+            let parentZip = null;
+            let currentName = game.romof || game.cloneof;
+            while (currentName && !parentZip) {
+              const pDir = path.join(dataDir, 'roms', colFolder, game.version, 'roms');
+              const pDirs = game.platform ? [path.join(pDir, game.platform), pDir] : [pDir];
+              for (const d of pDirs) {
+                if (!fs.existsSync(d)) continue;
+                for (const entry of fs.readdirSync(d)) {
+                  if (entry.endsWith('.zip') && path.basename(entry, '.zip') === currentName) {
+                    parentZip = path.join(d, entry);
+                    break;
+                  }
+                }
+                if (parentZip) break;
+              }
+              if (!parentZip) {
+                const parentGame = get('SELECT romof, cloneof FROM game_entries WHERE version_id = ? AND name = ?', [game.version_id, currentName]);
+                currentName = parentGame ? (parentGame.romof || parentGame.cloneof) : null;
+              }
+            }
+            neededZips.set('_parent', parentZip);
+          }
+        }
+      }
+    }
+
+    // Read cached CRC sets
+    const gameCrcs = gameZipPath ? getZipCrcs(gameZipPath) : null;
+    const parentPath = neededZips.get('_parent');
+    const parentCrcs = parentPath ? getZipCrcs(parentPath) : null;
+
     for (const rom of roms) {
-      rom.downloaded = completedDownloads.has(rom.filename) || state?.available === 1
+      if (!rom.crc32) { rom.downloaded = false; continue; }
+      if (rom.merge_target) {
+        rom.downloaded = gameZipPath && parentCrcs ? parentCrcs.has(rom.crc32.toUpperCase()) : false;
+      } else {
+        rom.downloaded = gameCrcs ? gameCrcs.has(rom.crc32.toUpperCase()) : false;
+      }
     }
     const clones = all(`SELECT id, name, description, cloneof, region FROM game_entries WHERE name = ? AND version_id = ? AND id != ?${game.cloneof ? ' AND cloneof IS NOT NULL' : ''} ORDER BY name`, [game.cloneof || game.name, game.version_id, game.id]);
     let parent = null;
@@ -160,9 +277,10 @@ router.get('/:id/play', async (req, res) => {
     if (colFolder1) {
       const vers = get('SELECT version FROM set_versions WHERE id = ?', [game.version_id]);
       if (vers) {
+        const romsDir = path.join(dataDir, 'roms', colFolder1, vers.version, 'roms');
         const searchDirs = [
-          path.join(dataDir, 'roms', colFolder1, vers.version, 'roms', 'arcade'),
-          path.join(dataDir, 'roms', colFolder1, vers.version, 'roms'),
+          ...(game.platform ? [path.join(romsDir, game.platform)] : []),
+          romsDir,
         ];
         for (const d of searchDirs) {
           filePath = findInDir(d)
@@ -181,7 +299,7 @@ router.get('/:id/play', async (req, res) => {
           if (idx > 0) {
             for (const v of versions.slice(0, idx).reverse()) {
               const olderDirs = [
-                path.join(dataDir, 'roms', colFolder1, v, 'roms', 'arcade'),
+                ...(game.platform ? [path.join(dataDir, 'roms', colFolder1, v, 'roms', game.platform)] : []),
                 path.join(dataDir, 'roms', colFolder1, v, 'roms'),
               ];
               for (const d of olderDirs) {
@@ -235,6 +353,84 @@ router.get('/:id/play', async (req, res) => {
     }
 
     if (!filePath) return res.status(404).json({ error: 'ROM file not found on disk' })
+
+    // For split-format zips: merge parent ROMs into the game zip
+    if (colFolder1) {
+      const vers = get('SELECT version FROM set_versions WHERE id = ?', [game.version_id]);
+      if (vers) {
+        const romsDir = path.join(dataDir, 'roms', colFolder1, vers.version, 'roms');
+        const searchDirs = [
+          ...(game.platform ? [path.join(romsDir, game.platform)] : []),
+          romsDir,
+        ];
+
+        // Collect parent zips for merge: follow romof chain, or find via merge_target
+        const parentZips = [];
+
+        // Method 1: Follow romof (or cloneof fallback) chain
+        let currentRef = game.romof || game.cloneof;
+        while (currentRef) {
+          let found = null;
+          for (const d of searchDirs) {
+            found = findInDir(d);
+            if (found && path.basename(found, '.zip') === currentRef) break;
+            found = null;
+          }
+          if (!found) break;
+          parentZips.push(found);
+          const parentGame = get('SELECT romof, cloneof FROM game_entries WHERE version_id = ? AND name = ?', [game.version_id, currentRef]);
+          currentRef = parentGame ? (parentGame.romof || parentGame.cloneof) : null;
+        }
+
+        // Method 2: No romof chain but has merge_target ROMs — find parent by content
+        if (parentZips.length === 0) {
+          const mergeTargets = all('SELECT DISTINCT merge_target FROM rom_entries WHERE game_entry_id = ? AND merge_target IS NOT NULL', [game.id]);
+          if (mergeTargets.length > 0) {
+            const targetNames = new Set(mergeTargets.map(r => r.merge_target));
+            for (const d of searchDirs) {
+              if (!fs.existsSync(d)) continue;
+              for (const entry of fs.readdirSync(d)) {
+                if (!entry.endsWith('.zip') || entry === path.basename(filePath)) continue;
+                try {
+                  // Check if this zip contains any merge target entry
+                  const listing = execSync(`unzip -l "${path.join(d, entry)}"`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+                  const lines = listing.split('\n').filter(l => l.includes('  '));
+                  const hasMatch = lines.some(l => {
+                    const parts = l.trim().split(/\s+/);
+                    const fname = parts[parts.length - 1];
+                    return targetNames.has(fname);
+                  });
+                  if (hasMatch) {
+                    parentZips.push(path.join(d, entry));
+                  }
+                } catch {}
+              }
+            }
+          }
+        }
+
+        if (parentZips.length > 0) {
+          const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rom-'));
+          const mergedPath = path.join(tmpDir, path.basename(filePath));
+          try {
+            const mergeDir = path.join(tmpDir, 'merged');
+            fs.mkdirSync(mergeDir, { recursive: true });
+            // Extract parents in chain order (root first, then closer)
+            for (const pz of parentZips.reverse()) {
+              execSync(`unzip -o "${pz}" -d "${mergeDir}"`, { stdio: 'ignore' });
+            }
+            // Extract game zip last (overrides)
+            execSync(`unzip -o "${filePath}" -d "${mergeDir}"`, { stdio: 'ignore' });
+            // Re-zip
+            execSync(`cd "${mergeDir}" && zip -X -r "${mergedPath}" .`, { stdio: 'ignore' });
+            filePath = mergedPath;
+            res.on('finish', () => { try { fs.rmSync(tmpDir, { recursive: true }); } catch {} });
+          } catch (e) {
+            try { fs.rmSync(tmpDir, { recursive: true }); } catch {}
+          }
+        }
+      }
+    }
 
     const ext = path.extname(filePath).toLowerCase()
     const contentTypes = {
@@ -569,6 +765,25 @@ router.put('/:id/rating', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.post('/:id/play', async (req, res) => {
+  await dbReady;
+  try {
+    const game = get('SELECT id FROM game_entries WHERE id = ?', [req.params.id]);
+    if (!game) return res.status(404).json({ error: 'Game not found' });
+    run("INSERT OR REPLACE INTO recently_played (game_entry_id, played_at) VALUES (?, datetime('now'))", [req.params.id]);
+    run(`DELETE FROM recently_played WHERE game_entry_id NOT IN (
+      SELECT game_entry_id FROM recently_played ORDER BY played_at DESC LIMIT 6
+    )`);
+    const existing = get('SELECT game_entry_id FROM game_state WHERE game_entry_id = ?', [req.params.id]);
+    if (existing) {
+      run("UPDATE game_state SET play_count = play_count + 1, updated_at = datetime('now') WHERE game_entry_id = ?", [req.params.id]);
+    } else {
+      run("INSERT INTO game_state (game_entry_id, play_count) VALUES (?, 1)", [req.params.id]);
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/:id/cover', async (req, res) => {
   await dbReady;
   try {
@@ -613,15 +828,14 @@ router.get('/:id/cover', async (req, res) => {
 router.post('/:id/download-ia', async (req, res) => {
   await dbReady;
   try {
-    const game = get('SELECT g.id, g.name, g.version_id, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [req.params.id]);
+    const game = get('SELECT g.id, g.name, g.platform, g.version_id, sv.source, sv.version FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [req.params.id]);
     if (!game) return res.status(404).json({ error: 'Game not found' });
 
-    const col = get(`SELECT c.id, c.folder, c.slug FROM collections c
+    const col = get(`SELECT c.id, c.folder, c.slug, c.name FROM collections c
       JOIN collection_versions cv ON cv.collection_id = c.id
       WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
     if (!col) return res.status(404).json({ error: 'Collection not found' });
 
-    // Determine romset name from source
     const romset = game.source.toLowerCase();
     const colFolder = col.folder || col.slug;
 
@@ -631,37 +845,63 @@ router.post('/:id/download-ia', async (req, res) => {
 
     setTimeout(async () => {
       try {
-        const outputDir = path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms', colFolder);
+        const baseRomDir = path.resolve(__dirname, '..', '..', '..', '..', 'data', 'roms', colFolder, game.version || '', 'roms');
+        const outputDir = game.platform ? path.join(baseRomDir, game.platform) : baseRomDir;
+        fs.mkdirSync(outputDir, { recursive: true });
+
+        // Build CRC string from rom_entries (exclude merge_target ROMs — split format)
+        const roms = all('SELECT filename, crc32 FROM rom_entries WHERE game_entry_id = ? AND crc32 IS NOT NULL AND crc32 != ? AND merge_target IS NULL', [game.id, '']);
+        const crcStr = roms.map(r => `${r.filename}:${r.crc32.toUpperCase()}`).join(',');
+
+        // Check cache for a known IA item identifier
+        const cachedId = getCachedId(romset, game.version || '');
 
         const args = ['find', romset, game.name, '--output', outputDir];
-        if (game.version) {
-          // Use the import dir as a fallback version hint (ia-cli uses it for search)
-          args.push('--version', game.version);
+        if (game.version) args.push('--version', game.version);
+        if (cachedId) args.push('--cached-id', cachedId);
+        if (crcStr) args.push('--crc', crcStr);
+
+        const iaAuth = getAuth();
+        if (iaAuth) {
+          args.push('--username', iaAuth.username);
+          args.push('--password', iaAuth.password);
         }
 
         updateProgress(jobId, 0, `Searching for ${game.name} on Internet Archive...`);
 
         const result = execCli(args, { binary: 'ia' });
 
-        updateProgress(jobId, 90, 'Updating availability...');
+        // Parse JSON result from CLI
+        if (!result.ok) {
+          const errMsg = result.error || 'Unknown error';
+          const dlUrl = result.download_url || '';
+          const msg = dlUrl ? `${errMsg}. Download URL: ${dlUrl}` : errMsg;
+          throw new Error(msg);
+        }
+
+        // Update cache with the found identifier
+        if (result.cached_id) {
+          setCachedId(romset, game.version || '', result.cached_id);
+        }
 
         // Verify the file was actually downloaded
-        const downloadedFile = ['.zip', '.7z'].map(ext => path.join(outputDir, game.name + ext)).find(f => fs.existsSync(f));
+        const filename = result.file || game.name;
+        const downloadedFile = [path.join(outputDir, filename), ...['.zip', '.7z'].map(ext => path.join(outputDir, game.name + ext))]
+          .find(f => fs.existsSync(f));
 
         if (!downloadedFile) {
-          // Check if any file matching the game name exists in outputDir
           const files = fs.readdirSync(outputDir).filter(f => f.toLowerCase().includes(game.name.toLowerCase()));
           if (files.length === 0) {
             throw new Error(`Download completed but file not found for ${game.name}`);
           }
         }
 
-        // Update game_state.available after download
+        // Update game_state.available after successful download
         run(`INSERT INTO game_state (game_entry_id, available, updated_at)
           SELECT ge.id, 1, datetime('now') FROM game_entries ge WHERE ge.id = ?
           ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [game.id]);
 
-        doneJob(jobId, { ok: true, details: result });
+        doneJob(jobId, { ok: true, crc_match: result.crc_match, details: result });
       } catch (e) {
         if (job._abort.signal.aborted) return;
         failJob(jobId, e.message);

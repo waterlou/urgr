@@ -8,6 +8,7 @@ import { getDb, reloadDb } from '../db.js';
 import { execCli, execCliStream } from '../cli.js';
 import { createJob, getJob, updateProgress, doneJob, failJob, cancelJob } from '../jobs.js';
 import { all, get, run, runNow, unescapeXml, KNOWN_PLATFORMS, dbReady } from '../helpers.js';
+import { getCookieHeader } from '../ia-auth.js';
 import { sortVersions } from '../versionSort.js';
 import { scanNpsDir, buildNps } from '../nps.js';
 import { scrapeSingleGame } from './games.js';
@@ -667,6 +668,8 @@ router.post('/api/collections/:id/download-ia', async (req, res) => {
 
         const headers = {};
         if (startByte > 0) headers['Range'] = `bytes=${startByte}-`;
+        const cookieHdr = getCookieHeader();
+        if (cookieHdr) headers['Cookie'] = cookieHdr;
         const dlResp = await fetch(dlUrl, { headers, signal: job._abort.signal });
         if (!dlResp.ok && dlResp.status !== 206) throw new Error(`HTTP ${dlResp.status}`);
 

@@ -28,14 +28,13 @@ export default function EmulatorModal({ game, onClose }) {
 
     async function init() {
       try {
-        const core = getEmulatorCore(game.platform)
+        const core = getEmulatorCore(game.platform, game.source)
         if (!core) {
           setError(`Platform "${game.platform}" is not supported by EmulatorJS`)
           setLoading(false)
           return
         }
 
-        // Set globals BEFORE loading script
         window.EJS_player = '#emulator-game'
         window.EJS_core = core
         window.EJS_gameName = game.name
@@ -59,31 +58,17 @@ export default function EmulatorModal({ game, onClose }) {
 
     return () => {
       destroyed = true
-
-      // Stop the emulator: close audio context, clear main loop, remove DOM
+      // Stop emulator audio and pause main loop
       try {
         const emu = window.EJS_emulator
         if (emu) {
-          // Close Web Audio context to stop sound
           const al = emu.Module?.AL?.currentCtx
           if (al?.audioCtx) al.audioCtx.close().catch(() => {})
-          // Stop the main loop via Emscripten
           if (emu.Module?.pauseMainLoop) emu.Module.pauseMainLoop()
         }
       } catch {}
-
-      // Remove emulator DOM
       const el = document.getElementById('emulator-game')
       if (el) el.innerHTML = ''
-
-      // Clean up globals
-      try { delete window.EJS_emulator } catch {}
-      try { delete window.EJS_player } catch {}
-      try { delete window.EJS_core } catch {}
-      try { delete window.EJS_gameName } catch {}
-      try { delete window.EJS_gameUrl } catch {}
-      try { delete window.EJS_color } catch {}
-      try { delete window.EJS_pathtodata } catch {}
     }
   }, [game])
 

@@ -55,6 +55,7 @@ pub fn parse_mame_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>, Vec<R
                             year: game.2,
                             manufacturer: game.3,
                             cloneof: game.4,
+                            romof: game.5,
                             platform: String::new(),
                             region: None,
                         };
@@ -99,14 +100,14 @@ pub fn parse_mame_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>, Vec<R
     Ok((games, all_roms, stats))
 }
 
-type MachineData = (String, String, Option<String>, Option<String>, Option<String>);
+type MachineData = (String, String, Option<String>, Option<String>, Option<String>, Option<String>);
 type RomRecord = (String, Option<i64>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>);
 
 fn parse_machine<R: BufRead>(
     xml: &mut Reader<R>,
     name: &str,
     cloneof: Option<&str>,
-    _romof: Option<&str>,
+    romof: Option<&str>,
 ) -> Result<(MachineData, Vec<RomRecord>)> {
     let mut description = String::new();
     let mut year: Option<String> = None;
@@ -173,6 +174,7 @@ fn parse_machine<R: BufRead>(
             year,
             manufacturer,
             cloneof.map(|s| s.to_string()),
+            romof.map(|s| s.to_string()),
         ),
         roms,
     ))
@@ -321,6 +323,7 @@ mod tests {
 
         let (games, _, _) = parse(xml);
         assert_eq!(games[0].cloneof.as_deref(), Some("sf2"));
+        assert_eq!(games[0].romof.as_deref(), Some("sf2"));
     }
 
     #[test]

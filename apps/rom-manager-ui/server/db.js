@@ -275,8 +275,22 @@ export function initDb(dbPath) {
   // Migration: add pkg_url column to rom_entries
   try { db.run("ALTER TABLE rom_entries ADD COLUMN pkg_url TEXT DEFAULT ''"); } catch (_) {}
 
+  // Migration: set default platform for MAME/FBNeo games (reverted — see BUGS.md)
+  try { db.run("UPDATE game_entries SET platform = '' WHERE platform = 'Arcade' AND EXISTS (SELECT 1 FROM set_versions sv WHERE sv.id = game_entries.version_id AND sv.source = 'MAME')"); } catch (_) {}
+
+  // Migration: add romof column to game_entries
+  try { db.run("ALTER TABLE game_entries ADD COLUMN romof TEXT"); } catch (_) {}
+
   // Drop scanned_games table (CLI now returns JSON directly)
   try { db.run("DROP TABLE IF EXISTS scanned_games"); } catch (_) {}
+
+  // Recently played games (max 6)
+  try {
+    db.run(`CREATE TABLE IF NOT EXISTS recently_played (
+      game_entry_id INTEGER PRIMARY KEY,
+      played_at     TEXT DEFAULT (datetime('now'))
+    )`);
+  } catch (_) {}
 
   // Migration: normalize NULL regions and deduplicate game_entries
   try {

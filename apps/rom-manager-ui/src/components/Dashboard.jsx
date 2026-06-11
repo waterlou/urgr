@@ -1,17 +1,42 @@
 import { useState, useEffect } from 'react'
-import { getCollections, getCollectionGames } from '../api.js'
+import { getCollections, getRecentlyPlayed, recordPlay } from '../api.js'
+import { isEmulatorSupported } from '../platformEmulator.js'
 import IconDisplay from './IconDisplay.jsx'
+import EmulatorModal from './EmulatorModal.jsx'
 
-export default function Dashboard({ onSelectCollection }) {
+export default function Dashboard({ onSelectCollection, onSelectGame }) {
   const [collections, setCollections] = useState([])
+  const [recentGames, setRecentGames] = useState([])
   const [loading, setLoading] = useState(true)
+  const [emulatorGame, setEmulatorGame] = useState(null)
+  const [emuKey, setEmuKey] = useState(0)
+  const [orientations, setOrientations] = useState({})
 
   useEffect(() => {
-    getCollections().then(data => {
-      setCollections(data || [])
+    Promise.all([
+      getCollections().catch(() => []),
+      getRecentlyPlayed().catch(() => ({ games: [] }))
+    ]).then(([cols, gamesData]) => {
+      setCollections(cols || [])
+      setRecentGames(gamesData.games || [])
       setLoading(false)
-    }).catch(() => setLoading(false))
+    })
   }, [])
+
+  function handlePlayGame(e, game) {
+    e.stopPropagation()
+    if (!isEmulatorSupported(game.platform, game.source)) return
+    recordPlay(game.id).catch(() => {})
+    setEmulatorGame(game)
+    setEmuKey(k => k + 1)
+  }
+
+  function handleImgLoad(e, gameId) {
+    const { naturalWidth, naturalHeight } = e.target
+    if (naturalWidth && naturalHeight) {
+      setOrientations(prev => ({ ...prev, [gameId]: naturalWidth > naturalHeight ? 'landscape' : 'portrait' }))
+    }
+  }
 
   if (loading) {
     return <div className="loading-screen"><div className="loading-spinner" /></div>
@@ -31,6 +56,31 @@ export default function Dashboard({ onSelectCollection }) {
       </div>
 
       <div className="browser-content">
+        {recentGames.length > 0 && (
+          <section className="recently-played">
+            <h2 className="section-title">Recently Played</h2>
+            <div className="recently-played-grid">
+              {recentGames.map(game => {
+                const img = game.screenshots?.length > 0 ? (() => { let u = game.screenshots[0]; if (u.startsWith('//')) u = 'https:' + u; return u; })() : null
+                const supported = isEmulatorSupported(game.platform, game.source)
+                const orient = orientations[game.id]
+                return (
+                  <div key={game.id} className={`recently-played-card${orient ? ' ' + orient : ''}`} onClick={e => handlePlayGame(e, game)}>
+                    <div className="recently-played-img">
+                      {img ? <img src={img} alt="" loading="lazy" onLoad={e => handleImgLoad(e, game.id)} /> : <div className="recently-played-placeholder"><span className="icon">image_not_supported</span></div>}
+                      {supported && (
+                        <div className="recently-played-play">
+                          <span className="icon">play_arrow</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )}
+
         {collections.length === 0 ? (
           <p className="modal-description">No collections yet. Create one to get started.</p>
         ) : (
@@ -58,6 +108,8 @@ export default function Dashboard({ onSelectCollection }) {
           </div>
         )}
       </div>
+
+      {emulatorGame && <EmulatorModal key={emuKey} game={emulatorGame} onClose={() => setEmulatorGame(null)} />}
     </div>
   )
 }

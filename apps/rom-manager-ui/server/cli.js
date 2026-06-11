@@ -19,6 +19,7 @@ const SETTINGS_KEYS = [
   'IGDB_CLIENT_ID', 'IGDB_CLIENT_SECRET',
   'TGDB_API_KEY',
   'SCRAPER_SOURCE',
+  'IA_USERNAME', 'IA_PASSWORD',
 ];
 
 function loadScraperEnv() {
@@ -82,8 +83,16 @@ export function execCli(args, { binary = 'build' } = {}) {
     if (binary === 'scraper') opts.env = loadScraperEnv();
     stdout = execFileSync(cmdArgs[0], cmdArgs.slice(1), opts);
   } catch (e) {
-    const msg = e.stderr?.trim() || e.message;
-    throw new Error(`CLI error: ${msg}`);
+    // CLI exited with error — try to extract download_url from JSON in stdout
+    const out = e.stdout?.toString().trim();
+    let dlUrl = '';
+    if (out) {
+      try { const j = JSON.parse(out); dlUrl = j.download_url || ''; } catch {}
+    }
+    const lines = (e.stderr?.toString() || e.message).trim().split('\n').filter(l => l.trim());
+    const lastErr = lines.filter(l => l.startsWith('Error:')).pop() || lines.pop() || e.message;
+    const suffix = dlUrl ? `\nDownload URL: ${dlUrl}` : '';
+    throw new Error(`${lastErr}${suffix}`);
   }
 
   if (needsDb) initDb(dbPath);

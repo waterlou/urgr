@@ -21,17 +21,11 @@ pub struct SearchDoc {
     pub downloads: Option<i64>,
 }
 
-/// Search Internet Archive for items matching romset name and optional version.
+/// Search Internet Archive with a given query string.
 pub async fn search_items(
-    romset: &str,
-    version: Option<&str>,
+    query: &str,
     rows: u32,
 ) -> Result<Vec<SearchDoc>, String> {
-    let mut query = format!("title:({} roms) OR description:({} roms)", romset, romset);
-    if let Some(ver) = version {
-        query.push_str(&format!(" AND (title:{} OR description:{})", ver, ver));
-    }
-
     let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
         .cookie_store(true)
@@ -39,7 +33,7 @@ pub async fn search_items(
         .map_err(|e| format!("Failed to build client: {}", e))?;
     let url = format!(
         "{}?q={}&fl[]=identifier&fl[]=title&fl[]=downloads&sort[]=downloads+desc&output=json&rows={}",
-        SEARCH_URL, urlencoding(&query), rows
+        SEARCH_URL, urlencoding(query), rows
     );
 
     let resp = client

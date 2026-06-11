@@ -1,65 +1,139 @@
+use reqwest::cookie::Jar;
+use reqwest::Url;
 use serde::Deserialize;
+use std::sync::Arc;
 
-/// Log in to Internet Archive and return a cookie-authenticated client.
-/// The client can then be used to download private files.
+#[derive(Debug, Clone)]
+pub struct IaSession {
+    pub client: reqwest::Client,
+    pub cookies: IaCookies,
+    pub s3_keys: S3Keys,
+    pub screenname: String,
+    pub email: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct IaCookies {
+    pub logged_in_user: String,
+    pub logged_in_sig: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct S3Keys {
+    pub access: String,
+    pub secret: String,
+}
+
+#[derive(Deserialize)]
+struct XauthnResponse {
+    success: bool,
+    #[serde(default)]
+    values: Option<XauthnValues>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct XauthnValues {
+    cookies: XauthnCookies,
+    s3: XauthnS3,
+    screenname: String,
+    email: String,
+}
+
+#[derive(Deserialize)]
+struct XauthnCookies {
+    #[serde(rename = "logged-in-user")]
+    logged_in_user: String,
+    #[serde(rename = "logged-in-sig")]
+    logged_in_sig: String,
+}
+
+#[derive(Deserialize)]
+struct XauthnS3 {
+    access: String,
+    secret: String,
+}
+
 pub async fn login(
-    username: &str,
+    email: &str,
     password: &str,
-) -> Result<reqwest::Client, String> {
-    let client = reqwest::Client::builder()
+) -> Result<IaSession, String> {
+    let resp = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-        .cookie_store(true)
         .build()
-        .map_err(|e| format!("Failed to build client: {}", e))?;
-
-    // Get login page first to get any initial cookies
-    let _ = client.get("https://archive.org/login").send().await;
-
-    // Submit login form
-    let resp = client
-        .post("https://archive.org/account/login")
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(format!("username={}&password={}&action=login&referer=https%3A%2F%2Farchive.org%2F",
-            urlencoding(username), urlencoding(password)))
+        .map_err(|e| format!("Failed to build client: {}", e))?
+        .post("https://archive.org/services/xauthn/?op=login")
+        .header("Accept", "application/json")
+        .form(&[("email", email), ("password", password)])
         .send()
         .await
         .map_err(|e| format!("Login request error: {}", e))?;
 
     let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
+    let text = resp.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
 
-    if !status.is_success() && status.as_u16() != 302 {
-        // IA returns 302 on successful login (redirect)
-        return Err(format!("Login failed (HTTP {}): {}", status, body.chars().take(200).collect::<String>()));
+    let xauthn: XauthnResponse = serde_json::from_str(&text)
+        .map_err(|e| format!("Failed to parse login response (HTTP {}): {}", status, e))?;
+
+    if !xauthn.success {
+        let msg = xauthn.error.unwrap_or_else(|| "unknown error".into());
+        let friendly = match msg.as_str() {
+            "account_not_found" => "Account not found, check your email and try again.".into(),
+            "account_bad_password" => "Incorrect password, try again.".into(),
+            s => format!("Authentication failed: {}", s),
+        };
+        return Err(friendly);
     }
 
-    // Verify login succeeded by checking a page that requires authentication
-    let check = client
-        .get("https://archive.org/details/tv")
-        .send()
-        .await
-        .map_err(|e| format!("Login verification error: {}", e))?;
+    let values = xauthn.values.ok_or("Missing values in login response")?;
 
-    // If we can access a page, login likely succeeded
-    if check.status().is_success() || check.status().as_u16() == 302 {
-        Ok(client)
-    } else {
-        Err(format!("Login failed: HTTP {}", check.status()))
-    }
-}
+    let logged_in_user = values.cookies.logged_in_user
+        .split(';')
+        .next()
+        .unwrap_or(&values.cookies.logged_in_user)
+        .to_string();
 
-fn urlencoding(s: &str) -> String {
-    s.chars()
-        .map(|c| match c {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' => c.to_string(),
-            ' ' => "+".to_string(),
-            _ => {
-                let mut out = String::new();
-                for b in c.to_string().bytes() {
-                    out.push_str(&format!("%{:02X}", b));
-                }
-                out
-            }
-        })
-        .collect()
+    let logged_in_sig = values.cookies.logged_in_sig
+        .split(';')
+        .next()
+        .unwrap_or(&values.cookies.logged_in_sig)
+        .to_string();
+
+    let cookies = IaCookies {
+        logged_in_user,
+        logged_in_sig,
+    };
+
+    let s3_keys = S3Keys {
+        access: values.s3.access,
+        secret: values.s3.secret,
+    };
+
+    // Build a cookie jar with the auth cookies
+    let cookie_jar = Jar::default();
+    let base_url: Url = "https://archive.org".parse().unwrap();
+
+    cookie_jar.add_cookie_str(
+        &format!("logged-in-user={}; domain=.archive.org; path=/", cookies.logged_in_user),
+        &base_url,
+    );
+    cookie_jar.add_cookie_str(
+        &format!("logged-in-sig={}; domain=.archive.org; path=/", cookies.logged_in_sig),
+        &base_url,
+    );
+
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+        .cookie_provider(Arc::new(cookie_jar))
+        .build()
+        .map_err(|e| format!("Failed to build authenticated client: {}", e))?;
+
+    Ok(IaSession {
+        client,
+        cookies,
+        s3_keys,
+        screenname: values.screenname,
+        email: values.email,
+    })
 }

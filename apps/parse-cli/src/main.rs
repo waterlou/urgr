@@ -105,6 +105,10 @@ EXAMPLES:
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--version") {
+        println!("parse-cli {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     let json = has_json();
 
     if args.len() < 5 || args[1] != "import" {

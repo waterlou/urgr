@@ -819,43 +819,26 @@ router.post('/api/versions/import-online', async (req, res) => {
         };
         walkDir(extractDir);
 
-        // Score files: prefer .xml (Logiqx/MAME XML) over .dat (can be ROMCenter/other)
-        // First check for version-matched files; if none found, accept any MAME-named DAT/XML
-        let bestScore = 0;
-        const candidateFiles = [];
+        // Pick the best MAME DAT/XML: prefer .dat (smaller), skip arcade/mess/chd subsets
+        const dats = allFiles.map(fp => ({ fp, base: path.basename(fp).toLowerCase() }))
+          .filter(({ base }) => {
+            if (!base.endsWith('.xml') && !(base.endsWith('.dat') && !/without.?crc|nocrc/i.test(base))) return false;
+            if (/\(?arcade\)?|\(?mess\)?|\bchd\b/i.test(base)) return false; // skip partial/subset files
+            return mameDatMatches(base, version) || /^mame(\s|\b|_)/.test(base);
+          })
+          .sort((a, b) => {
+            // .dat preferred (smaller, faster); .xml fallback (huge)
+            const aIsDat = a.base.endsWith('.dat') ? 0 : 1;
+            const bIsDat = b.base.endsWith('.dat') ? 0 : 1;
+            if (aIsDat !== bIsDat) return aIsDat - bIsDat;
+            // Version match before generic MAME name
+            const aVer = mameDatMatches(a.base, version) ? 0 : 1;
+            const bVer = mameDatMatches(b.base, version) ? 0 : 1;
+            if (aVer !== bVer) return aVer - bVer;
+            return a.base.localeCompare(b.base);
+          });
 
-        for (const fp of allFiles) {
-          const base = path.basename(fp).toLowerCase();
-          const isDat = base.endsWith('.dat') && !/without.?crc|nocrc/i.test(base);
-          const isXml = base.endsWith('.xml');
-          if (!isDat && !isXml) continue;
-
-          const versionMatch = mameDatMatches(base, version);
-          const isMame = /^mame(\s|\b|_)/.test(base);
-          const isQualified = /\(arcade\)|\(mess\)/.test(base);
-
-          let score = 0;
-          if (versionMatch) score = 4;
-          else if (isMame) score = 2;
-
-          if (isQualified) score -= 1;
-          if (isXml) score += 1;
-
-          if (score > 0) {
-            candidateFiles.push({ fp, score });
-            if (score > bestScore) bestScore = score;
-          }
-        }
-
-        // Pick the highest-scored file; prefer .xml on tie
-        let candidates = candidateFiles.filter(c => c.score === bestScore);
-        candidates.sort((a, b) => {
-          // .xml first, then .dat
-          const aExt = a.fp.endsWith('.xml') ? 0 : 1;
-          const bExt = b.fp.endsWith('.xml') ? 0 : 1;
-          return aExt - bExt || a.fp.localeCompare(b.fp);
-        });
-        if (candidates.length > 0) foundDat = candidates[0].fp;
+        if (dats.length > 0) foundDat = dats[0].fp;
 
         if (!foundDat) {
           for (const fp of allFiles) {
@@ -889,8 +872,12 @@ router.post('/api/versions/import-online', async (req, res) => {
 
         if (!foundDat) throw new Error(`No DAT/XML file found for version "${version}" in the archive`);
 
+        console.log(`[mame-import] Selected: ${foundDat} (${(fs.statSync(foundDat).size / 1024 / 1024).toFixed(1)} MB)`);
+        try { fs.writeFileSync('/tmp/mame_debug_sample.txt', fs.readFileSync(foundDat, { encoding: 'utf-8', flag: 'r' }).slice(0, 500)); } catch {}
+
         const result = execCli(['import', foundDat, 'MAME', version], { binary: 'parse' });
         if (!result) throw new Error('CLI returned null');
+        console.log(`[mame-import] Format: ${result.format}, games: ${result.games_inserted}`);
 
         const versionId = result.version_id;
         const totalGames = result.games_inserted || 0;

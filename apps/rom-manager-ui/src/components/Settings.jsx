@@ -34,6 +34,21 @@ const PROVIDER_TABS = [
       { key: 'TGDB_API_KEY', label: 'API Key', type: 'password', placeholder: 'Default key active — enter to override' },
     ],
   },
+  {
+    id: 'ia',
+    label: 'Internet Archive',
+    fields: [
+      { key: 'IA_USERNAME', label: 'Email', type: 'text', required: true },
+      { key: 'IA_PASSWORD', label: 'Password', type: 'password', required: true },
+    ],
+    instructions: (
+      <p className="settings-hint">
+        Required for downloading access-restricted ROM files from Internet Archive.
+        Enter your <strong>archive.org</strong> email and password.
+        Saved credentials are loaded on server startup.
+      </p>
+    ),
+  },
 ]
 
 const SOURCE_OPTIONS = [
@@ -148,22 +163,24 @@ export default function Settings({ onClose }) {
             </div>
           )}
 
-          <div className="settings-section">
-            <h3>Default Scraper Source</h3>
-            <p className="settings-hint">
-              Sets the <code>SCRAPER_SOURCE</code> environment variable used by scraper-cli
-              when <code>--source</code> is not provided.
-            </p>
-            <select
-              className="settings-select"
-              value={values['SCRAPER_SOURCE'] || ''}
-              onChange={e => setValue('SCRAPER_SOURCE', e.target.value)}
-            >
-              {SOURCE_OPTIONS.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </div>
+          {activeTab !== 'ia' && (
+            <div className="settings-section">
+              <h3>Default Scraper Source</h3>
+              <p className="settings-hint">
+                Sets the <code>SCRAPER_SOURCE</code> environment variable used by scraper-cli
+                when <code>--source</code> is not provided.
+              </p>
+              <select
+                className="settings-select"
+                value={values['SCRAPER_SOURCE'] || ''}
+                onChange={e => setValue('SCRAPER_SOURCE', e.target.value)}
+              >
+                {SOURCE_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {message && (
             <div className={`settings-message ${message.type}`}>

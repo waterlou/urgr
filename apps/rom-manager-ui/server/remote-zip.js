@@ -2,14 +2,15 @@
 // without downloading the whole file. Uses HTTP Range requests.
 
 export class RemoteZip {
-  constructor(url) {
+  constructor(url, customFetch) {
     this.url = url;
     this._size = null;
     this._entries = null;
+    this._fetch = customFetch || fetch;
   }
 
   async _fetchRange(start, end) {
-    let resp = await fetch(this.url, {
+    let resp = await this._fetch(this.url, {
       headers: { Range: `bytes=${start}-${end}` },
       redirect: 'manual',
     });
@@ -18,7 +19,7 @@ export class RemoteZip {
       const location = resp.headers.get('location');
       if (!location) throw new Error('Redirect without location');
       this.url = location;
-      resp = await fetch(this.url, {
+      resp = await this._fetch(this.url, {
         headers: { Range: `bytes=${start}-${end}` },
       });
     }
@@ -29,7 +30,7 @@ export class RemoteZip {
   async size() {
     if (this._size) return this._size;
     // GET first byte to detect file size (more reliable than HEAD for IA redirects)
-    const resp = await fetch(this.url, {
+    const resp = await this._fetch(this.url, {
       headers: { Range: 'bytes=0-0' },
     });
     if (resp.status !== 206 && !resp.ok) throw new Error(`HTTP ${resp.status} for ${this.url}`);

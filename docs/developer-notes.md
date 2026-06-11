@@ -6,8 +6,11 @@
 - **Frontend changes require rebuild**: server serves `dist/` statically; run `npx vite build` after JSX/CSS edits
 - **Rust changes require recompilation**: run `cargo build -p <name> --release` after modifying Rust source
 - **sql.js in-memory DB**: server loads DB into memory at startup; autosave happens 200ms after each write via debounce. Direct file edits while server runs get overwritten.
-- DB path injection: `execCli` automatically appends `--json --db <path>` for Rust binaries
-- `findBinary` checks: env var → PATH → `target/release/` → `target/debug/` → `/usr/local/bin/`
+- **IA credentials stored in `data/.env`**: saved via Settings → Internet Archive tab; auto-loaded on server startup via `ia-auth.js:loadFromEnv()`. Re-login happens on restart, so restart after saving credentials.
+- **IA item cache**: `data/ia-cache.json` maps `(source, version)` → IA item ID to skip re-searching. Managed automatically by server from `ia-cli find` JSON output.
+- **DB path injection**: `execCli` automatically appends `--json --db <path>` for Rust binaries
+- **`findBinary` checks**: env var → PATH → `target/release/` → `target/debug/` → `/usr/local/bin/`
+- **`romof` column**: `server/db.js` migration adds `romof TEXT` to `game_entries`. All three parsers (MAME listXML, Logiqx XML, ClrMAMEPro) read it from the `<machine>` element. Re-import required after migration.
 
 ## Download Manager
 
@@ -23,7 +26,11 @@ Singleton managing download queue. Key behaviors:
 
 ### Per-ROM Availability
 
-Game detail response includes `downloaded` flag per ROM entry, checked against `download_queue` entries with `status='completed'`.
+Game detail response includes `downloaded` flag per ROM entry, computed by CRC verification:
+- **Non-merge ROMs**: checked in the game's own zip via `unzip -v` (CRC-32 column)
+- **Merge ROMs** (`merge_target` set): checked in parent zips by following `romof`/`cloneof` chain
+- Results are cached per zip — one `unzip -v` call per zip, not per ROM
+- Previously this was a simple `game_state.available === 1` shortcut — now it's CRC-based
 
 ## Frontend
 
@@ -32,6 +39,7 @@ Game detail response includes `downloaded` flag per ROM entry, checked against `
 - For unversioned collections (NPS, No-Intro): `reused` is always 0 (not shown by frontend)
 - For versioned collections (FBNeo, MAME): `reused` calculated by checking prior version directories. Also shown in scan results via `GET /api/collections/:id/build?scan=true`.
 - EmulatorJS CDN: `https://cdn.emulatorjs.org/nightly/data/` (nightly channel has more up-to-date cores)
+- **EmulatorJS re-open**: Closing the emulator modal triggers a page reload (`location.reload()`). EmulatorJS doesn't support re-initialization with a new game URL after the initial load.
 
 ## CLI Behavior
 
@@ -40,6 +48,30 @@ Game detail response includes `downloaded` flag per ROM entry, checked against `
 - **Zip-based ROMs (FBNeo, MAME, No-Intro)**: Use **CRC32** read from zip entry headers. No decompression needed — `zip::ZipArchive::by_index_raw().crc32()` reads the stored CRC directly from the zip's local file header.
 - **NPS (PKG files)**: Uses **SHA-256** for download verification (`downloader.js` compares downloaded file hash against `expected_sha256`).
 - `scanned_games` table was removed. CLI now outputs match results as JSON; server writes directly to `game_state.available`.
+
+### Split-Format (Merged) ROM Support
+
+DATs from `progettosnaps.net` are in **Logiqx XML format** (detected via `<!DOCTYPE datafile>`). All three parsers (MAME listXML, Logiqx XML, ClrMAMEPro) now read `romof` from `<machine>` elements.
+
+**Key concepts:**
+- `merge_target` on `RomEntry` — this ROM lives in a parent game's zip, not this game's zip. Set when `<rom>` has a `merge` attribute.
+- `romof` on `GameEntry` — which game's zip provides the shared ROMs. Only set for clone/child games.
+- `cloneof` on `GameEntry` — game hierarchy (which game this is a variant of). Same as `romof` when both are present.
+
+**How split-format works:**
+
+| Storage | Game zip | Parent zip (e.g. `neogeo.zip`) |
+|---------|----------|-------------------------------|
+| Non-merge ROMs | `201-c1.c1`, `201-p1.p1` (game-specific) | — |
+| Merge ROMs | — (not in this zip) | `000-lo.lo`, `sfix.sfix`, `sm1.sm1` (BIOS) |
+
+**CRC verification skips merge ROMs** — in both `verify_game_zip` (builder) and `ImportIndex::find_match` (import matcher). ROMs with `merge_target` set are expected to be in the parent zip, not the game zip.
+
+**CRC verification also subtracts by `cloneof`** — ROMs whose CRCs match the parent game's ROMs are skipped. This handles cases where the parent has the shared ROMs but `merge` attribute isn't set.
+
+**Play endpoint merges parent zips** — when serving a game, follows `romof` chain (or `cloneof` fallback) to find all parent zips, extracts all entries, and re-zips into a single merged file for EmulatorJS.
+
+**Per-ROM availability** — `rom.downloaded` is computed by actually checking CRC in zip files via `unzip -v`. Non-merge ROMs checked in game's own zip; merge ROMs checked in parent zip via `romof` chain. Results are cached per zip (one `unzip -v` call per zip).
 
 ### Scan commands (`nps-cli scan`, `build-cli scan`)
 

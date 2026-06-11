@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { getGame, coverUrl, scrapeGameMetadata, enqueueDownload, downloadGameFromIA, subscribeJobSSE } from '../api.js'
+import { getGame, coverUrl, scrapeGameMetadata, enqueueDownload, downloadGameFromIA, subscribeJobSSE, getIaAuthStatus, recordPlay } from '../api.js'
 import { isEmulatorSupported } from '../platformEmulator.js'
 import EmulatorModal from './EmulatorModal.jsx'
 
@@ -15,6 +15,7 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
   const [iaDownloading, setIaDownloading] = useState(false)
   const [iaDownloadMsg, setIaDownloadMsg] = useState(null)
   const [showEmulator, setShowEmulator] = useState(false)
+  const [iaAuth, setIaAuth] = useState(null)
 
   useEffect(() => {
     getGame(gameId).then(g => {
@@ -35,6 +36,10 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
           .finally(() => setScraping(false))
       }
     }).catch(console.error)
+  }, [gameId])
+
+  useEffect(() => {
+    getIaAuthStatus().then(s => setIaAuth(s)).catch(() => {})
   }, [gameId])
 
   // Refresh game data when tab becomes visible (download state may have changed)
@@ -102,7 +107,6 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
         onError: (err) => {
           setIaDownloadMsg(`Error: ${err}`)
           setIaDownloading(false)
-          setTimeout(() => setIaDownloadMsg(null), 4000)
         },
       })
     } catch (err) {
@@ -185,12 +189,12 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                 </button>
               )}
               {game.roms && game.roms.length > 0 && (() => {
-                const supported = isEmulatorSupported(game.platform)
+                const supported = isEmulatorSupported(game.platform, game.source)
                 const canPlay = game.available === 1
                 return (
                   <button
                     className={`btn btn-sm play-btn ${!supported ? 'play-btn-unsupported' : ''}`}
-                    onClick={() => canPlay && supported && setShowEmulator(true)}
+                    onClick={() => canPlay && supported && (recordPlay(game.id).catch(() => {}), setShowEmulator(true), setEmuKey(n => n + 1))}
                     disabled={!canPlay || !supported}
                     title={!supported
                       ? `EmulatorJS does not support ${game.platform || 'this platform'}`
@@ -271,10 +275,10 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
                       })()}</td>
                       <td><span className="badge">{rom.subtype || 'game'}</span></td>
                       <td>{rom.size != null ? formatSize(rom.size) : '-'}</td>
-                      <td>{rom.downloaded ? <span className="icon" style={{color:'var(--accent)',fontSize:16}}>check</span> : <span className="icon" style={{color:'#888',fontSize:16}}>close</span>}</td>
                       {game.source !== 'NPS' && (
                         <td><span className={`rom-status rom-status-${rom.status}`}>{rom.status}</span></td>
                       )}
+                      <td>{rom.downloaded ? <span className="icon" style={{color:'var(--accent)',fontSize:16}}>check</span> : <span className="icon" style={{color:'#888',fontSize:16}}>close</span>}</td>
                       <td className="rom-hash">{rom.crc32 || rom.sha1 ? (rom.crc32 || rom.sha1).slice(0, 12) + '...' : '-'}</td>
                     </tr>
                   ))}
@@ -310,17 +314,35 @@ export default function GameDetail({ gameId, onBack, onNavigate }) {
           <section>
             {iaDownloading
               ? <div className="loading-inline"><div className="loading-spinner-sm" /> {iaDownloadMsg}</div>
-              : <button className="btn btn-sm" onClick={handleIaDownload} disabled={iaDownloading}>
-                  <span className="icon">download</span> Download from Internet Archive
-                </button>
+              : <div style={{display:'flex', alignItems:'center', gap:8}}>
+                  <button className="btn btn-sm" onClick={handleIaDownload} disabled={iaDownloading}>
+                    <span className="icon">download</span> Download from Internet Archive
+                  </button>
+                  <span className="badge" style={{
+                    background: iaAuth?.authenticated ? 'var(--accent)' : '#555',
+                    color: '#fff', fontSize: 10, opacity: 0.8
+                  }}>
+                    {iaAuth?.authenticated ? `IA: ${iaAuth.screenname}` : 'IA: Anonymous'}
+                  </span>
+                </div>
             }
-            {iaDownloadMsg && !iaDownloading && <p className="scrape-success" style={{marginTop:4}}>{iaDownloadMsg}</p>}
+            {iaDownloadMsg && !iaDownloading && (
+              <p className="scrape-success" style={{marginTop:4}}>
+                {iaDownloadMsg.split(/(https?:\/\/[^\s]+)/g).map((part, i) =>
+                  part.match(/^https?:\/\//)
+                    ? <a key={i} href={part} target="_blank" rel="noopener noreferrer" style={{wordBreak:'break-all'}}>{part}</a>
+                    : part
+                )}
+              </p>
+            )}
           </section>
         )}
+
+
       </div>
 
       {showEmulator && (
-        <EmulatorModal game={game} onClose={() => setShowEmulator(false)} />
+        <EmulatorModal game={game} onClose={() => { setShowEmulator(false); setTimeout(() => location.reload(), 100) }} />
       )}
     </div>
   )
