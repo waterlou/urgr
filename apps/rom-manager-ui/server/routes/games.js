@@ -255,8 +255,14 @@ router.get('/:id/availability', async (req, res) => {
     const gameCrcs = gameZipPath ? getZipCrcs(gameZipPath) : null;
     const parentCrcs = parentPath ? getZipCrcs(parentPath) : null;
 
+    // Check game_state for NPS/fallback availability
+    const state = get('SELECT available FROM game_state WHERE game_entry_id = ?', [game.id]);
+
     for (const rom of roms) {
-      if (!rom.crc32) { available[rom.id] = false; continue; }
+      if (!rom.crc32) {
+        available[rom.id] = state?.available === 1;
+        continue;
+      }
       if (rom.merge_target) {
         available[rom.id] = !!gameZipPath && !!parentCrcs && parentCrcs.has(rom.crc32.toUpperCase());
       } else {
