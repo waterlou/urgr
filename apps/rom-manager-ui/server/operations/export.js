@@ -13,15 +13,14 @@ export class ExportOperation extends Operation {
     this.updateProgress(0, 'Exporting...');
 
     try {
-      // Query games with ROM entries
-      const games = all(`SELECT ge.*, sv.source, sv.version
-        FROM game_entries ge
-        JOIN set_versions sv ON sv.id = ge.version_id
-        WHERE ge.version_id = ?`, [version_id]);
+      const games = all(`SELECT g.*, sv.source, sv.version
+        FROM games g
+        JOIN game_rom_sets grs ON grs.game_id = g.id
+        JOIN set_versions sv ON sv.id = grs.version_id
+        WHERE grs.version_id = ?`, [version_id]);
 
       this.updateProgress(50, `Processing ${games.length} games...`);
 
-      // Build export manifest
       const manifest = {
         version_id,
         format: format || 'json',
@@ -33,7 +32,6 @@ export class ExportOperation extends Operation {
           year: g.year,
           manufacturer: g.manufacturer,
           platform: g.platform,
-          region: g.region,
           source: g.source,
           version: g.version,
         })),

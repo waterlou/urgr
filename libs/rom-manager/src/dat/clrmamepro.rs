@@ -3,18 +3,16 @@ use std::fs;
 use std::path::Path;
 
 use crate::error::Result;
-use crate::models::{GameEntry, ParseStats, RomEntry};
+use crate::models::{ParsedGame, ParsedRom, ParseStats};
 
-pub fn parse_clrmamepro_dat<P: AsRef<Path>>(path: P) -> Result<(Vec<GameEntry>, Vec<RomEntry>, ParseStats)> {
+pub fn parse_clrmamepro_dat<P: AsRef<Path>>(path: P) -> Result<(Vec<ParsedGame>, ParseStats)> {
     let text = fs::read_to_string(path.as_ref())?;
     Ok(parse_clrmamepro_str(&text))
 }
 
-pub fn parse_clrmamepro_str(text: &str) -> (Vec<GameEntry>, Vec<RomEntry>, ParseStats) {
-    let mut stats = ParseStats { total_games: 0, total_roms: 0, errors: vec![] };
+pub fn parse_clrmamepro_str(text: &str) -> (Vec<ParsedGame>, ParseStats) {
     let mut games = Vec::new();
-    let mut roms = Vec::new();
-    let mut game_id_counter = 0i64;
+    let mut errors = Vec::new();
 
     let stripped = text.lines()
         .map(|l| l.trim())
@@ -27,22 +25,27 @@ pub fn parse_clrmamepro_str(text: &str) -> (Vec<GameEntry>, Vec<RomEntry>, Parse
         let start = pos + game_start;
         let block = match extract_block(&stripped[start..]) {
             Some(b) => b,
-            None => { stats.errors.push("Malformed game block".into()); pos = start + 6; continue; }
+            None => { errors.push("Malformed game block".into()); pos = start + 6; continue; }
         };
         pos = start + block.len();
 
         let kv = parse_game_block(&block);
         let name = match kv.get("name") {
             Some(n) => n.clone(),
-            None => { stats.errors.push("Game block missing name".into()); continue; }
+            None => { errors.push("Game block missing name".into()); continue; }
         };
 
-        game_id_counter += 1;
-        stats.total_games += 1;
+        let mut roms = Vec::new();
+        if let Some(rom_blocks) = kv.get("_roms") {
+            for rblock in rom_blocks.split('\n') {
+                if rblock.trim().is_empty() { continue; }
+                if let Some(rom) = parse_rom_entry(rblock) {
+                    roms.push(rom);
+                }
+            }
+        }
 
-        games.push(GameEntry {
-            id: game_id_counter,
-            version_id: 0,
+        games.push(ParsedGame {
             name,
             description: kv.get("description").cloned().unwrap_or_default(),
             year: kv.get("year").cloned(),
@@ -50,18 +53,18 @@ pub fn parse_clrmamepro_str(text: &str) -> (Vec<GameEntry>, Vec<RomEntry>, Parse
             cloneof: kv.get("cloneof").cloned(),
             romof: kv.get("romof").cloned(),
             platform: String::new(),
-            region: None,
+            roms,
         });
-
-        if let Some(rom_blocks) = kv.get("_roms") {
-            for rblock in rom_blocks.split('\n') {
-                if rblock.trim().is_empty() { continue; }
-                parse_rom_entry(rblock, game_id_counter, &mut roms, &mut stats);
-            }
-        }
     }
 
-    (games, roms, stats)
+    let total_roms: usize = games.iter().map(|g| g.roms.len()).sum();
+    let stats = ParseStats {
+        total_games: games.len(),
+        total_roms,
+        errors,
+    };
+
+    (games, stats)
 }
 
 fn extract_block(s: &str) -> Option<String> {
@@ -167,15 +170,15 @@ fn match_paren(chars: &[char], start: usize) -> Option<usize> {
     None
 }
 
-fn parse_rom_entry(text: &str, game_id: i64, roms: &mut Vec<RomEntry>, stats: &mut ParseStats) {
+fn parse_rom_entry(text: &str) -> Option<ParsedRom> {
     let chars: Vec<char> = text.chars().collect();
     let mut map = HashMap::new();
     let mut idx = 0;
 
     while idx < chars.len() && chars[idx] != '(' { idx += 1; }
-    if idx >= chars.len() { return; }
+    if idx >= chars.len() { return None; }
 
-    let close = match match_paren(&chars, idx) { Some(c) => c, None => return };
+    let close = match match_paren(&chars, idx) { Some(c) => c, None => return None };
     let inner: String = chars[idx + 1..close].iter().collect();
 
     let ic: Vec<char> = inner.chars().collect();
@@ -207,10 +210,7 @@ fn parse_rom_entry(text: &str, game_id: i64, roms: &mut Vec<RomEntry>, stats: &m
         }
     }
 
-    stats.total_roms += 1;
-    roms.push(RomEntry {
-        id: 0,
-        game_entry_id: game_id,
+    Some(ParsedRom {
         filename: map.get("name").cloned().unwrap_or_default(),
         size: map.get("size").and_then(|s| s.parse().ok()),
         crc32: map.get("crc").map(|s| s.to_uppercase()),
@@ -218,14 +218,14 @@ fn parse_rom_entry(text: &str, game_id: i64, roms: &mut Vec<RomEntry>, stats: &m
         sha1: map.get("sha1").map(|s| s.to_uppercase()),
         status: map.get("status").cloned().unwrap_or_else(|| "good".into()),
         merge_target: None,
-    });
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn parse(text: &str) -> (Vec<GameEntry>, Vec<RomEntry>, ParseStats) {
+    fn parse(text: &str) -> (Vec<ParsedGame>, ParseStats) {
         parse_clrmamepro_str(text)
     }
 
@@ -244,7 +244,7 @@ game (
   rom ( name "sf2.03" size 524288 crc 3F47A0D8 sha1 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA )
 )
 "#;
-        let (games, roms, stats) = parse(dat);
+        let (games, stats) = parse(dat);
         assert_eq!(stats.total_games, 1);
         assert_eq!(stats.total_roms, 1);
         assert_eq!(games[0].name, "sf2");
@@ -252,11 +252,11 @@ game (
         assert_eq!(games[0].year.as_deref(), Some("1991"));
         assert_eq!(games[0].manufacturer.as_deref(), Some("Capcom"));
         assert!(games[0].cloneof.is_none());
-        assert_eq!(roms[0].filename, "sf2.03");
-        assert_eq!(roms[0].size, Some(524288));
-        assert_eq!(roms[0].crc32.as_deref(), Some("3F47A0D8"));
-        assert_eq!(roms[0].sha1.as_deref(), Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
-        assert_eq!(roms[0].status, "good");
+        assert_eq!(games[0].roms[0].filename, "sf2.03");
+        assert_eq!(games[0].roms[0].size, Some(524288));
+        assert_eq!(games[0].roms[0].crc32.as_deref(), Some("3F47A0D8"));
+        assert_eq!(games[0].roms[0].sha1.as_deref(), Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+        assert_eq!(games[0].roms[0].status, "good");
     }
 
     #[test]
@@ -267,9 +267,10 @@ game ( name "a" description "A" rom ( name "a.rom" size 100 crc 00000001 ) )
 game ( name "b" description "B" rom ( name "b.rom" size 200 crc 00000002 ) )
 game ( name "c" description "C" )
 "#;
-        let (games, roms, _) = parse(dat);
+        let (games, _) = parse(dat);
         assert_eq!(games.len(), 3);
-        assert_eq!(roms.len(), 2);
+        let total_roms: usize = games.iter().map(|g| g.roms.len()).sum();
+        assert_eq!(total_roms, 2);
         assert_eq!(games[0].name, "a");
         assert_eq!(games[1].name, "b");
         assert_eq!(games[2].name, "c");
@@ -281,7 +282,7 @@ game ( name "c" description "C" )
 clrmamepro ( name "Test" )
 game ( name "sf2j" description "SF2 (Japan)" cloneof "sf2" rom ( name "sf2j.rom" ) )
 "#;
-        let (games, _, _) = parse(dat);
+        let (games, _) = parse(dat);
         assert_eq!(games[0].cloneof.as_deref(), Some("sf2"));
     }
 
@@ -296,32 +297,32 @@ game (
   rom ( name "r2.bin" size 1024 crc BBBB2222 merge "t" )
 )
 "#;
-        let (_, roms, stats) = parse(dat);
+        let (games, stats) = parse(dat);
         assert_eq!(stats.total_roms, 2);
-        assert_eq!(roms.len(), 2);
+        assert_eq!(games[0].roms.len(), 2);
 
-        assert_eq!(roms[0].filename, "r1.bin");
-        assert_eq!(roms[0].size, Some(512));
-        assert_eq!(roms[0].crc32.as_deref(), Some("AAAA1111"));
-        assert_eq!(roms[0].md5.as_deref(), Some("ABCDEF1234567890ABCDEF1234567890"));
-        assert_eq!(roms[0].sha1.as_deref(), Some("EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"));
-        assert_eq!(roms[0].status, "nodump");
-        assert!(roms[0].merge_target.is_none());
+        assert_eq!(games[0].roms[0].filename, "r1.bin");
+        assert_eq!(games[0].roms[0].size, Some(512));
+        assert_eq!(games[0].roms[0].crc32.as_deref(), Some("AAAA1111"));
+        assert_eq!(games[0].roms[0].md5.as_deref(), Some("ABCDEF1234567890ABCDEF1234567890"));
+        assert_eq!(games[0].roms[0].sha1.as_deref(), Some("EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"));
+        assert_eq!(games[0].roms[0].status, "nodump");
+        assert!(games[0].roms[0].merge_target.is_none());
 
-        assert_eq!(roms[1].filename, "r2.bin");
-        assert_eq!(roms[1].size, Some(1024));
-        assert_eq!(roms[1].crc32.as_deref(), Some("BBBB2222"));
-        assert_eq!(roms[1].status, "good");
-        assert!(roms[1].md5.is_none());
+        assert_eq!(games[0].roms[1].filename, "r2.bin");
+        assert_eq!(games[0].roms[1].size, Some(1024));
+        assert_eq!(games[0].roms[1].crc32.as_deref(), Some("BBBB2222"));
+        assert_eq!(games[0].roms[1].status, "good");
+        assert!(games[0].roms[1].md5.is_none());
     }
 
     #[test]
     fn test_clrmamepro_empty_header() {
         let dat = "game ( name \"only\" description \"Just a game\" )";
-        let (games, roms, stats) = parse(dat);
+        let (games, stats) = parse(dat);
         assert_eq!(stats.total_games, 1);
         assert_eq!(games[0].name, "only");
-        assert!(roms.is_empty());
+        assert!(games[0].roms.is_empty());
     }
 
     #[test]
@@ -335,7 +336,7 @@ game ( name "g1" description "G1" )
 
 game ( name "g2" description "G2" )
 "#;
-        let (games, _, _) = parse(dat);
+        let (games, _) = parse(dat);
         assert_eq!(games.len(), 2);
         assert_eq!(games[0].name, "g1");
         assert_eq!(games[1].name, "g2");
@@ -343,9 +344,8 @@ game ( name "g2" description "G2" )
 
     #[test]
     fn test_clrmamepro_empty_input() {
-        let (games, roms, stats) = parse("");
+        let (games, stats) = parse("");
         assert!(games.is_empty());
-        assert!(roms.is_empty());
         assert_eq!(stats.total_games, 0);
     }
 
@@ -355,7 +355,7 @@ game ( name "g2" description "G2" )
 game ( name "g1" description "G1" )
 game ( name "g2" description "G2" )
 "#;
-        let (games, _, stats) = parse(dat);
+        let (games, stats) = parse(dat);
         assert_eq!(games.len(), 2);
         assert_eq!(stats.errors.len(), 0);
     }

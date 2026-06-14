@@ -11,23 +11,56 @@ pub struct SetVersion {
 }
 
 #[derive(Debug, Clone)]
-pub struct GameEntry {
+pub struct Game {
     pub id: i64,
+    pub name: String,
+    pub description: String,
+    pub year: Option<String>,
+    pub manufacturer: Option<String>,
+    pub platform: String,
+    pub parent_game_id: Option<i64>,
+    pub synopsis: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct GameRomSet {
+    pub id: i64,
+    pub game_id: i64,
     pub version_id: i64,
+    pub romof: Option<String>,
+    pub status: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RomFile {
+    pub id: i64,
+    pub rom_set_id: i64,
+    pub filename: String,
+    pub size: Option<i64>,
+    pub crc32: Option<String>,
+    pub md5: Option<String>,
+    pub sha1: Option<String>,
+    pub status: String,
+    pub merge_target: Option<String>,
+}
+
+/// Temporary struct used during DAT parsing (before DB insertion)
+#[derive(Debug, Clone)]
+pub struct ParsedGame {
     pub name: String,
     pub description: String,
     pub year: Option<String>,
     pub manufacturer: Option<String>,
     pub cloneof: Option<String>,
     pub romof: Option<String>,
+    /// Platform name from the DAT (e.g. "Nintendo - Game Boy" from OfflineList
+    /// `<configuration><system>` or set by the importer for FBNeo per-manufacturer dats).
     pub platform: String,
-    pub region: Option<String>,
+    pub roms: Vec<ParsedRom>,
 }
 
 #[derive(Debug, Clone)]
-pub struct RomEntry {
-    pub id: i64,
-    pub game_entry_id: i64,
+pub struct ParsedRom {
     pub filename: String,
     pub size: Option<i64>,
     pub crc32: Option<String>,
@@ -72,4 +105,24 @@ pub struct MissingGame {
 pub enum MissingReason {
     FileNotFound,
     CrcMismatch { matched: usize, expected: usize },
+}
+
+/// Temporary struct for NPS import (games without a DAT)
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct NpsGame {
+    pub id: i64,
+    pub name: String,
+    pub title_id: Option<String>,
+    pub content_id: Option<String>,
+    pub platform: Option<String>,
+    pub roms: Vec<NpsRom>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct NpsRom {
+    pub id: i64,
+    pub filename: String,
+    pub subtype: String,
+    pub size: Option<i64>,
+    pub sha1: Option<String>,
 }

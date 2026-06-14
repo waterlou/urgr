@@ -135,7 +135,7 @@ export function execCliStream(args, { binary = 'build', onProgress, signal } = {
         for (const line of lines) {
           try {
             const progress = JSON.parse(line);
-            if (progress.phase && progress.pct !== undefined) {
+            if (progress.pct !== undefined) {
               onProgress(progress);
             }
           } catch {

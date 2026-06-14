@@ -31,13 +31,13 @@ export default function DownloadDialog({ open, gameName, progress, jobId, onClos
           {messages.length === 0 ? (
             <Typography variant="caption" color="text.secondary">Starting...</Typography>
           ) : messages.map((msg, i) => (
-            <Typography key={i} variant="caption" display="block"
-              color={msg.startsWith('✗') || msg.startsWith('Error') ? 'error'
-                : msg.startsWith('✓') ? 'success.main'
-                : msg.startsWith('⚠') ? 'warning.main'
-                : 'text.primary'}
-              sx={{ whiteSpace: 'pre-wrap' }}
-            >
+              <Typography key={i} component="div" variant="caption"
+                color={msg.startsWith('✗') || msg.startsWith('Error') ? 'error'
+                  : msg.startsWith('✓') ? 'success.main'
+                  : msg.startsWith('⚠') ? 'warning.main'
+                  : 'text.primary'}
+                sx={{ whiteSpace: 'pre-wrap', mb: 0.25 }}
+              >
               {msg}
             </Typography>
           ))}

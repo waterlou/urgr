@@ -387,7 +387,7 @@ fn cmd_scrape(args: &[String], json: bool) -> ExitCode {
     install_signal_handlers();
     CANCEL_FLAG.store(false, Ordering::Relaxed);
 
-    let games = match db.list_games_needing_screenshots(version_id) {
+    let games = match db.list_nps_games(version_id) {
         Ok(g) => g,
         Err(e) => { eprintln!("Failed to list games: {}", e); return ExitCode::FAILURE; }
     };
@@ -477,7 +477,11 @@ fn cmd_scrape(args: &[String], json: bool) -> ExitCode {
 
         if !screenshots.is_empty() {
             screenshots.truncate(5);
-            if let Err(e) = db.update_game_screenshots(game.id, &screenshots) {
+            let json = serde_json::to_string(&screenshots).unwrap_or_else(|_| "[]".to_string());
+            if let Err(e) = db.conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+                &[&format!("screenshots_{}", game.id) as &dyn rusqlite::types::ToSql, &json as &dyn rusqlite::types::ToSql],
+            ) {
                 eprintln!("Failed to update game {}: {}", game.id, e);
                 failed += 1;
             } else {

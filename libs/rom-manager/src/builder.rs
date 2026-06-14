@@ -8,7 +8,7 @@ use tracing::info;
 
 use crate::db::Database;
 use crate::error::{Error, Result};
-use crate::models::{GameEntry, MissingGame, MissingReason, RomEntry, SetVersion};
+use crate::models::{Game, MissingGame, MissingReason, ParsedGame, ParsedRom, RomFile, SetVersion};
 use rom_scraper::compute_hashes_from_bytes;
 
 const STATUS_FILENAME: &str = "_build_status.json";
@@ -106,7 +106,7 @@ impl ImportIndex {
         Ok(Self { name_to_path, zip_crcs, loose_files })
     }
 
-    fn find_match(&self, game_name: &str, expected_roms: &[RomEntry]) -> Option<PathBuf> {
+    fn find_match(&self, game_name: &str, expected_roms: &[RomFile]) -> Option<PathBuf> {
         if expected_roms.is_empty() { return None; }
         let path = self.name_to_path.get(game_name)?;
         let zip_crc_set = self.zip_crcs.get(game_name)?;
@@ -121,7 +121,7 @@ impl ImportIndex {
 
     /// For a filename-matched zip that has mismatched CRCs, find loose files to patch it.
     /// Returns (zip_path, missing_roms_with_loose_source)
-    fn find_patches(&self, game_name: &str, expected_roms: &[RomEntry]) -> Option<(PathBuf, Vec<(String, PathBuf)>)> {
+    fn find_patches(&self, game_name: &str, expected_roms: &[RomFile]) -> Option<(PathBuf, Vec<(String, PathBuf)>)> {
         let path = self.name_to_path.get(game_name)?;
         let zip_crc_set = self.zip_crcs.get(game_name)?;
         let mut patches = Vec::new();
@@ -140,7 +140,7 @@ impl ImportIndex {
     }
 
     /// After find_match fails, determine the detailed reason
-    fn explain_missing(&self, game_name: &str, expected_roms: &[RomEntry]) -> MissingReason {
+    fn explain_missing(&self, game_name: &str, expected_roms: &[RomFile]) -> MissingReason {
         let path = self.name_to_path.get(game_name);
         if path.is_none() {
             return MissingReason::FileNotFound;
@@ -149,7 +149,7 @@ impl ImportIndex {
             Some(s) => s,
             None => return MissingReason::CrcMismatch { matched: 0, expected: expected_roms.len() },
         };
-        let non_merge: Vec<&RomEntry> = expected_roms.iter()
+        let non_merge: Vec<&RomFile> = expected_roms.iter()
             .filter(|r| r.merge_target.is_none())
             .collect();
         let expected_count = non_merge.len();
@@ -241,7 +241,7 @@ fn filter_prior_versions(all_versions: &[String], current_version: &str) -> Vec<
 /// Check if a game's ROM exists in a prior version's output (identical file by SHA1).
 fn find_in_fallback(
     game_name: &str,
-    game_map: &HashMap<String, &GameEntry>,
+    game_map: &HashMap<String, &Game>,
     collection_dir: Option<&Path>,
     prior_versions: &[String],
     db: &Database,
@@ -511,7 +511,7 @@ pub fn build_version(
     progress(on_progress, "index", 30, "Import index built", 0, need_copy.len(), need_copy.len() + unchanged, &progress_path);
 
     // ── Phase 5: Copy matching ROMs + CHDs ──
-    let game_map: HashMap<String, &GameEntry> = all_games.iter().map(|g| (g.name.clone(), g)).collect();
+    let game_map: HashMap<String, &Game> = all_games.iter().map(|g| (g.name.clone(), g)).collect();
 
     // Read prior versions for fallback chain (only older versions, not newer ones)
     let mut prior_versions: Vec<String> = collection_dir
@@ -565,7 +565,7 @@ pub fn build_version(
         // Get expected ROMs for this game
         let ge = game_map.get(game_name);
         let expected_roms = if let Some(g) = ge {
-            db.list_roms_for_game(g.id)?
+            db.list_roms_for_game(g.id, latest.id)?
         } else {
             Vec::new()
         };
@@ -611,7 +611,7 @@ pub fn build_version(
                 else { roms_dir.join(format!("{}.zip", game_name)) };
             if dest.exists() { continue; }
             let ge = game_map.get(game_name);
-            let expected_roms = if let Some(g) = ge { db.list_roms_for_game(g.id)? } else { Vec::new() };
+            let expected_roms = if let Some(g) = ge { db.list_roms_for_game(g.id, latest.id)? } else { Vec::new() };
             for rom in &expected_roms {
                 if let Some(ref crc) = rom.crc32 {
                     if let Some(src) = index.loose_files.get(crc) {
@@ -906,7 +906,7 @@ fn move_to_deleted(
     Ok(())
 }
 
-fn verify_zip_contains(zip_path: &Path, expected_roms: &[RomEntry]) -> bool {
+fn verify_zip_contains(zip_path: &Path, expected_roms: &[RomFile]) -> bool {
     if expected_roms.is_empty() {
         return false;
     }
@@ -946,7 +946,7 @@ fn verify_game_zip(db: &Database, version_id: i64, game_name: &str, zip_path: &P
         Some(g) => g,
         None => return Ok(false),
     };
-    let mut expected = db.list_roms_for_game(game.id)?;
+    let mut expected = db.list_roms_for_game(game.id, version_id)?;
     if expected.is_empty() {
         return Ok(false);
     }
@@ -960,9 +960,9 @@ fn verify_game_zip(db: &Database, version_id: i64, game_name: &str, zip_path: &P
     }
 
     // Split-format support: subtract ROMs inherited from parent (cloneof)
-    if let Some(ref parent_name) = game.cloneof {
-        if let Some(parent) = games.iter().find(|g| g.name == *parent_name) {
-            let parent_roms = db.list_roms_for_game(parent.id)?;
+    if let Some(parent_id) = game.parent_game_id {
+        if let Some(parent) = games.iter().find(|g| g.id == parent_id) {
+            let parent_roms = db.list_roms_for_game(parent.id, version_id)?;
             let parent_crcs: HashSet<String> = parent_roms.iter()
                 .filter_map(|r| r.crc32.as_ref())
                 .cloned()
@@ -972,7 +972,7 @@ fn verify_game_zip(db: &Database, version_id: i64, game_name: &str, zip_path: &P
     }
     // If after subtraction we have nothing left, check all (game is its own parent)
     if expected.is_empty() {
-        let all = db.list_roms_for_game(game.id)?;
+        let all = db.list_roms_for_game(game.id, version_id)?;
         let non_merge: Vec<_> = all.iter().filter(|r| r.merge_target.is_none()).cloned().collect();
         return Ok(verify_zip_contains(zip_path, &non_merge));
     }
@@ -983,67 +983,56 @@ fn verify_game_zip(db: &Database, version_id: i64, game_name: &str, zip_path: &P
 mod tests {
     use super::*;
     use crate::db::Database;
-    use crate::models::GameEntry;
     use std::io::Write;
     use std::sync::atomic::AtomicBool;
+    use crate::models::ParsedGame;
 
     fn make_db() -> Database {
         Database::open_in_memory().expect("in-memory db")
     }
 
     fn add_game(db: &Database, vid: i64, name: &str) -> i64 {
-        db.insert_game(
-            vid,
-            &GameEntry {
-                id: 0,
-                version_id: 0,
-                name: name.to_string(),
-                description: String::new(),
-                year: None,
-                manufacturer: None,
-                cloneof: None,
-                romof: None,
-                platform: String::new(),
-                region: None,
-            },
-        )
-        .unwrap()
+        let parsed = ParsedGame {
+            name: name.to_string(),
+            description: String::new(),
+            year: None,
+            manufacturer: None,
+            cloneof: None,
+            romof: None,
+            platform: String::new(),
+            roms: Vec::new(),
+        };
+        let gid = db.insert_game(&parsed).unwrap();
+        db.insert_rom_set(gid, vid, None).unwrap();
+        gid
     }
 
-    fn add_rom(db: &Database, gid: i64, name: &str, sha1: &str) {
-        db.insert_rom(
-            gid,
-            &RomEntry {
-                id: 0,
-                game_entry_id: 0,
-                filename: name.to_string(),
-                size: Some(4),
-                crc32: None,
-                md5: None,
-                sha1: Some(sha1.to_string()),
-                status: "good".to_string(),
-                merge_target: None,
-            },
-        )
-        .unwrap();
+    fn add_rom(db: &Database, gid: i64, vid: i64, name: &str, sha1: &str) {
+        let rsid = db.insert_rom_set(gid, vid, None).unwrap();
+        let parsed = ParsedRom {
+            filename: name.to_string(),
+            size: Some(4),
+            crc32: None,
+            md5: None,
+            sha1: Some(sha1.to_string()),
+            status: "good".to_string(),
+            merge_target: None,
+        };
+        db.insert_rom_files_batch(rsid, &[parsed]).unwrap();
     }
 
-    fn add_rom_with_crc(db: &Database, gid: i64, name: &str, sha1: &str, crc32: &str) {
-        db.insert_rom(
-            gid,
-            &RomEntry {
-                id: 0,
-                game_entry_id: 0,
-                filename: name.to_string(),
-                size: Some(4),
-                crc32: Some(crc32.to_string()),
-                md5: None,
-                sha1: Some(sha1.to_string()),
-                status: "good".to_string(),
-                merge_target: None,
-            },
-        )
-        .unwrap();
+    fn add_rom_with_crc(db: &Database, gid: i64, vid: i64, name: &str, sha1: &str, crc32: &str) {
+        let rsid = db.insert_rom_set(gid, vid, None).unwrap();
+        let parsed = ParsedRom {
+            filename: name.to_string(),
+            size: Some(4),
+            crc32: Some(crc32.to_string()),
+            md5: None,
+            sha1: Some(sha1.to_string()),
+            status: "good".to_string(),
+            merge_target: None,
+        };
+        db.insert_rom_files_batch(rsid, &[parsed]).unwrap();
     }
 
     fn make_zip_with_content(path: &Path, content: &[u8]) {
@@ -1208,7 +1197,7 @@ mod tests {
         let db = make_db();
         let vid = db.import_version("test", "v1.0", None).unwrap();
         let gid = add_game(&db, vid, "game1");
-        add_rom(&db, gid, "rom.bin", &sha1);
+        add_rom(&db, gid, vid, "rom.bin", &sha1);
 
         let cancelled = AtomicBool::new(false);
         let progress = |_: &BuildProgress| {};
@@ -1271,7 +1260,7 @@ mod tests {
             let crcs = &crc_map[name];
             let sha1 = &sha1_map[name];
             for (rom_name, crc_hex) in crcs {
-                add_rom_with_crc(&db, gid, rom_name, sha1, crc_hex);
+                add_rom_with_crc(&db, gid, vid1, rom_name, sha1, crc_hex);
             }
         }
 
@@ -1324,7 +1313,7 @@ mod tests {
             let crcs = &crc_map[name];
             let sha1 = &sha1_map[name];
             for (rom_name, crc_hex) in crcs {
-                add_rom_with_crc(&db, gid, rom_name, sha1, crc_hex);
+                add_rom_with_crc(&db, gid, vid2, rom_name, sha1, crc_hex);
             }
             // Keep v0.1 zip in import dir (same CRC)
             v2_sha1_map.insert(name.clone(), sha1_map[name].clone());
@@ -1351,7 +1340,7 @@ mod tests {
             let zip_bytes = std::fs::read(&import_dir.join(format!("{}.zip", name))).unwrap();
             let sha1 = rom_scraper::compute_hashes_from_bytes(&zip_bytes).sha1;
             for (rom_name, crc_hex) in &crc_vec {
-                add_rom_with_crc(&db, gid, rom_name, &sha1, crc_hex);
+                add_rom_with_crc(&db, gid, vid2, rom_name, &sha1, crc_hex);
             }
             v2_crc_map.insert(name.clone(), crc_vec);
             v2_sha1_map.insert(name.clone(), sha1);
@@ -1377,7 +1366,7 @@ mod tests {
             let zip_bytes = std::fs::read(&import_dir.join(format!("{}.zip", name))).unwrap();
             let sha1 = rom_scraper::compute_hashes_from_bytes(&zip_bytes).sha1;
             for (rom_name, crc_hex) in &crc_vec {
-                add_rom_with_crc(&db, gid, rom_name, &sha1, crc_hex);
+                add_rom_with_crc(&db, gid, vid2, rom_name, &sha1, crc_hex);
             }
             v2_crc_map.insert(name.clone(), crc_vec);
             v2_sha1_map.insert(name.clone(), sha1);

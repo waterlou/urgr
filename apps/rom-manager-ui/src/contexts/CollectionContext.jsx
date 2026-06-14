@@ -43,15 +43,22 @@ export function CollectionProvider({ children }) {
     }
   }, []);
 
-  const loadGames = useCallback(async (view, id, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, romsOnly, versionFilter, collectionSubView) => {
+  const loadGames = useCallback(async (view, id, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, romsOnly, versionFilter, collectionSubView, yearFilter, manufacturerFilter) => {
     setLoading(true);
     setOffset(0);
     try {
       let data;
+      const common = { limit: PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery,
+        parents_only: parentsOnly ? 'true' : undefined,
+        favourites_only: favouritesOnly ? 'true' : undefined,
+        roms_only: romsOnly ? 'true' : undefined,
+        year: yearFilter || undefined,
+        manufacturer: manufacturerFilter || undefined,
+      };
       if (view === 'browse') {
-        data = await getGames({ limit: PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery, parents_only: parentsOnly ? 'true' : undefined, favourites_only: favouritesOnly ? 'true' : undefined, roms_only: romsOnly ? 'true' : undefined });
+        data = await getGames(common);
       } else if (view === 'collection') {
-        data = await getCollectionGames(id, { limit: PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery, parents_only: parentsOnly ? 'true' : undefined, favourites_only: favouritesOnly ? 'true' : undefined, roms_only: romsOnly ? 'true' : undefined, version_id: versionFilter || undefined });
+        data = await getCollectionGames(id, { ...common, version_id: versionFilter || undefined });
         setCollectionVersions(data?.versions || []);
       } else if (view === 'game-set') {
         data = await getGameSetGames(id, { limit: PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery });
@@ -69,16 +76,23 @@ export function CollectionProvider({ children }) {
     }
   }, []);
 
-  const loadMore = useCallback(async (view, id, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, romsOnly, versionFilter) => {
+  const loadMore = useCallback(async (view, id, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, romsOnly, versionFilter, yearFilter, manufacturerFilter) => {
     if (loadingMoreRef.current || !hasMore) return;
     loadingMoreRef.current = true;
     setLoading(true);
     try {
       let data;
+      const common = { limit: PAGE_SIZE, offset: offset + PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery,
+        parents_only: parentsOnly ? 'true' : undefined,
+        favourites_only: favouritesOnly ? 'true' : undefined,
+        roms_only: romsOnly ? 'true' : undefined,
+        year: yearFilter || undefined,
+        manufacturer: manufacturerFilter || undefined,
+      };
       if (view === 'browse') {
-        data = await getGames({ limit: PAGE_SIZE, offset: offset + PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery, parents_only: parentsOnly ? 'true' : undefined, favourites_only: favouritesOnly ? 'true' : undefined, roms_only: romsOnly ? 'true' : undefined });
+        data = await getGames(common);
       } else if (view === 'collection') {
-        data = await getCollectionGames(id, { limit: PAGE_SIZE, offset: offset + PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery, parents_only: parentsOnly ? 'true' : undefined, favourites_only: favouritesOnly ? 'true' : undefined, roms_only: romsOnly ? 'true' : undefined, version_id: versionFilter || undefined });
+        data = await getCollectionGames(id, { ...common, version_id: versionFilter || undefined });
       } else if (view === 'game-set') {
         data = await getGameSetGames(id, { limit: PAGE_SIZE, offset: offset + PAGE_SIZE, sort: sortField, order: sortOrder, q: searchQuery });
       }

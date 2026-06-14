@@ -7,7 +7,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use crate::error::Result;
-use crate::models::{DatFormat, GameEntry, ParseStats, RomEntry};
+use crate::models::{DatFormat, ParsedGame, ParseStats};
 
 pub use clrmamepro::parse_clrmamepro_dat;
 pub use logiqx::parse_logiqx_dat;
@@ -74,7 +74,7 @@ pub fn detect_format<P: AsRef<Path>>(path: P) -> Result<DatFormat> {
     )))
 }
 
-pub fn parse_dat<P: AsRef<Path>>(path: P) -> Result<(Vec<GameEntry>, Vec<RomEntry>, ParseStats)> {
+pub fn parse_dat<P: AsRef<Path>>(path: P) -> Result<(Vec<ParsedGame>, ParseStats)> {
     let fmt = detect_format(&path)?;
     match fmt {
         DatFormat::MameListXml => parse_mame_dat(path),

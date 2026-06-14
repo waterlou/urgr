@@ -123,6 +123,9 @@ fn main() -> ExitCode {
         .and_then(|p| args.get(p + 1));
     let platform = args.iter().position(|a| a == "--platform")
         .and_then(|p| args.get(p + 1));
+    let subtype = args.iter().position(|a| a == "--subtype")
+        .and_then(|p| args.get(p + 1));
+    let existing_only = args.iter().any(|a| a == "--existing-only");
 
     let path = std::path::Path::new(file);
     if !path.exists() {
@@ -141,7 +144,7 @@ fn main() -> ExitCode {
         Err(e) => { eprintln!("Format detection failed: {}", e); return ExitCode::FAILURE; }
     };
 
-    let (games, roms, stats) = match parse_dat(file) {
+    let (games, stats) = match parse_dat(file) {
         Ok(v) => v,
         Err(e) => { eprintln!("Parse error: {}", e); return ExitCode::FAILURE; }
     };
@@ -153,35 +156,47 @@ fn main() -> ExitCode {
         Err(e) => { eprintln!("Failed to import version: {}", e); return ExitCode::FAILURE; }
     };
 
-    let mut parser_id_to_db_id: HashMap<i64, i64> = HashMap::new();
-    for game in &games {
-        match db.insert_game(version_id, game) {
-            Ok(db_id) => {
-                parser_id_to_db_id.insert(game.id, db_id);
-                // Set platform if provided
-                if let Some(p) = platform {
-                    if let Err(e) = db.set_game_platform(db_id, p) {
-                        eprintln!("Failed to set platform: {}", e);
-                    }
-                }
-            }
-            Err(e) => { eprintln!("Failed to insert game {}: {}", game.name, e); return ExitCode::FAILURE; }
-        }
-    }
-    let games_inserted = games.len();
-
     let mut rom_count = 0usize;
-    for rom in &roms {
-        if let Some(&db_game_id) = parser_id_to_db_id.get(&rom.game_entry_id) {
-            let mut r = rom.clone();
-            r.game_entry_id = db_game_id;
-            if let Err(e) = db.insert_rom(db_game_id, &r) {
-                eprintln!("Failed to insert ROM {}: {}", rom.filename, e);
-            } else {
-                rom_count += 1;
+    for game in &games {
+        // Skip games that don't exist yet when --existing-only is set
+        if existing_only {
+            let exists = db.game_exists(&game.name, version_id).unwrap_or(false);
+            if !exists { continue; }
+        }
+        // If --platform was passed, override the platform field (used for FBNeo per-manufacturer dats)
+        let mut game = game.clone();
+        if let Some(p) = platform {
+            game.platform = p.to_string();
+        }
+        let gid = match db.insert_game(&game) {
+            Ok(id) => id,
+            Err(e) => { eprintln!("Failed to insert game {}: {}", game.name, e); return ExitCode::FAILURE; }
+        };
+        let rsid = match db.insert_rom_set(gid, version_id, game.romof.as_deref()) {
+            Ok(id) => id,
+            Err(e) => { eprintln!("Failed to create ROM set for {}: {}", game.name, e); return ExitCode::FAILURE; }
+        };
+        if !game.roms.is_empty() {
+            if let Err(e) = db.insert_rom_files_batch(rsid, &game.roms) {
+                eprintln!("Failed to insert ROMs for {}: {}", game.name, e);
+                return ExitCode::FAILURE;
+            }
+            rom_count += game.roms.len();
+        }
+        // Set subtype on all ROM files for this rom set
+        if let Some(st) = subtype {
+            if let Err(e) = db.set_rom_subtype(rsid, st) {
+                eprintln!("Failed to set subtype for {}: {}", game.name, e);
+                return ExitCode::FAILURE;
             }
         }
     }
+    // Second pass: resolve cloneof → parent_game_id
+    if let Err(e) = db.resolve_parents(&games) {
+        eprintln!("Warning: failed to resolve parent references: {}", e);
+    }
+
+    let games_inserted = games.len();
 
     if json {
         print_json(&DatImportOutput {

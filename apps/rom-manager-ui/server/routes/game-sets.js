@@ -51,18 +51,26 @@ router.get('/api/game-sets/:id/games', async (req, res) => {
     const { limit = 200, offset = 0, sort = 'name', order = 'asc' } = req.query;
     const gameSet = get('SELECT * FROM game_sets WHERE id = ?', [id]);
     if (!gameSet) return res.status(404).json({ error: 'not found' });
-    const sortCol = sort === 'rating' ? 'COALESCE(r.rating, 0)' : sort === 'favourite' ? 'COALESCE(r.favourite, 0)' : sort === 'play_count' ? 'COALESCE(r.play_count, 0)' : 'g.name';
+    const sortCol = sort === 'rating' ? 'COALESCE(gs.rating, 0)' : sort === 'favourite' ? 'COALESCE(gs.favourite, 0)' : sort === 'play_count' ? 'COALESCE(gs.play_count, 0)' : 'g.name';
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
     const total = get('SELECT COUNT(*) as c FROM game_set_games WHERE game_set_id = ?', [id]).c;
     const games = all(`
-      SELECT g.*, sv.source, sv.version, COALESCE(r.rating, 0) as rating, COALESCE(r.favourite, 0) as favourite, COALESCE(r.play_count, 0) as play_count
-      FROM game_set_games gsg JOIN game_entries g ON g.id = gsg.game_entry_id
-      JOIN set_versions sv ON sv.id = g.version_id
-      LEFT JOIN game_state r ON r.game_entry_id = g.id
+      SELECT g.*, parent_g.name as cloneof, sv_min.source, sv_min.version, COALESCE(gs.rating, 0) as rating, COALESCE(gs.favourite, 0) as favourite, COALESCE(gs.play_count, 0) as play_count
+      FROM game_set_games gsg
+      JOIN games g ON g.id = gsg.game_id
+      LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
+      LEFT JOIN game_state gs ON gs.game_id = g.id
+      LEFT JOIN game_rom_sets grs ON grs.id = (SELECT grs2.id FROM game_rom_sets grs2 WHERE grs2.game_id = g.id ORDER BY grs2.version_id LIMIT 1)
+      LEFT JOIN set_versions sv_min ON sv_min.id = grs.version_id
       WHERE gsg.game_set_id = ?
       ORDER BY ${sortCol} ${sortDir}, g.name LIMIT ? OFFSET ?
     `, [id, Number(limit), Number(offset)]);
-    const size = get('SELECT SUM(re.size) as total_bytes FROM game_set_games gsg JOIN rom_entries re ON re.game_entry_id = gsg.game_entry_id WHERE gsg.game_set_id = ?', [id]);
+    const size = get(`SELECT SUM(grf.size) as total_bytes
+      FROM game_set_games gsg
+      JOIN games g ON g.id = gsg.game_id
+      JOIN game_rom_sets grs ON grs.game_id = g.id
+      JOIN game_rom_files grf ON grf.rom_set_id = grs.id
+      WHERE gsg.game_set_id = ?`, [id]);
     res.json({ game_set: gameSet, games, total, total_size: size?.total_bytes || 0, limit: Number(limit), offset: Number(offset) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -72,7 +80,7 @@ router.post('/api/game-sets/:id/games', async (req, res) => {
   try {
     const { game_entry_ids } = req.body;
     if (!game_entry_ids?.length) return res.status(400).json({ error: 'game_entry_ids required' });
-    const insert = getDb().prepare('INSERT OR IGNORE INTO game_set_games (game_set_id, game_entry_id) VALUES (?, ?)');
+    const insert = getDb().prepare('INSERT OR IGNORE INTO game_set_games (game_set_id, game_id) VALUES (?, ?)');
     for (const gid of game_entry_ids) { insert.bind([req.params.id, gid]); insert.step(); insert.reset(); }
     insert.free();
     saveDb();
@@ -83,7 +91,7 @@ router.post('/api/game-sets/:id/games', async (req, res) => {
 router.delete('/api/game-sets/:id/games/:gameId', async (req, res) => {
   await dbReady;
   try {
-    run('DELETE FROM game_set_games WHERE game_set_id = ? AND game_entry_id = ?', [req.params.id, req.params.gameId]);
+    run('DELETE FROM game_set_games WHERE game_set_id = ? AND game_id = ?', [req.params.id, req.params.gameId]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -94,10 +102,13 @@ router.get('/api/game-sets/:id/exports', async (req, res) => {
     const gs = get('SELECT * FROM game_sets WHERE id = ?', [req.params.id]);
     if (!gs) return res.status(404).json({ error: 'not found' });
     const games = all(`
-      SELECT g.name, g.description, g.year, g.manufacturer, g.cloneof, sv.source, sv.version, r.size
-      FROM game_set_games gsg JOIN game_entries g ON g.id = gsg.game_entry_id
-      JOIN set_versions sv ON sv.id = g.version_id
-      LEFT JOIN rom_entries r ON r.game_entry_id = g.id AND r.id = (SELECT MIN(id) FROM rom_entries WHERE game_entry_id = g.id)
+      SELECT g.name, g.description, g.year, g.manufacturer, parent_g.name as cloneof, sv.source, sv.version, grf.size
+      FROM game_set_games gsg
+      JOIN games g ON g.id = gsg.game_id
+      LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
+      LEFT JOIN game_rom_sets grs ON grs.game_id = g.id AND grs.id = (SELECT MIN(id) FROM game_rom_sets WHERE game_id = g.id)
+      LEFT JOIN set_versions sv ON sv.id = grs.version_id
+      LEFT JOIN game_rom_files grf ON grf.rom_set_id = grs.id AND grf.id = (SELECT MIN(id) FROM game_rom_files WHERE rom_set_id = grs.id)
       WHERE gsg.game_set_id = ? ORDER BY g.name
     `, [req.params.id]);
     res.json({ game_set: gs, games, total_games: games.length });

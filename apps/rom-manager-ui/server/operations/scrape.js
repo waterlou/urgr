@@ -21,10 +21,11 @@ export class ScrapeOperation extends Operation {
     if (gameIds && gameIds.length > 0) {
       games = gameIds.map(id => ({ id }));
     } else {
-      games = all(`SELECT DISTINCT ge.id FROM game_entries ge
-        JOIN collection_versions cv ON cv.version_id = ge.version_id
-        WHERE cv.collection_id = ? AND (ge.manufacturer IS NULL OR ge.manufacturer = '' OR ge.year IS NULL OR ge.year = '')
-        ORDER BY ge.name`, [this.collectionId]);
+      games = all(`SELECT DISTINCT g.id FROM games g
+        JOIN game_rom_sets grs ON grs.game_id = g.id
+        JOIN collection_versions cv ON cv.version_id = grs.version_id
+        WHERE cv.collection_id = ? AND (g.manufacturer IS NULL OR g.manufacturer = '' OR g.year IS NULL OR g.year = '')
+        ORDER BY g.name`, [this.collectionId]);
     }
 
     const total = games.length;

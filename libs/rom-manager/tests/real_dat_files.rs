@@ -12,7 +12,7 @@ fn fixture(name: &str) -> String {
 #[test]
 fn test_real_mame_logiqx_dat() {
     let path = fixture("mame_2000_xml.dat");
-    let (games, _roms, stats) = rom_manager::dat::parse_dat(&path).unwrap();
+    let (games, stats) = rom_manager::dat::parse_dat(&path).unwrap();
 
     assert!(stats.total_games > 0, "should parse games from real MAME DAT");
     assert!(stats.total_roms > 0, "should parse ROMs from real MAME DAT");
@@ -30,7 +30,7 @@ fn test_real_mame_logiqx_dat() {
 #[test]
 fn test_real_fbneo_clrmamepro_dat() {
     let path = fixture("fbneo_arcade_games.dat");
-    let (games, _roms, stats) = rom_manager::dat::parse_dat(&path).unwrap();
+    let (games, stats) = rom_manager::dat::parse_dat(&path).unwrap();
 
     assert!(stats.total_games > 0, "should parse games from real FBNeo DAT");
     assert!(stats.total_roms > 0, "should parse ROMs from real FBNeo DAT");

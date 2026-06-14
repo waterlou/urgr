@@ -4,8 +4,8 @@ use std::path::Path;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
-use crate::error::{Error, Result};
-use crate::models::{GameEntry, ParseStats, RomEntry};
+use crate::error::Result;
+use crate::models::{ParsedGame, ParsedRom, ParseStats};
 
 /// Parse an OfflineList XML DAT (used by No-Intro nointro.free.fr).
 ///
@@ -26,19 +26,18 @@ use crate::models::{GameEntry, ParseStats, RomEntry};
 ///   </games>
 /// </dat>
 /// ```
-pub fn parse_offlinelist_dat<P: AsRef<Path>>(path: P) -> Result<(Vec<GameEntry>, Vec<RomEntry>, ParseStats)> {
+pub fn parse_offlinelist_dat<P: AsRef<Path>>(path: P) -> Result<(Vec<ParsedGame>, ParseStats)> {
     let file = std::fs::File::open(path.as_ref())?;
     let reader = BufReader::new(file);
     parse_offlinelist_reader(reader)
 }
 
-pub fn parse_offlinelist_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>, Vec<RomEntry>, ParseStats)> {
+pub fn parse_offlinelist_reader<R: BufRead>(reader: R) -> Result<(Vec<ParsedGame>, ParseStats)> {
     let mut xml = Reader::from_reader(reader);
     xml.config_mut().trim_text(true);
 
     let mut buf = Vec::new();
     let mut games = Vec::new();
-    let mut all_roms = Vec::new();
     let mut errors = Vec::new();
     let mut system = String::new();
     let mut in_configuration = false;
@@ -52,6 +51,7 @@ pub fn parse_offlinelist_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>
     let mut publisher = String::new();
     let mut rom_size_str = String::new();
     let mut current_crc_ext = String::new();
+    let mut current_roms = Vec::new();
 
     loop {
         match xml.read_event_into(&mut buf) {
@@ -59,9 +59,7 @@ pub fn parse_offlinelist_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>
                 let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 match tag.as_str() {
                     "configuration" => in_configuration = true,
-                    "system" if in_configuration => {
-                        current_element = tag;
-                    }
+                    "system" if in_configuration => current_element = tag,
                     "games" => in_games = true,
                     "game" if in_games => {
                         in_game = true;
@@ -69,6 +67,7 @@ pub fn parse_offlinelist_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>
                         title.clear();
                         publisher.clear();
                         rom_size_str.clear();
+                        current_roms.clear();
                     }
                     "files" if in_game => in_files = true,
                     "romCRC" if in_files => {
@@ -99,9 +98,7 @@ pub fn parse_offlinelist_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>
                         let crc = text.trim();
                         if !crc.is_empty() && crc != "00000000" {
                             let filename = format!("{}{}", sanitize_name(&title), current_crc_ext);
-                            all_roms.push(RomEntry {
-                                id: 0,
-                                game_entry_id: games.len() as i64,
+                            current_roms.push(ParsedRom {
                                 filename,
                                 size: rom_size_str.parse().ok(),
                                 crc32: Some(crc.to_uppercase()),
@@ -122,10 +119,7 @@ pub fn parse_offlinelist_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>
                     "configuration" => in_configuration = false,
                     "games" => in_games = false,
                     "game" if in_game => {
-                        // Finalize the game
-                        let game_entry = GameEntry {
-                            id: games.len() as i64,
-                            version_id: 0,
+                        let game = ParsedGame {
                             name: sanitize_name(&title),
                             description: title.clone(),
                             year: None,
@@ -133,10 +127,9 @@ pub fn parse_offlinelist_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>
                             cloneof: None,
                             romof: None,
                             platform: system.clone(),
-                            region: None,
+                            roms: std::mem::take(&mut current_roms),
                         };
-                        games.push(game_entry);
-
+                        games.push(game);
                         in_game = false;
                         in_files = false;
                         current_element.clear();
@@ -170,9 +163,7 @@ pub fn parse_offlinelist_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>
                         .unwrap_or_default();
                     if !crc.is_empty() && crc != "00000000" {
                         let filename = format!("{}{}", sanitize_name(&title), ext);
-                        all_roms.push(RomEntry {
-                            id: 0,
-                            game_entry_id: games.len() as i64,
+                        current_roms.push(ParsedRom {
                             filename,
                             size: rom_size_str.parse().ok(),
                             crc32: Some(crc.to_uppercase()),
@@ -196,11 +187,11 @@ pub fn parse_offlinelist_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>
 
     let stats = ParseStats {
         total_games: games.len(),
-        total_roms: all_roms.len(),
+        total_roms: games.iter().map(|g| g.roms.len()).sum(),
         errors,
     };
 
-    Ok((games, all_roms, stats))
+    Ok((games, stats))
 }
 
 /// Sanitize a game title into a valid filename:
@@ -246,7 +237,7 @@ mod tests {
   </games>
 </dat>"#;
 
-        let (games, roms, stats) = parse_offlinelist_reader(std::io::Cursor::new(xml.as_bytes())).unwrap();
+        let (games, stats) = parse_offlinelist_reader(std::io::Cursor::new(xml.as_bytes())).unwrap();
         assert_eq!(stats.total_games, 2);
         assert_eq!(stats.total_roms, 2);
         assert!(stats.errors.is_empty());
@@ -257,15 +248,15 @@ mod tests {
         assert_eq!(games[0].platform, "Nintendo - Game Boy");
         assert!(games[0].cloneof.is_none());
 
-        assert_eq!(roms[0].filename, "Game One.gb");
-        assert_eq!(roms[0].size, Some(131072));
-        assert_eq!(roms[0].crc32.as_deref(), Some("B61CD120"));
-        assert!(roms[0].md5.is_none());
-        assert!(roms[0].sha1.is_none());
+        assert_eq!(games[0].roms[0].filename, "Game One.gb");
+        assert_eq!(games[0].roms[0].size, Some(131072));
+        assert_eq!(games[0].roms[0].crc32.as_deref(), Some("B61CD120"));
+        assert!(games[0].roms[0].md5.is_none());
+        assert!(games[0].roms[0].sha1.is_none());
 
         assert_eq!(games[1].name, "Game Two");
-        assert_eq!(roms[1].filename, "Game Two.gb");
-        assert_eq!(roms[1].crc32.as_deref(), Some("CAFE0D2B"));
+        assert_eq!(games[1].roms[0].filename, "Game Two.gb");
+        assert_eq!(games[1].roms[0].crc32.as_deref(), Some("CAFE0D2B"));
     }
 
     #[test]
@@ -291,10 +282,10 @@ mod tests {
   </games>
 </dat>"#;
 
-        let (games, roms, stats) = parse_offlinelist_reader(std::io::Cursor::new(xml.as_bytes())).unwrap();
+        let (games, _stats) = parse_offlinelist_reader(std::io::Cursor::new(xml.as_bytes())).unwrap();
         assert_eq!(games.len(), 1);
-        assert_eq!(roms.len(), 2);
-        assert_eq!(roms[0].filename, "Multi.gba");
-        assert_eq!(roms[1].filename, "Multi.bin");
+        assert_eq!(games[0].roms.len(), 2);
+        assert_eq!(games[0].roms[0].filename, "Multi.gba");
+        assert_eq!(games[0].roms[1].filename, "Multi.bin");
     }
 }

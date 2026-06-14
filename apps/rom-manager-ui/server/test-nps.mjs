@@ -100,8 +100,9 @@ describe('NPS import', () => {
     })
 
     after(() => {
-      try { db.run('DROP TABLE IF EXISTS game_entries') } catch {}
-      try { db.run('DROP TABLE IF EXISTS rom_entries') } catch {}
+      try { db.run('DROP TABLE IF EXISTS games') } catch {}
+      try { db.run('DROP TABLE IF EXISTS game_rom_sets') } catch {}
+      try { db.run('DROP TABLE IF EXISTS game_rom_files') } catch {}
       try { db.run('DROP TABLE IF EXISTS set_versions') } catch {}
       try { db.run('DROP TABLE IF EXISTS collection_versions') } catch {}
       try { db.run('DROP TABLE IF EXISTS game_state') } catch {}
@@ -112,17 +113,13 @@ describe('NPS import', () => {
     })
 
     it('imports games from mock PSV TSV', async () => {
-      // Create a version for import
       db.run('INSERT INTO set_versions (source, version) VALUES (?, ?)', ['NPS', 'PSV'])
       const idResult = db.exec('SELECT last_insert_rowid() as id')
       const versionId = idResult[0]?.values[0]?.[0]
       assert.ok(versionId)
 
-      // Mock TSV data (simulating real NPS format)
       const originalFetch = globalThis.fetch
-      let fetchCount = 0
       globalThis.fetch = async (url) => {
-        fetchCount++
         if (url.includes('PSV_GAMES.tsv')) {
           return {
             ok: true,
@@ -145,70 +142,72 @@ describe('NPS import', () => {
 
       const result = await importNps('PSV', versionId)
 
-      // Verify: MISSING PKG, Theme, Demo, and only-us-no-siblings games excluded
-      // 6 rows imported: 10 Second Ninja X (US+EU) = 1 parent + 1 clone, Persona 4 Golden (US+JP+EU+ASIA) = 1 parent + 3 clones
-      assert.equal(result.gamesImported, 6, 'should create 6 game entries')
+      // 2 game names, 6 ROM files (US+EU for Ninja, JP+US+EU+ASIA for P4G)
+      assert.equal(result.gamesImported, 2, 'should create 2 games')
+      assert.equal(result.romsImported, 6, 'should create 6 ROM files')
 
-      // Check parent/clone structure
+      // Check games table
       const games = db.exec(`
-        SELECT g.name, g.region, g.cloneof, g.title_id, g.content_id
-        FROM game_entries g WHERE g.version_id = ?
-        ORDER BY g.name, g.region`, [versionId])
+        SELECT g.name, g.platform, g.title_id, g.content_id
+        FROM games g
+        JOIN game_rom_sets grs ON grs.game_id = g.id
+        WHERE grs.version_id = ?
+        ORDER BY g.name`, [versionId])
       const rows = games[0]?.values || []
-      assert.equal(rows.length, 6)
+      assert.equal(rows.length, 2)
 
-      // 10 Second Ninja X: US is parent, EU is clone
-      const ninjaRows = rows.filter(r => r[0] === '10 Second Ninja X')
-      assert.equal(ninjaRows.length, 2)
+      // 10 Second Ninja X (parent = US)
+      const ninjaRow = rows.find(r => r[0] === '10 Second Ninja X')
+      assert.ok(ninjaRow, '10 Second Ninja X exists')
+      assert.equal(ninjaRow[1], 'PSV', 'platform set')
+      assert.equal(ninjaRow[2], 'PCSE00001', 'title_id from US variant')
 
-      const ninjaUS = ninjaRows.find(r => r[1] === 'US')
-      assert.ok(ninjaUS, 'US variant exists')
-      assert.equal(ninjaUS[2], null, 'US is parent (cloneof = null)')
-      assert.equal(ninjaUS[3], 'PCSE00001', 'US has correct title_id')
-      assert.equal(ninjaUS[4], 'UP4395-PCSE00001_00-GAME', 'US has correct content_id')
+      // Persona 4 Golden (parent = US)
+      const p4Row = rows.find(r => r[0] === 'Persona 4 Golden')
+      assert.ok(p4Row, 'Persona 4 Golden exists')
 
-      const ninjaEU = ninjaRows.find(r => r[1] === 'EU')
-      assert.ok(ninjaEU, 'EU variant exists')
-      assert.equal(ninjaEU[2], '10 Second Ninja X', 'EU is clone of parent')
-      assert.equal(ninjaEU[3], 'PCSB00001', 'EU has correct title_id')
+      // Check ROM files for Ninja (US + EU)
+      const ninjaRoms = db.exec(`
+        SELECT grf.filename, grf.subtype FROM game_rom_files grf
+        JOIN game_rom_sets grs ON grs.id = grf.rom_set_id
+        JOIN games g ON g.id = grs.game_id
+        WHERE g.name = ? AND grs.version_id = ?
+        ORDER BY grf.filename`, ['10 Second Ninja X', versionId])
+      const ninjaRomRows = ninjaRoms[0]?.values || []
+      assert.equal(ninjaRomRows.length, 2, 'Ninja has 2 ROM files (US + EU)')
+      assert.ok(ninjaRomRows.some(r => r[0].includes('PCSE00001')), 'US variant ROM')
+      assert.ok(ninjaRomRows.some(r => r[0].includes('PCSB00001')), 'EU variant ROM')
 
-      // Persona 4 Golden: US is parent, JP/EU/ASIA are clones
-      const p4Rows = rows.filter(r => r[0] === 'Persona 4 Golden')
-      assert.equal(p4Rows.length, 4)
+      // Check ROM files for Persona 4 (JP + US + EU + ASIA)
+      const p4Roms = db.exec(`
+        SELECT grf.filename, grf.subtype FROM game_rom_files grf
+        JOIN game_rom_sets grs ON grs.id = grf.rom_set_id
+        JOIN games g ON g.id = grs.game_id
+        WHERE g.name = 'Persona 4 Golden' AND grs.version_id = ?
+        ORDER BY grf.filename`, [versionId])
+      const p4RomRows = p4Roms[0]?.values || []
+      assert.equal(p4RomRows.length, 4, 'P4G has 4 ROM files (JP+US+EU+ASIA)')
+      assert.equal(p4RomRows[0][1], 'game', 'subtype is game')
 
-      const p4US = p4Rows.find(r => r[1] === 'US')
-      assert.ok(p4US, 'US parent exists')
-      assert.equal(p4US[2], null, 'US is parent')
-
-      // Check ROM filenames use exact PKG filename
-      const roms = db.exec(`
-        SELECT r.filename, r.subtype FROM rom_entries r
-        JOIN game_entries g ON g.id = r.game_entry_id
-        WHERE g.version_id = ? AND g.name = '10 Second Ninja X' AND g.region = 'US'`, [versionId])
-      const usRoms = roms[0]?.values || []
-      assert.equal(usRoms.length, 1)
-      assert.ok(usRoms[0][0].endsWith('.pkg'), 'ROM filename ends with .pkg')
-      assert.ok(usRoms[0][0].includes('PCSE00001'), 'ROM filename contains title_id')
-      assert.equal(usRoms[0][1], 'game', 'subtype is game')
-
-      // Verify DUPLICATE SCENARIO: re-importing same version skips existing
-      const result2 = await importNps('PSV', versionId)
-      assert.equal(result2.gamesImported, 0, 're-import should skip all')
-
-      // Verify that MISSING PKG, Theme, Demo were excluded
+      // Verify MISSING PKG, Theme, Demo were excluded
       const excluded = db.exec(`
-        SELECT g.name FROM game_entries g WHERE g.version_id = ?
+        SELECT g.name FROM games g
+        JOIN game_rom_sets grs ON grs.game_id = g.id
+        WHERE grs.version_id = ?
         AND (g.name LIKE '%MISSING%' OR g.name LIKE '%Theme%' OR g.name LIKE '%Demo%')`, [versionId])
       assert.equal(excluded[0]?.values?.length || 0, 0, 'MISSING/Themes/Demos not imported')
+
+      // Verify re-import skips existing
+      const result2 = await importNps('PSV', versionId)
+      assert.equal(result2.gamesImported, 0, 're-import should skip all')
+      assert.equal(result2.romsImported, 0, 're-import should skip all ROMs')
 
       globalThis.fetch = originalFetch
     })
 
     it('handles multi-region TSV values', async () => {
       const originalFetch = globalThis.fetch
-      let fetchCount = 0
       globalThis.fetch = async (url) => {
-        fetchCount++
         if (url.includes('_GAMES.tsv')) {
           return {
             ok: true,
@@ -226,16 +225,10 @@ describe('NPS import', () => {
       const versionId = idResult[0]?.values[0]?.[0]
 
       const result = await importNps('PSV', versionId)
-      // Multi-region "US, EU" splits into 2 variants: parent (US) + clone (EU)
-      assert.equal(result.gamesImported, 2, 'multi-region splits into 2 entries')
-
-      const games = db.exec(`
-        SELECT g.name, g.region, g.cloneof FROM game_entries g WHERE g.version_id = ?
-        ORDER BY g.region`, [versionId])
-      const rows = games[0]?.values || []
-      assert.equal(rows.length, 2)
-      assert.equal(rows[0][1], 'EU', 'EU variant')
-      assert.equal(rows[1][1], 'US', 'US parent')
+      // Multi-region "US, EU" splits into 2 variants, but they're the same PKG filename
+      // so only 1 ROM file with dedup
+      assert.equal(result.gamesImported, 1, '1 game row')
+      assert.equal(result.romsImported, 1, '1 ROM file (same PKG for both regions)')
 
       globalThis.fetch = originalFetch
     })

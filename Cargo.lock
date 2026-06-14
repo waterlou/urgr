@@ -921,6 +921,7 @@ dependencies = [
  "libc",
  "reqwest",
  "rom-manager",
+ "rusqlite",
  "serde",
  "serde_json",
  "walkdir",
