@@ -1,4 +1,5 @@
 import fs from 'fs';
+import fsp from 'fs/promises';
 import path from 'path';
 import { dataDir } from './paths.js';
 
@@ -12,74 +13,100 @@ const MIME_MAP = {
   '.mp4': 'video/mp4',
 };
 
-const MEDIA_TYPES = ['title', 'ingame', 'marquee', 'cabinet', 'flyer', 'icon', 'shortplay'];
+const EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4'];
 
 // Find a locally cached file by game name and media type, probing extensions
-function findLocalFile(gameName, mediaType) {
+async function findLocalFile(gameName, mediaType) {
   const dir = path.join(ARCADEDB_CACHE, gameName);
-  if (!fs.existsSync(dir)) return null;
-  // Try exact match from list
-  for (const ext of ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4']) {
+  try {
+    await fsp.access(dir);
+  } catch {
+    return null;
+  }
+  // Try exact match from list first
+  for (const ext of EXTENSIONS) {
     const fp = path.join(dir, mediaType + ext);
-    if (fs.existsSync(fp)) return fp;
+    try {
+      await fsp.access(fp);
+      return fp;
+    } catch { continue; }
   }
   // Fallback: scan directory
-  const entry = fs.readdirSync(dir).find(f => f.startsWith(mediaType + '.'));
-  return entry ? path.join(dir, entry) : null;
+  try {
+    const entries = await fsp.readdir(dir);
+    const entry = entries.find(f => f.startsWith(mediaType + '.'));
+    return entry ? path.join(dir, entry) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readCached(localPath) {
+  const data = await fsp.readFile(localPath);
+  const ext = path.extname(localPath).toLowerCase();
+  return { data, mime: MIME_MAP[ext] || 'application/octet-stream', cachedPath: localPath };
+}
+
+// Fetch a URL with a timeout, returning the buffer and content-type
+async function fetchWithTimeout(url, timeoutMs) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, { signal: controller.signal });
+    if (!resp.ok) return null;
+    const buf = Buffer.from(await resp.arrayBuffer());
+    return { buf, contentType: resp.headers.get('content-type') || '' };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function extFromContentType(contentType) {
+  if (contentType.includes('png')) return '.png';
+  if (contentType.includes('webp')) return '.webp';
+  if (contentType.includes('gif')) return '.gif';
+  if (contentType.includes('mp4') || contentType.includes('video')) return '.mp4';
+  return '.jpg';
 }
 
 // Get media: returns { data: Buffer, mime: string, cachedPath?: string } from cache or remote
 export async function getMedia(url, gameName, mediaType) {
-  // 1. Already local path
+  // 1. Already a local path — read from cache
   if (url.startsWith('/media/arcadedb/')) {
-    const localPath = findLocalFile(gameName, mediaType);
-    if (localPath) {
-      const ext = path.extname(localPath).toLowerCase();
-      return { data: fs.readFileSync(localPath), mime: MIME_MAP[ext] || 'application/octet-stream', cachedPath: localPath };
-    }
+    const localPath = await findLocalFile(gameName, mediaType);
+    if (localPath) return readCached(localPath);
   }
 
   // 2. Remote ArcadeDB URL — check cache first, fetch on miss
   if (typeof url === 'string' && url.includes('adb.arcadeitalia.net')) {
-    const cached = findLocalFile(gameName, mediaType);
-    if (cached) {
-      const ext = path.extname(cached).toLowerCase();
-      return { data: fs.readFileSync(cached), mime: MIME_MAP[ext] || 'application/octet-stream', cachedPath: cached };
-    }
+    const cached = await findLocalFile(gameName, mediaType);
+    if (cached) return readCached(cached);
+
     // Cache miss — fetch and save
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    try {
-      const resp = await fetch(url, { signal: controller.signal });
-      clearTimeout(timeout);
-      if (resp.ok) {
-        const buf = Buffer.from(await resp.arrayBuffer());
-        const contentType = resp.headers.get('content-type') || '';
-        const ext = contentType.includes('png') ? '.png' : contentType.includes('webp') ? '.webp' : '.jpg';
-        // Save to cache
-        const cacheDir = path.join(ARCADEDB_CACHE, gameName);
-        fs.mkdirSync(cacheDir, { recursive: true });
-        const cachedPath = path.join(cacheDir, mediaType + ext);
-        fs.writeFileSync(cachedPath, buf);
-        const mime = MIME_MAP[ext] || contentType || 'application/octet-stream';
-        return { data: buf, mime, cachedPath };
+    const result = await fetchWithTimeout(url, 15000);
+    if (result) {
+      const { buf, contentType } = result;
+      const ext = extFromContentType(contentType);
+      const cacheDir = path.join(ARCADEDB_CACHE, gameName);
+      const cachedPath = path.join(cacheDir, mediaType + ext);
+      try {
+        await fsp.mkdir(cacheDir, { recursive: true });
+        await fsp.writeFile(cachedPath, buf);
+      } catch (e) {
+        // Cache write failure is non-fatal — we can still return the fetched data
+        return { data: buf, mime: MIME_MAP[ext] || contentType || 'application/octet-stream' };
       }
-    } catch { clearTimeout(timeout); }
+      return { data: buf, mime: MIME_MAP[ext] || contentType || 'application/octet-stream', cachedPath };
+    }
   }
 
   // 3. Other remote URL — fetch directly
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
-  try {
-    const resp = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (resp.ok) {
-      const buf = Buffer.from(await resp.arrayBuffer());
-      return { data: buf, mime: resp.headers.get('content-type') || 'application/octet-stream' };
-    }
-  } catch { clearTimeout(timeout); }
+  const result = await fetchWithTimeout(url, 10000);
+  if (result) {
+    return { data: result.buf, mime: result.contentType || 'application/octet-stream' };
+  }
 
   return null;
 }
-
-// Remove unused `precacheArcadeMedia` — lazy caching via getMedia is sufficient

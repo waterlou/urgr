@@ -185,7 +185,10 @@ impl Database {
                platform = CASE WHEN excluded.platform != '' THEN excluded.platform ELSE platform END",
             params![game.name, game.description, game.year, game.manufacturer, game.platform],
         )?;
-        let id = self.conn.query_row(
+        // Can't use last_insert_rowid() reliably after DO UPDATE (returns the most recent
+        // successful insert, which may belong to a different row on conflict). Look up by
+        // the UNIQUE name column instead — guaranteed correct, and the index makes it O(1).
+        let id: i64 = self.conn.query_row(
             "SELECT id FROM games WHERE name = ?1",
             params![game.name],
             |r| r.get(0),
@@ -193,23 +196,51 @@ impl Database {
         Ok(id)
     }
 
+    /// Resolve cloneof → parent_game_id for all games with a non-empty cloneof.
+    /// Looks up parents from BOTH the in-memory slice (handles same-import ordering issues
+    /// where a child was inserted before its parent) AND the DB (handles parents imported
+    /// in earlier batches or via a different DAT).
     pub fn resolve_parents(&self, games: &[ParsedGame]) -> Result<()> {
-        for game in games {
-            if let Some(ref cloneof) = game.cloneof {
-                if !cloneof.is_empty() {
-                    let result = self.conn.query_row(
-                        "SELECT id FROM games WHERE name = ?1",
-                        params![cloneof],
-                        |r| r.get::<_, i64>(0),
-                    );
-                    if let Ok(parent_id) = result {
-                        self.conn.execute(
-                            "UPDATE games SET parent_game_id = ?1 WHERE name = ?2",
-                            params![parent_id, game.name],
-                        )?;
-                    }
-                }
+        // First pass: query each inserted game from the DB to get its id.
+        // This is needed because the in-memory `games` slice doesn't carry rowids.
+        let mut name_to_id: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        for chunk in games.chunks(500) {
+            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!("SELECT name, id FROM games WHERE name IN ({})", placeholders);
+            let mut stmt = self.conn.prepare(&sql)?;
+            let params: Vec<&dyn rusqlite::ToSql> = chunk.iter().map(|g| &g.name as &dyn rusqlite::ToSql).collect();
+            let rows = stmt.query_map(params.as_slice(), |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+            })?;
+            for row in rows {
+                let (name, id) = row?;
+                name_to_id.insert(name, id);
             }
+        }
+
+        // Second pass: UPDATE each game's parent_game_id, falling back to a fresh DB
+        // lookup if the parent isn't in the in-memory map (e.g. parent was inserted in
+        // a previous import).
+        for game in games {
+            let Some(ref cloneof) = game.cloneof else { continue };
+            if cloneof.is_empty() { continue; }
+            let parent_id = match name_to_id.get(cloneof) {
+                Some(&id) => id,
+                None => match self.conn.query_row(
+                    "SELECT id FROM games WHERE name = ?1",
+                    params![cloneof],
+                    |r| r.get::<_, i64>(0),
+                ) {
+                    Ok(id) => id,
+                    Err(rusqlite::Error::QueryReturnedNoRows) => continue, // parent not in DB
+                    Err(e) => return Err(crate::Error::Source(format!("Parent lookup error: {}", e))),
+                },
+            };
+            let Some(&child_id) = name_to_id.get(&game.name) else { continue };
+            self.conn.execute(
+                "UPDATE games SET parent_game_id = ?1 WHERE id = ?2",
+                params![parent_id, child_id],
+            )?;
         }
         Ok(())
     }
@@ -291,7 +322,8 @@ impl Database {
              ON CONFLICT(game_id, version_id) DO UPDATE SET romof = excluded.romof",
             params![game_id, version_id, romof],
         )?;
-        let id = self.conn.query_row(
+        // Look up by UNIQUE composite key (game_id, version_id) — O(1) with the index.
+        let id: i64 = self.conn.query_row(
             "SELECT id FROM game_rom_sets WHERE game_id = ?1 AND version_id = ?2",
             params![game_id, version_id],
             |r| r.get(0),
@@ -373,28 +405,43 @@ impl Database {
         let va = self.get_version(version_id_a)?.unwrap();
         let vb = self.get_version(version_id_b)?.unwrap();
 
-        let games_a: std::collections::BTreeSet<String> = {
+        // Closure: list all game names in a version, sorted.
+        let list_game_names = |version_id: i64| -> Result<std::collections::BTreeSet<String>> {
             let mut stmt = self.conn.prepare(
                 "SELECT g.name FROM games g
                  JOIN game_rom_sets grs ON grs.game_id = g.id
                  WHERE grs.version_id = ?1 ORDER BY g.name",
             )?;
-            let result = stmt.query_map(params![version_id_a], |r| r.get::<_, String>(0))?
+            let names = stmt.query_map(params![version_id], |r| r.get::<_, String>(0))?
                 .filter_map(|r| r.ok())
                 .collect();
-            result
+            Ok(names)
         };
-        let games_b: std::collections::BTreeSet<String> = {
+
+        // Closure: get the rom_set id for a (version, game_name) pair.
+        let rom_set_id = |version_id: i64, name: &str| -> Result<i64> {
+            self.conn.query_row(
+                "SELECT grs.id FROM game_rom_sets grs
+                 JOIN games g ON g.id = grs.game_id
+                 WHERE grs.version_id = ?1 AND g.name = ?2",
+                params![version_id, name],
+                |r| r.get(0),
+            ).map_err(Into::into)
+        };
+
+        // Closure: collect all non-null SHA1s for a rom_set into a sorted set.
+        let collect_hashes = |rom_set_id: i64| -> Result<std::collections::BTreeSet<String>> {
             let mut stmt = self.conn.prepare(
-                "SELECT g.name FROM games g
-                 JOIN game_rom_sets grs ON grs.game_id = g.id
-                 WHERE grs.version_id = ?1 ORDER BY g.name",
+                "SELECT sha1 FROM game_rom_files WHERE rom_set_id = ?1 AND sha1 IS NOT NULL",
             )?;
-            let result = stmt.query_map(params![version_id_b], |r| r.get::<_, String>(0))?
+            let hashes = stmt.query_map(params![rom_set_id], |r| r.get::<_, String>(0))?
                 .filter_map(|r| r.ok())
                 .collect();
-            result
+            Ok(hashes)
         };
+
+        let games_a = list_game_names(version_id_a)?;
+        let games_b = list_game_names(version_id_b)?;
 
         let added: Vec<String> = games_b.difference(&games_a).cloned().collect();
         let removed: Vec<String> = games_a.difference(&games_b).cloned().collect();
@@ -402,39 +449,10 @@ impl Database {
 
         let mut changed = Vec::new();
         for name in &common {
-            let rs_a: i64 = self.conn.query_row(
-                "SELECT grs.id FROM game_rom_sets grs
-                 JOIN games g ON g.id = grs.game_id
-                 WHERE grs.version_id = ?1 AND g.name = ?2",
-                params![version_id_a, name],
-                |r| r.get(0),
-            )?;
-            let rs_b: i64 = self.conn.query_row(
-                "SELECT grs.id FROM game_rom_sets grs
-                 JOIN games g ON g.id = grs.game_id
-                 WHERE grs.version_id = ?1 AND g.name = ?2",
-                params![version_id_b, name],
-                |r| r.get(0),
-            )?;
-
-            let hashes_a: std::collections::BTreeSet<String> = {
-                let mut s = self.conn.prepare(
-                    "SELECT sha1 FROM game_rom_files WHERE rom_set_id = ?1 AND sha1 IS NOT NULL",
-                )?;
-                let result = s.query_map(params![rs_a], |r| r.get::<_, String>(0))?
-                    .filter_map(|r| r.ok())
-                    .collect();
-                result
-            };
-            let hashes_b: std::collections::BTreeSet<String> = {
-                let mut s = self.conn.prepare(
-                    "SELECT sha1 FROM game_rom_files WHERE rom_set_id = ?1 AND sha1 IS NOT NULL",
-                )?;
-                let result = s.query_map(params![rs_b], |r| r.get::<_, String>(0))?
-                    .filter_map(|r| r.ok())
-                    .collect();
-                result
-            };
+            let rs_a = rom_set_id(version_id_a, name)?;
+            let rs_b = rom_set_id(version_id_b, name)?;
+            let hashes_a = collect_hashes(rs_a)?;
+            let hashes_b = collect_hashes(rs_b)?;
 
             if hashes_a != hashes_b {
                 changed.push(name.to_string());
@@ -842,5 +860,83 @@ mod tests {
             "  DB diff (3K games, identical): {:.3}s", elapsed.as_secs_f64()
         );
         assert_eq!(diff.unchanged, 3_000);
+    }
+
+    #[test]
+    fn test_resolve_parents_out_of_order() {
+        // Regression test: previously, if a clone was inserted before its parent in the
+        // same batch, the parent lookup would fail because the parent wasn't yet in the DB.
+        // Now resolve_parents uses an in-memory map of just-inserted names.
+        let db = make_db();
+        let vid = db.import_version("mame", "0.261", None).unwrap();
+
+        // Insert clone FIRST, parent SECOND — alphabetical order would be parent-first,
+        // but DATs aren't guaranteed to be sorted that way.
+        let clone = ParsedGame {
+            name: "sf2a".to_string(),
+            description: "SF2 variant".into(),
+            year: Some("1991".into()),
+            manufacturer: Some("Capcom".into()),
+            cloneof: Some("sf2".to_string()),
+            romof: None,
+            platform: String::new(),
+            roms: vec![],
+        };
+        let parent = ParsedGame {
+            name: "sf2".to_string(),
+            description: "SF2 parent".into(),
+            year: Some("1991".into()),
+            manufacturer: Some("Capcom".into()),
+            cloneof: None,
+            romof: None,
+            platform: String::new(),
+            roms: vec![],
+        };
+
+        for g in &[&clone, &parent] {
+            let gid = db.insert_game(g).unwrap();
+            db.insert_rom_set(gid, vid, None).unwrap();
+        }
+
+        // Resolve parents — even though clone was inserted first, parent IS in the
+        // in-memory slice and should be findable.
+        db.resolve_parents(&[clone, parent]).unwrap();
+
+        // Verify sf2a has sf2 as parent
+        let parent_id: i64 = db.conn.query_row(
+            "SELECT parent_game_id FROM games WHERE name = 'sf2a'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        let parent_name: String = db.conn.query_row(
+            "SELECT name FROM games WHERE id = ?1",
+            [parent_id],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(parent_name, "sf2");
+    }
+
+    #[test]
+    fn test_resolve_parents_unknown_parent() {
+        // If the parent isn't in the same batch nor in the DB, the child should
+        // simply not get a parent_game_id (no error).
+        let db = make_db();
+        let vid = db.import_version("mame", "0.261", None).unwrap();
+        let child = sample_game("lonely_clone");
+        let mut child = child;
+        child.cloneof = Some("nonexistent_parent".to_string());
+
+        let gid = db.insert_game(&child).unwrap();
+        db.insert_rom_set(gid, vid, None).unwrap();
+
+        // Should not error
+        db.resolve_parents(&[child]).unwrap();
+
+        let parent_id: Option<i64> = db.conn.query_row(
+            "SELECT parent_game_id FROM games WHERE name = 'lonely_clone'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert!(parent_id.is_none());
     }
 }

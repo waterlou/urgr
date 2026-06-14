@@ -63,6 +63,56 @@ function parseVersions(g) {
   return { ...g, versions, versions_tags: undefined };
 }
 
+// Get the scrape_mode for a version's collection.
+// 'parent' (default): for clones, search by parent name — all clones share parent's media
+// 'individual': search by each game's own name — each variant gets its own search
+function getScrapeMode(versionId) {
+  if (!versionId) return 'parent';
+  const col = get(`SELECT scrape_mode FROM collections c
+    JOIN collection_versions cv ON cv.collection_id = c.id
+    WHERE cv.version_id = ?`, [versionId]);
+  return col?.scrape_mode || 'parent';
+}
+
+// Compute the canonical name used for game_media lookups.
+// In 'parent' mode (default), clones share their parent's media.
+// In 'individual' mode, each game is scraped separately.
+function canonicalName(game, scrapeMode) {
+  return (scrapeMode === 'individual') ? game.name : (game.cloneof || game.name);
+}
+
+// Fetch a game with its rom_set and version joined — INNER JOIN variant.
+// Returns null if the game has no rom_set (e.g. game exists but is not in any version).
+// Used by routes that require a rom_set: availability, play, download-ia.
+function fetchGameWithRomSet(gameId) {
+  return get(`
+    SELECT g.*, parent_g.name as cloneof,
+      grs.version_id, grs.romof, sv.source, sv.version
+    FROM games g
+    LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
+    JOIN game_rom_sets grs ON grs.game_id = g.id
+    JOIN set_versions sv ON sv.id = grs.version_id
+    WHERE g.id = ?
+    ORDER BY grs.version_id ASC LIMIT 1
+  `, [gameId]);
+}
+
+// Fetch a game with optional rom_set and version joined — LEFT JOIN variant.
+// Returns the game even if it has no rom_set. version_id/source/version will be null.
+// Used by routes that should still work for orphan games: detail, scrape, media.
+function fetchGameOptionalRomSet(gameId) {
+  return get(`
+    SELECT g.*, parent_g.name as cloneof,
+      grs.version_id, grs.romof, sv.source, sv.version
+    FROM games g
+    LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
+    LEFT JOIN game_rom_sets grs ON grs.game_id = g.id
+    LEFT JOIN set_versions sv ON sv.id = grs.version_id
+    WHERE g.id = ?
+    ORDER BY grs.version_id ASC LIMIT 1
+  `, [gameId]);
+}
+
 router.get('/', async (req, res) => {
   await dbReady;
   try {
@@ -180,29 +230,13 @@ router.get('/recently-played', async (req, res) => {
 router.get('/:id', async (req, res) => {
   await dbReady;
   try {
-    const game = get(`
-      SELECT g.*, parent_g.name as cloneof,
-        grs.version_id, grs.romof, sv.source, sv.version
-      FROM games g
-      LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
-      LEFT JOIN game_rom_sets grs ON grs.game_id = g.id
-      LEFT JOIN set_versions sv ON sv.id = grs.version_id
-      WHERE g.id = ?
-      ORDER BY grs.version_id ASC
-      LIMIT 1
-    `, [req.params.id]);
+    const game = fetchGameOptionalRomSet(req.params.id);
     if (!game) return res.status(404).json({ error: 'not found' });
     if (typeof game.synopsis === 'string') try { game.synopsis = JSON.parse(game.synopsis); } catch {}
 
     // Determine canonical name for game_media lookup (respects collection's scrape_mode)
-    let scrapeMode = 'parent';
-    if (game.version_id) {
-      const col = get(`SELECT scrape_mode FROM collections c
-        JOIN collection_versions cv ON cv.collection_id = c.id
-        WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
-      if (col?.scrape_mode) scrapeMode = col.scrape_mode;
-    }
-    const canonical = (scrapeMode === 'individual') ? game.name : (game.cloneof || game.name);
+    const scrapeMode = getScrapeMode(game.version_id);
+    const canonical = canonicalName(game, scrapeMode);
     const mediaPlat = (game.platform || '').trim() || 'arcade';
     const media = get('SELECT covers, screenshots, videos, synopsis as media_synopsis FROM game_media WHERE name = ? AND platform = ?', [canonical, mediaPlat]);
     let covers = [];
@@ -254,15 +288,7 @@ router.get('/:id', async (req, res) => {
 router.get('/:id/availability', async (req, res) => {
   await dbReady;
   try {
-    const game = get(`
-      SELECT g.*, parent_g.name as cloneof, grs.version_id, grs.romof, sv.source, sv.version
-      FROM games g
-      LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
-      JOIN game_rom_sets grs ON grs.game_id = g.id
-      JOIN set_versions sv ON sv.id = grs.version_id
-      WHERE g.id = ?
-      ORDER BY grs.version_id ASC LIMIT 1
-    `, [req.params.id]);
+    const game = fetchGameWithRomSet(req.params.id);
     if (!game) return res.status(404).json({ error: 'not found' });
 
     const roms = all(`
@@ -361,15 +387,7 @@ router.get('/:id/availability', async (req, res) => {
 router.get('/:id/play', async (req, res) => {
   await dbReady;
   try {
-    const game = get(`
-      SELECT g.*, parent_g.name as cloneof, grs.version_id, grs.romof, sv.source, sv.version
-      FROM games g
-      LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
-      JOIN game_rom_sets grs ON grs.game_id = g.id
-      JOIN set_versions sv ON sv.id = grs.version_id
-      WHERE g.id = ?
-      ORDER BY grs.version_id ASC LIMIT 1
-    `, [req.params.id]);
+    const game = fetchGameWithRomSet(req.params.id);
     if (!game) return res.status(404).json({ error: 'Game not found' });
 
     let filePath = null;
@@ -600,27 +618,13 @@ router.get('/:id/play', async (req, res) => {
 });
 
 export async function scrapeSingleGame(gameId) {
-  const game = get(`
-    SELECT g.*, parent_g.name as cloneof, grs.version_id, sv.source
-    FROM games g
-    LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
-    LEFT JOIN game_rom_sets grs ON grs.game_id = g.id
-    LEFT JOIN set_versions sv ON sv.id = grs.version_id
-    WHERE g.id = ?
-    ORDER BY grs.version_id ASC LIMIT 1
-  `, [gameId]);
+  const game = fetchGameOptionalRomSet(gameId);
   if (!game) return { scraped: false, error: 'Game not found', gameId };
 
   // Get collection's scrape_mode setting
   // 'parent' (default): for clones, search by parent name — all clones share media
   // 'individual': search by each game's own name — each variant gets its own search
-  let scrapeMode = 'parent';
-  if (game.version_id) {
-    const col = get(`SELECT c.scrape_mode FROM collections c
-      JOIN collection_versions cv ON cv.collection_id = c.id
-      WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
-    if (col?.scrape_mode) scrapeMode = col.scrape_mode;
-  }
+  const scrapeMode = getScrapeMode(game.version_id);
 
   // In 'parent' mode, use the parent's name for searching (clones share parent's result)
   const searchName = (scrapeMode === 'parent' && game.cloneof) ? game.cloneof : game.name;
@@ -629,9 +633,8 @@ export async function scrapeSingleGame(gameId) {
     : game.description;
 
   const mediaPlatform = p => (p || '').trim() || 'arcade';
-  const canonicalName = g => (scrapeMode === 'individual' ? g.name : (g.cloneof || g.name));
 
-  const canonical = canonicalName(game);
+  const canonical = canonicalName(game, scrapeMode);
   const mediaPlat = mediaPlatform(game.platform);
 
   function trySearch(query, platform) {
@@ -871,15 +874,7 @@ export async function scrapeSingleGame(gameId) {
   const mediaVideos = mediaRow?.videos ? (() => { try { return JSON.parse(mediaRow.videos); } catch { return []; } })() : [];
   const mediaSynopsis = mediaRow?.media_synopsis || '';
 
-  const updated = get(`
-    SELECT g.*, parent_g.name as cloneof, grs.version_id, sv.source, sv.version
-    FROM games g
-    LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
-    LEFT JOIN game_rom_sets grs ON grs.game_id = g.id
-    LEFT JOIN set_versions sv ON sv.id = grs.version_id
-    WHERE g.id = ?
-    ORDER BY grs.version_id ASC LIMIT 1
-  `, [game.id]);
+  const updated = fetchGameOptionalRomSet(game.id);
   updated.covers = mediaCovers;
   updated.screenshots = mediaScreenshots;
   updated.videos = mediaVideos;
@@ -1019,14 +1014,10 @@ router.post('/:id/play', async (req, res) => {
 async function serveGameMedia(req, res, mediaType, dbField, opts = {}) {
   await dbReady;
   try {
-    const game = get('SELECT g.id, g.name, g.platform, parent_g.name as cloneof, grs.version_id FROM games g LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id LEFT JOIN game_rom_sets grs ON grs.game_id = g.id WHERE g.id = ? ORDER BY grs.version_id ASC LIMIT 1', [req.params.id]);
+    const game = fetchGameOptionalRomSet(req.params.id);
     if (!game) return res.status(404).end();
-    let scrapeMode = 'parent';
-    if (game.version_id) {
-      const col = get(`SELECT scrape_mode FROM collections c JOIN collection_versions cv ON cv.collection_id = c.id WHERE cv.version_id = ? LIMIT 1`, [game.version_id]);
-      if (col?.scrape_mode) scrapeMode = col.scrape_mode;
-    }
-    const canonical = (scrapeMode === 'individual') ? game.name : (game.cloneof || game.name);
+    const scrapeMode = getScrapeMode(game.version_id);
+    const canonical = canonicalName(game, scrapeMode);
     const mediaPlat = (game.platform || '').trim() || 'arcade';
     const media = get(`SELECT ${dbField} FROM game_media WHERE name = ? AND platform = ?`, [canonical, mediaPlat]);
     if (media?.[dbField]) {
