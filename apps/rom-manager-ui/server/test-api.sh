@@ -68,6 +68,10 @@ test "POST /api/ia/list lists files" POST "/ia/list" "{\"url\":\"$IA_URL\",\"pat
 test "POST /api/games/:id/scrape returns result" POST "/games/1/scrape" "" "True"
 test "POST /api/scraper/search returns results" POST "/scraper/search" "{\"query\":\"Pac-Man\"}" "len(d.get('results',[])) > 0"
 
+# Filesystem browser
+test "GET /api/filesystem/browse returns directory" GET "/filesystem/browse" "" "'path' in d and isinstance(d.get('entries'), list)"
+test "GET /api/filesystem/browse rejects /etc" GET "/filesystem/browse?path=/etc" "" "d.get('error') and 'allowed_roots' in d"
+
 # Versions
 test "GET /api/versions returns list" GET "/versions" "" "isinstance(d, list) and len(d) > 0"
 

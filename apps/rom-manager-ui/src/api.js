@@ -262,6 +262,15 @@ export function getSettings() { return fetchJson('/settings'); }
 export function saveSettings(data) { return fetchWithBody('/settings', 'PUT', data); }
 
 // ==============================
+// Filesystem
+// ==============================
+export function browseFilesystem(path) {
+  const p = new URLSearchParams();
+  if (path) p.set('path', path);
+  return fetchJson(`/filesystem/browse?${p.toString()}`);
+}
+
+// ==============================
 // Downloads
 // ==============================
 export function enqueueDownload(gameId) {
