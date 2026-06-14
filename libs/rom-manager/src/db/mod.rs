@@ -176,21 +176,19 @@ impl Database {
     // ── Games ──
 
     pub fn insert_game(&self, game: &ParsedGame) -> Result<i64> {
-        self.conn.execute(
+        // RETURNING id gives us the rowid of the affected row whether it was inserted
+        // (new row) or updated (ON CONFLICT path). This is the only reliable way to get
+        // the id after a UPSERT — last_insert_rowid() returns the most recent insert
+        // from any table on the connection, which is wrong on the conflict path.
+        let id: i64 = self.conn.query_row(
             "INSERT INTO games (name, description, year, manufacturer, platform) VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(name) DO UPDATE SET
                description = excluded.description,
                year = excluded.year,
                manufacturer = excluded.manufacturer,
-               platform = CASE WHEN excluded.platform != '' THEN excluded.platform ELSE platform END",
+               platform = CASE WHEN excluded.platform != '' THEN excluded.platform ELSE platform END
+             RETURNING id",
             params![game.name, game.description, game.year, game.manufacturer, game.platform],
-        )?;
-        // Can't use last_insert_rowid() reliably after DO UPDATE (returns the most recent
-        // successful insert, which may belong to a different row on conflict). Look up by
-        // the UNIQUE name column instead — guaranteed correct, and the index makes it O(1).
-        let id: i64 = self.conn.query_row(
-            "SELECT id FROM games WHERE name = ?1",
-            params![game.name],
             |r| r.get(0),
         )?;
         Ok(id)
@@ -317,15 +315,13 @@ impl Database {
         version_id: i64,
         romof: Option<&str>,
     ) -> Result<i64> {
-        self.conn.execute(
-            "INSERT INTO game_rom_sets (game_id, version_id, romof) VALUES (?1, ?2, ?3)
-             ON CONFLICT(game_id, version_id) DO UPDATE SET romof = excluded.romof",
-            params![game_id, version_id, romof],
-        )?;
-        // Look up by UNIQUE composite key (game_id, version_id) — O(1) with the index.
+        // RETURNING id returns the rowid of the affected row whether it was inserted
+        // (new rom_set) or updated (ON CONFLICT path).
         let id: i64 = self.conn.query_row(
-            "SELECT id FROM game_rom_sets WHERE game_id = ?1 AND version_id = ?2",
-            params![game_id, version_id],
+            "INSERT INTO game_rom_sets (game_id, version_id, romof) VALUES (?1, ?2, ?3)
+             ON CONFLICT(game_id, version_id) DO UPDATE SET romof = excluded.romof
+             RETURNING id",
+            params![game_id, version_id, romof],
             |r| r.get(0),
         )?;
         Ok(id)
@@ -938,5 +934,42 @@ mod tests {
             |r| r.get(0),
         ).unwrap();
         assert!(parent_id.is_none());
+    }
+
+    /// Regression test: insert_game and insert_rom_set must return the rowid of the
+    /// affected row even on the ON CONFLICT DO UPDATE path. Previously we relied on
+    /// last_insert_rowid() which returns the most recent insert from any table on
+    /// the connection, not the current statement's affected row — so a re-insert
+    /// after another table's insert would return the wrong id.
+    #[test]
+    fn test_insert_returns_correct_id_on_upsert() {
+        let db = make_db();
+        let va = db.import_version("mame", "0.261", None).unwrap();
+        let vb = db.import_version("mame", "0.262", None).unwrap();
+
+        // Insert game + rom_set for version a
+        let gid_a = db.insert_game(&sample_game("shared")).unwrap();
+        let rs_a = db.insert_rom_set(gid_a, va, None).unwrap();
+        let gid_b = db.insert_game(&sample_game("other")).unwrap();
+        let rs_b = db.insert_rom_set(gid_b, vb, None).unwrap();
+
+        // Now the critical scenario: re-insert "shared" (UPSERT path) and verify
+        // the returned id is the ORIGINAL gid_a, not the most recent rowid.
+        let gid_a_again = db.insert_game(&sample_game("shared")).unwrap();
+        assert_eq!(gid_a_again, gid_a,
+            "insert_game on conflict must return the original rowid, not last_insert_rowid()");
+
+        let rs_a_again = db.insert_rom_set(gid_a, va, None).unwrap();
+        assert_eq!(rs_a_again, rs_a,
+            "insert_rom_set on conflict must return the original rowid, not last_insert_rowid()");
+
+        // And verify the OTHER table inserts (game_rom_files) don't corrupt the counter.
+        // Insert a rom file into rs_b to shift last_insert_rowid() to a different table.
+        db.insert_rom_files_batch(rs_b, &[sample_rom("ic1", &"A".repeat(40))]).unwrap();
+
+        // Re-insert "shared" again — should STILL return gid_a.
+        let gid_a_third = db.insert_game(&sample_game("shared")).unwrap();
+        assert_eq!(gid_a_third, gid_a,
+            "insert_game must return original rowid even after other table inserts");
     }
 }
