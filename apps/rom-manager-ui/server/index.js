@@ -63,6 +63,10 @@ const sonyStoreDir = path.join(dataDir, 'media', 'sony-store');
 fs.mkdirSync(sonyStoreDir, { recursive: true });
 app.use('/media/sony-store', express.static(sonyStoreDir));
 
+const igdbDir = path.join(dataDir, 'media', 'igdb');
+fs.mkdirSync(igdbDir, { recursive: true });
+app.use('/media/igdb', express.static(igdbDir));
+
 app.use((req, res) => {
   const filePath = path.join(distDir, 'index.html');
   if (fs.existsSync(filePath)) {

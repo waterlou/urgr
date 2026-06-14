@@ -35,6 +35,13 @@ const CACHE_SOURCES = [
     mountPrefix: '/media/sony-store/',
     timeout: 10000,
   },
+  {
+    name: 'igdb',
+    hostPattern: 'images.igdb.com',
+    cacheDir: path.join(dataDir, 'media', 'igdb'),
+    mountPrefix: '/media/igdb/',
+    timeout: 10000,
+  },
 ];
 
 async function findLocalFile(cacheDir, gameName, mediaType) {
