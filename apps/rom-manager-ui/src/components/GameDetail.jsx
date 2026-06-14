@@ -296,7 +296,7 @@ export default function GameDetail() {
                           <TableCell sx={{ width: '40%' }}>Filename</TableCell>
                           <TableCell sx={{ width: 70 }}>Type</TableCell>
                           <TableCell sx={{ width: 80 }}>Size</TableCell>
-                          <TableCell sx={{ width: 90 }}>Status</TableCell>
+                          <TableCell sx={{ width: 70 }}>Status</TableCell>
                           <TableCell sx={{ width: 60, textAlign: 'center' }}>Available</TableCell>
                           <TableCell sx={{ width: 100 }}>CRC</TableCell>
                         </TableRow>
