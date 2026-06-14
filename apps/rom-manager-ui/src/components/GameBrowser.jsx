@@ -300,18 +300,19 @@ export default function GameBrowser() {
             </Table>
           </TableContainer>
         ) : (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, contentVisibility: 'auto', containIntrinsicSize: 220 }}>
+          <Box sx={{
+            display: 'grid',
+            gridTemplateColumns: `repeat(auto-fill, minmax(${viewMode === 'large' ? 220 : 160}px, 1fr))`,
+            gap: 1.5,
+            contentVisibility: 'auto',
+            containIntrinsicSize: 220,
+          }}>
             {games.map(g => (
-              <Box key={g.id} sx={{
-                width: viewMode === 'large' ? 240 : 180,
-                flexShrink: 0,
-              }}>
-                <GameGridCard game={g} onSelect={(game) => navigate(`${location.pathname}/game/${game.id}`)}
-                  onRating={(id, patch) => updateGame(id, patch)}
-                  onFavourite={(id, patch) => updateGame(id, patch)}
-                  onAddToGameSet={addToGameSet} onRemoveFromGameSet={removeFromGameSet}
-                  gameSets={gameSets} listImageMode={listImageMode} onPlay={playGame} />
-              </Box>
+              <GameGridCard key={g.id} game={g} onSelect={(game) => navigate(`${location.pathname}/game/${game.id}`)}
+                onRating={(id, patch) => updateGame(id, patch)}
+                onFavourite={(id, patch) => updateGame(id, patch)}
+                onAddToGameSet={addToGameSet} onRemoveFromGameSet={removeFromGameSet}
+                gameSets={gameSets} listImageMode={listImageMode} onPlay={playGame} />
             ))}
           </Box>
         )}
