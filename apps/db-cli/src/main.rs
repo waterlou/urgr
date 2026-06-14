@@ -32,7 +32,7 @@ USAGE:
     db-cli summary <db>
     db-cli versions <db> [--source <s>]
     db-cli games   <db> <version-id> [--search <q>] [--limit <n>]
-    db-cli roms    <db> <game-id>
+    db-cli roms    <db> <version-id> <game-id>
 
 COMMANDS:
     summary     Show row counts for every table in the database
@@ -56,7 +56,7 @@ EXAMPLES:
     db-cli versions ~/roms/games.db --source mame
     db-cli games ~/roms/games.db 1 --search 1942
     db-cli games ~/roms/games.db 1 --limit 10
-    db-cli roms ~/roms/games.db 42
+    db-cli roms ~/roms/games.db 1 42
 ");
 }
 
@@ -156,6 +156,9 @@ fn cmd_games(db: Database, _db_path: String) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
+    let parent_names: std::collections::HashMap<i64, String> = filtered.iter()
+        .filter_map(|g| g.parent_game_id.map(|pid| (pid, g.name.clone())))
+        .collect();
     println!("Games in version {} (showing {} of {}):", version_id, shown, total);
     println!("{}", "─".repeat(72));
     println!("{:<6} {:<28} {:<6} {:<18} {:<12}", "ID", "Name", "Year", "Manufacturer", "Cloneof");
@@ -163,7 +166,7 @@ fn cmd_games(db: Database, _db_path: String) -> ExitCode {
     for g in &filtered[..shown] {
         let year = g.year.as_deref().unwrap_or("-");
         let mfr = g.manufacturer.as_deref().unwrap_or("-");
-        let clone = g.cloneof.as_deref().unwrap_or("-");
+        let clone = g.parent_game_id.and_then(|pid| parent_names.get(&pid)).map(|s| s.as_str()).unwrap_or("-");
         println!("{:<6} {:<28} {:<6} {:<18} {:<12}", g.id, g.name, year, mfr, clone);
     }
     if shown < total {
@@ -175,12 +178,16 @@ fn cmd_games(db: Database, _db_path: String) -> ExitCode {
 fn cmd_roms(db: Database, _db_path: String) -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
 
-    let game_id: i64 = match args.get(3).and_then(|s| s.parse().ok()) {
+    let version_id: i64 = match args.get(3).and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => { eprintln!("Error: <version-id> must be a number"); return ExitCode::FAILURE; }
+    };
+    let game_id: i64 = match args.get(4).and_then(|s| s.parse().ok()) {
         Some(id) => id,
         None => { eprintln!("Error: <game-id> must be a number"); return ExitCode::FAILURE; }
     };
 
-    let roms = match db.list_roms_for_game(game_id) {
+    let roms = match db.list_roms_for_game(game_id, version_id) {
         Ok(r) => r,
         Err(e) => { eprintln!("Error listing ROMs: {}", e); return ExitCode::FAILURE; }
     };

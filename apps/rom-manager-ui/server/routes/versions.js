@@ -88,7 +88,12 @@ router.post('/api/versions/:id/fill-descriptions', async (req, res) => {
       }
     }
 
-    const games = all('SELECT id, name, description, cloneof FROM game_entries WHERE version_id = ? AND (description IS NULL OR description = "" OR length(description) > 80 OR cloneof IS NULL OR cloneof = "")', [sv.id]);
+    const games = all(`SELECT g.id, g.name, g.description, parent_g.name as cloneof
+      FROM games g
+      JOIN game_rom_sets grs ON grs.game_id = g.id
+      LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
+      WHERE grs.version_id = ?
+      AND (g.description IS NULL OR g.description = "" OR length(g.description) > 80 OR parent_g.name IS NULL)`, [sv.id]);
     let updated = 0;
     let synopsisMoved = 0;
     let cloneofFilled = 0;
@@ -110,13 +115,13 @@ router.post('/api/versions/:id/fill-descriptions', async (req, res) => {
         }
       }
       if (co && (!g.cloneof || g.cloneof !== co)) {
-        updates.push('cloneof = ?');
+        updates.push('parent_game_id = (SELECT id FROM games WHERE name = ?)');
         upParams.push(co);
         cloneofFilled++;
       }
       if (updates.length > 0) {
         upParams.push(g.id);
-        run(`UPDATE game_entries SET ${updates.join(', ')} WHERE id = ?`, upParams);
+        run(`UPDATE games SET ${updates.join(', ')} WHERE id = ?`, upParams);
         updated++;
       }
     }
@@ -477,7 +482,7 @@ async function downloadDatomicDat(systemId) {
 router.get('/api/versions', async (req, res) => {
   await dbReady;
   try {
-    const versions = all('SELECT sv.*, (SELECT COUNT(*) FROM game_entries WHERE version_id = sv.id) as total_games FROM set_versions sv ORDER BY sv.created_at DESC');
+    const versions = all('SELECT sv.*, (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games FROM set_versions sv ORDER BY sv.created_at DESC');
     res.json(versions);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -488,9 +493,14 @@ router.get('/api/versions/:id/games', async (req, res) => {
     const { id } = req.params;
     const { limit = 100, offset = 0, q } = req.query;
     if (!get('SELECT 1 FROM set_versions WHERE id = ?', [id])) return res.status(404).json({ error: 'not found' });
-    const where = q ? 'AND (name LIKE ? OR description LIKE ? OR manufacturer LIKE ?)' : '';
+    const where = q ? 'AND (g.name LIKE ? OR g.description LIKE ? OR g.manufacturer LIKE ?)' : '';
     const params = q ? [id, `%${q}%`, `%${q}%`, `%${q}%`, Number(limit), Number(offset)] : [id, Number(limit), Number(offset)];
-    const games = all(`SELECT * FROM game_entries WHERE version_id = ? ${where} ORDER BY name LIMIT ? OFFSET ?`, params);
+    const games = all(`SELECT g.*, parent_g.name as cloneof
+      FROM games g
+      JOIN game_rom_sets grs ON grs.game_id = g.id
+      LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
+      WHERE grs.version_id = ? ${where}
+      ORDER BY g.name LIMIT ? OFFSET ?`, params);
     res.json({ games, limit: Number(limit), offset: Number(offset) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -818,19 +828,23 @@ router.post('/api/versions/import-online', async (req, res) => {
         };
         walkDir(extractDir);
 
-        // Pick the best MAME DAT/XML: prefer .dat (smaller), skip arcade/mess/chd subsets
+        // Pick the best DAT: prefer ARCADE subset, then .dat over .xml, skip mess/chd subsets
         const dats = allFiles.map(fp => ({ fp, base: path.basename(fp).toLowerCase() }))
           .filter(({ base }) => {
             if (!base.endsWith('.xml') && !(base.endsWith('.dat') && !/without.?crc|nocrc/i.test(base))) return false;
-            if (/\(?arcade\)?|\(?mess\)?|\bchd\b/i.test(base)) return false; // skip partial/subset files
-            return mameDatMatches(base, version) || /^mame(\s|\b|_)/.test(base);
+            if (/\(?mess\)?|\bchd\b/i.test(base)) return false; // skip mess/chd subsets
+            return mameDatMatches(base, version) || /^mame(\s|\b|_)/.test(base) || /^arcade(\s|\b|_)/.test(base);
           })
           .sort((a, b) => {
-            // .dat preferred (smaller, faster); .xml fallback (huge)
+            // ARCADE subset preferred over full MAME set (smaller, arcade-only)
+            const aIsArcade = a.base.startsWith('arcade') ? 0 : 1;
+            const bIsArcade = b.base.startsWith('arcade') ? 0 : 1;
+            if (aIsArcade !== bIsArcade) return aIsArcade - bIsArcade;
+            // .dat preferred over .xml
             const aIsDat = a.base.endsWith('.dat') ? 0 : 1;
             const bIsDat = b.base.endsWith('.dat') ? 0 : 1;
             if (aIsDat !== bIsDat) return aIsDat - bIsDat;
-            // Version match before generic MAME name
+            // Version match before generic name
             const aVer = mameDatMatches(a.base, version) ? 0 : 1;
             const bVer = mameDatMatches(b.base, version) ? 0 : 1;
             if (aVer !== bVer) return aVer - bVer;
@@ -877,6 +891,23 @@ router.post('/api/versions/import-online', async (req, res) => {
         const result = execCli(['import', foundDat, 'MAME', version], { binary: 'parse' });
         if (!result) throw new Error('CLI returned null');
         console.log(`[mame-import] Format: ${result.format}, games: ${result.games_inserted}`);
+
+        // Import companion DATs (CHD, Samples) if present — same version, existing games only
+        for (const fp of allFiles) {
+          const base = path.basename(fp).toLowerCase();
+          if (/MAME_CHD_.*\.dat$/i.test(base)) {
+            console.log(`[mame-import] Also importing ${base} (subtype: chd)`);
+            try {
+              execCli(['import', fp, 'MAME', version, '--subtype', 'chd', '--existing-only'], { binary: 'parse' });
+            } catch (e) { console.error(`[mame-import] CHD import failed: ${e.message}`); }
+          }
+          if (/MAME_Samples_.*\.dat$/i.test(base)) {
+            console.log(`[mame-import] Also importing ${base} (subtype: sample)`);
+            try {
+              execCli(['import', fp, 'MAME', version, '--subtype', 'sample', '--existing-only'], { binary: 'parse' });
+            } catch (e) { console.error(`[mame-import] Samples import failed: ${e.message}`); }
+          }
+        }
 
         const versionId = result.version_id;
         const totalGames = result.games_inserted || 0;
@@ -950,13 +981,18 @@ router.post('/api/versions/import-dat', async (req, res) => {
     const versionId = idResult[0]?.values[0]?.[0];
     if (!versionId) return res.status(500).json({ error: 'Failed to create version' });
 
-    const insert = db.prepare('INSERT INTO game_entries (version_id, name, description) VALUES (?, ?, ?)');
+    const gameInsert = db.prepare('INSERT OR IGNORE INTO games (name, description) VALUES (?, ?)');
+    const setInsert = db.prepare('INSERT OR IGNORE INTO game_rom_sets (game_id, version_id) VALUES ((SELECT id FROM games WHERE name = ?), ?)');
     for (const name of gameNames) {
-      insert.bind([versionId, name, '']);
-      insert.step();
-      insert.reset();
+      gameInsert.bind([name, '']);
+      gameInsert.step();
+      gameInsert.reset();
+      setInsert.bind([name, versionId]);
+      setInsert.step();
+      setInsert.reset();
     }
-    insert.free();
+    gameInsert.free();
+    setInsert.free();
     saveDb();
 
     res.json({ ok: true, version_id: versionId, source, version, total_games: gameNames.length });

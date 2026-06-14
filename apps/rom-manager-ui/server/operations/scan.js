@@ -15,19 +15,18 @@ export class ScanOperation extends Operation {
     this.updateProgress(0, 'Scanning ROMs...');
 
     try {
-      // Reset availability
-      run('UPDATE game_state SET available = 0 WHERE game_entry_id IN (SELECT id FROM game_entries WHERE version_id = ?)', [version_id]);
+      run('UPDATE game_state SET available = 0 WHERE game_id IN (SELECT game_id FROM game_rom_sets WHERE version_id = ?)', [version_id]);
 
       const result = execCli(['scan', version_id, dir]);
 
-      // Update availability from scan result JSON
       const matchedNames = (result?.matches || []).map(m => m.name);
       if (matchedNames.length > 0) {
         const ph = matchedNames.map(() => '?').join(',');
-        run(`INSERT INTO game_state (game_entry_id, available, updated_at)
-          SELECT ge.id, 1, datetime('now') FROM game_entries ge
-          WHERE ge.version_id = ? AND ge.name IN (${ph})
-          ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id, ...matchedNames]);
+        run(`INSERT INTO game_state (game_id, available, updated_at)
+          SELECT g.id, 1, datetime('now') FROM games g
+          JOIN game_rom_sets grs ON grs.game_id = g.id
+          WHERE grs.version_id = ? AND g.name IN (${ph})
+          ON CONFLICT(game_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id, ...matchedNames]);
       }
 
       reloadDb();

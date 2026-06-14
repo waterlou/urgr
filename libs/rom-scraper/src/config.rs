@@ -46,9 +46,11 @@ impl Default for Config {
             }),
             cache_dir: None,
             source_priority: vec![
+                SourceEntry { source: ScrapeSource::ArcadeDb, priority: 80 },
                 SourceEntry { source: ScrapeSource::TheGamesDb, priority: 100 },
                 SourceEntry { source: ScrapeSource::ScreenScraper, priority: 200 },
                 SourceEntry { source: ScrapeSource::Igdb, priority: 300 },
+                SourceEntry { source: ScrapeSource::LibretroThumbnails, priority: 350 },
                 SourceEntry { source: ScrapeSource::NoIntroPictures, priority: 400 },
                 SourceEntry { source: ScrapeSource::Vgmuseum, priority: 450 },
                 SourceEntry { source: ScrapeSource::SonyStore, priority: 500 },

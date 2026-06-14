@@ -5,21 +5,20 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 
 use crate::error::{Error, Result};
-use crate::models::{GameEntry, ParseStats, RomEntry};
+use crate::models::{ParsedGame, ParsedRom, ParseStats};
 
-pub fn parse_mame_dat<P: AsRef<Path>>(path: P) -> Result<(Vec<GameEntry>, Vec<RomEntry>, ParseStats)> {
+pub fn parse_mame_dat<P: AsRef<Path>>(path: P) -> Result<(Vec<ParsedGame>, ParseStats)> {
     let file = std::fs::File::open(path.as_ref())?;
     let reader = BufReader::new(file);
     parse_mame_reader(reader)
 }
 
-pub fn parse_mame_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>, Vec<RomEntry>, ParseStats)> {
+pub fn parse_mame_reader<R: BufRead>(reader: R) -> Result<(Vec<ParsedGame>, ParseStats)> {
     let mut xml = Reader::from_reader(reader);
     xml.config_mut().trim_text(true);
 
     let mut buf = Vec::new();
     let mut games = Vec::new();
-    let mut all_roms = Vec::new();
     let mut errors = Vec::new();
 
     loop {
@@ -45,36 +44,8 @@ pub fn parse_mame_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>, Vec<R
                     .and_then(|a| a.unescape_value().ok());
 
                 match parse_machine(&mut xml, &name, cloneof.as_deref(), romof.as_deref()) {
-                    Ok((game, roms)) => {
-                        let game_id = games.len() as i64;
-                        let game_entry = GameEntry {
-                            id: game_id,
-                            version_id: 0,
-                            name: game.0,
-                            description: game.1,
-                            year: game.2,
-                            manufacturer: game.3,
-                            cloneof: game.4,
-                            romof: game.5,
-                            platform: String::new(),
-                            region: None,
-                        };
-                        let rom_entries: Vec<RomEntry> = roms
-                            .into_iter()
-                            .map(|r| RomEntry {
-                                id: 0,
-                                game_entry_id: game_id,
-                                filename: r.0,
-                                size: r.1,
-                                crc32: r.2,
-                                md5: r.3,
-                                sha1: r.4,
-                                status: r.5.unwrap_or_else(|| "good".to_string()),
-                                merge_target: r.6,
-                            })
-                            .collect();
-                        all_roms.extend(rom_entries);
-                        games.push(game_entry);
+                    Ok(game) => {
+                        games.push(game);
                     }
                     Err(e) => {
                         errors.push(format!("{}: {}", name, e));
@@ -93,30 +64,27 @@ pub fn parse_mame_reader<R: BufRead>(reader: R) -> Result<(Vec<GameEntry>, Vec<R
 
     let stats = ParseStats {
         total_games: games.len(),
-        total_roms: all_roms.len(),
+        total_roms: games.iter().map(|g| g.roms.len()).sum(),
         errors,
     };
 
-    Ok((games, all_roms, stats))
+    Ok((games, stats))
 }
-
-type MachineData = (String, String, Option<String>, Option<String>, Option<String>, Option<String>);
-type RomRecord = (String, Option<i64>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>);
 
 fn parse_machine<R: BufRead>(
     xml: &mut Reader<R>,
     name: &str,
     cloneof: Option<&str>,
     romof: Option<&str>,
-) -> Result<(MachineData, Vec<RomRecord>)> {
+) -> Result<ParsedGame> {
     let mut description = String::new();
     let mut year: Option<String> = None;
     let mut manufacturer: Option<String> = None;
-    let mut roms: Vec<RomRecord> = Vec::new();
+    let mut roms = Vec::new();
     let mut depth = 1;
-    let mut buf = Vec::new();
 
     loop {
+        let mut buf = Vec::new();
         match xml.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
                 depth += 1;
@@ -148,39 +116,31 @@ fn parse_machine<R: BufRead>(
                 }
                 _ => {}
             },
-            Ok(Event::End(ref e)) => {
+            Ok(Event::End(ref _e)) => {
                 depth -= 1;
                 if depth == 0 {
                     break;
-                }
-                if e.name().as_ref() == b"description"
-                    || e.name().as_ref() == b"year"
-                    || e.name().as_ref() == b"manufacturer"
-                {
-                    // Text already consumed, nothing to do
                 }
             }
             Ok(Event::Eof) => break,
             Err(e) => return Err(Error::Xml(format!("Parse error: {}", e))),
             _ => {}
         }
-        buf.clear();
     }
 
-    Ok((
-        (
-            name.to_string(),
-            description,
-            year,
-            manufacturer,
-            cloneof.map(|s| s.to_string()),
-            romof.map(|s| s.to_string()),
-        ),
+    Ok(ParsedGame {
+        name: name.to_string(),
+        description,
+        year,
+        manufacturer,
+        cloneof: cloneof.map(|s| s.to_string()),
+        romof: romof.map(|s| s.to_string()),
+        platform: String::new(),
         roms,
-    ))
+    })
 }
 
-fn parse_rom_attrs(e: &quick_xml::events::BytesStart<'_>, roms: &mut Vec<RomRecord>) {
+fn parse_rom_attrs(e: &quick_xml::events::BytesStart<'_>, roms: &mut Vec<ParsedRom>) {
     let mut rom_name = String::new();
     let mut size: Option<i64> = None;
     let mut crc: Option<String> = None;
@@ -218,7 +178,15 @@ fn parse_rom_attrs(e: &quick_xml::events::BytesStart<'_>, roms: &mut Vec<RomReco
     }
 
     if !rom_name.is_empty() {
-        roms.push((rom_name, size, crc, md5, sha1, status, merge));
+        roms.push(ParsedRom {
+            filename: rom_name,
+            size,
+            crc32: crc,
+            md5,
+            sha1,
+            status: status.unwrap_or_else(|| "good".to_string()),
+            merge_target: merge,
+        });
     }
 }
 
@@ -227,7 +195,7 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
-    fn parse(xml: &str) -> (Vec<GameEntry>, Vec<RomEntry>, ParseStats) {
+    fn parse(xml: &str) -> (Vec<ParsedGame>, ParseStats) {
         parse_mame_reader(std::io::Cursor::new(xml.as_bytes())).expect("mame parse")
     }
 
@@ -257,11 +225,13 @@ mod tests {
         let xml = generate_mame_xml(num_games);
         let xml_size = xml.len();
         let start = Instant::now();
-        let (games, roms, stats) = parse(&xml);
+        let (games, stats) = parse(&xml);
         let elapsed = start.elapsed();
 
         let games_per_sec = num_games as f64 / elapsed.as_secs_f64();
         let mb_per_sec = (xml_size as f64 / 1_048_576.0) / elapsed.as_secs_f64();
+
+        let total_roms: usize = games.iter().map(|g| g.roms.len()).sum();
 
         eprintln!(
             "  MAME perf: {} games, {} ROMs, {:.2} MB XML, {:.2}s, {:.0} games/s, {:.1} MB/s",
@@ -274,7 +244,7 @@ mod tests {
         );
 
         assert_eq!(games.len(), num_games);
-        assert_eq!(roms.len(), num_games);
+        assert_eq!(total_roms, num_games);
         assert!(stats.errors.is_empty());
         let max_allowed = (num_games as u128) * 10_000;
         assert!(
@@ -296,7 +266,7 @@ mod tests {
   </machine>
 </mame>"#;
 
-        let (games, roms, stats) = parse(xml);
+        let (games, stats) = parse(xml);
         assert_eq!(stats.total_games, 1);
         assert_eq!(stats.total_roms, 1);
         assert_eq!(games[0].name, "sf2");
@@ -304,10 +274,10 @@ mod tests {
         assert_eq!(games[0].year.as_deref(), Some("1991"));
         assert_eq!(games[0].manufacturer.as_deref(), Some("Capcom"));
         assert!(games[0].cloneof.is_none());
-        assert_eq!(roms[0].filename, "sf2.03");
-        assert_eq!(roms[0].size, Some(524288));
-        assert_eq!(roms[0].crc32.as_deref(), Some("3F47A0D8"));
-        assert_eq!(roms[0].sha1.as_deref(), Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+        assert_eq!(games[0].roms[0].filename, "sf2.03");
+        assert_eq!(games[0].roms[0].size, Some(524288));
+        assert_eq!(games[0].roms[0].crc32.as_deref(), Some("3F47A0D8"));
+        assert_eq!(games[0].roms[0].sha1.as_deref(), Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
     }
 
     #[test]
@@ -321,7 +291,7 @@ mod tests {
   </machine>
 </mame>"#;
 
-        let (games, _, _) = parse(xml);
+        let (games, _) = parse(xml);
         assert_eq!(games[0].cloneof.as_deref(), Some("sf2"));
         assert_eq!(games[0].romof.as_deref(), Some("sf2"));
     }
@@ -337,17 +307,16 @@ mod tests {
   </machine>
 </mame>"#;
 
-        let (_, roms, _) = parse(xml);
+        let (games, _) = parse(xml);
+        let roms = &games[0].roms;
         assert_eq!(roms.len(), 2);
 
-        // First ROM: all attributes present
         assert_eq!(roms[0].filename, "r1");
         assert_eq!(roms[0].sha1.as_deref(), Some("EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"));
         assert_eq!(roms[0].status, "nodump");
         assert!(roms[0].merge_target.is_none());
         assert_eq!(roms[0].crc32.as_deref(), Some("ABCD1234"));
 
-        // Second ROM: crc "00000000" should be treated as empty
         assert_eq!(roms[1].filename, "r2");
         assert!(roms[1].crc32.is_none());
         assert!(roms[1].sha1.is_none());
@@ -363,7 +332,7 @@ mod tests {
   </machine>
 </mame>"#;
 
-        let (games, _, _) = parse(xml);
+        let (games, _) = parse(xml);
         assert_eq!(games[0].description, "");
         assert!(games[0].year.is_none());
     }
@@ -377,7 +346,7 @@ mod tests {
   <machine name="c"><description>C</description></machine>
 </mame>"#;
 
-        let (games, _, stats) = parse(xml);
+        let (games, stats) = parse(xml);
         assert_eq!(games.len(), 3);
         assert_eq!(stats.total_games, 3);
         assert_eq!(games[0].name, "a");
@@ -391,9 +360,9 @@ mod tests {
 <mame>
 </mame>"#;
 
-        let (games, roms, stats) = parse(xml);
+        let (games, stats) = parse(xml);
         assert!(games.is_empty());
-        assert!(roms.is_empty());
+        assert!(games.iter().all(|g| g.roms.is_empty()));
         assert_eq!(stats.total_games, 0);
         assert!(stats.errors.is_empty());
     }

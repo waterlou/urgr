@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { closeDb, saveDb } from './db.js';
 import { all, run, dbReady } from './helpers.js';
-import { distDir, iconsDir, isElectron } from './paths.js';
+import { distDir, iconsDir, dataDir, isElectron } from './paths.js';
 import collectionsRouter from './routes/collections.js';
 import gamesRouter from './routes/games.js';
 import gameSetsRouter from './routes/game-sets.js';
@@ -48,6 +48,10 @@ app.use((err, req, res, next) => {
 app.use('/assets', express.static(path.join(distDir, 'assets')));
 
 app.use('/icons', express.static(iconsDir));
+
+const arcadeMediaDir = path.join(dataDir, 'arcadedb');
+fs.mkdirSync(arcadeMediaDir, { recursive: true });
+app.use('/media/arcadedb', express.static(arcadeMediaDir));
 
 app.use((req, res) => {
   const filePath = path.join(distDir, 'index.html');

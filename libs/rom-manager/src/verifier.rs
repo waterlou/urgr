@@ -95,7 +95,7 @@ fn find_zip_recursive(dir: &Path, filename: &str) -> bool {
 mod tests {
     use super::*;
     use crate::db::Database;
-    use crate::models::GameEntry;
+    use crate::models::ParsedGame;
     use std::io::Write;
 
     fn make_db() -> Database {
@@ -103,22 +103,19 @@ mod tests {
     }
 
     fn add_game(db: &Database, vid: i64, name: &str) -> i64 {
-        db.insert_game(
-            vid,
-            &GameEntry {
-                id: 0,
-                version_id: 0,
-                name: name.to_string(),
-                description: String::new(),
-                year: None,
-                manufacturer: None,
-                cloneof: None,
-                romof: None,
-                platform: String::new(),
-                region: None,
-            },
-        )
-        .unwrap()
+        let parsed = ParsedGame {
+            name: name.to_string(),
+            description: String::new(),
+            year: None,
+            manufacturer: None,
+            cloneof: None,
+            romof: None,
+            platform: String::new(),
+            roms: Vec::new(),
+        };
+        let gid = db.insert_game(&parsed).unwrap();
+        db.insert_rom_set(gid, vid, None).unwrap();
+        gid
     }
 
     fn create_zip(dir: &Path, name: &str) -> PathBuf {

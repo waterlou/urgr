@@ -16,23 +16,27 @@ export function getQueueItem(id) {
   return get('SELECT * FROM download_queue WHERE id = ?', [id])
 }
 
-export function enqueueGame(gameEntryId) {
-  const game = get('SELECT g.*, sv.source FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id WHERE g.id = ?', [gameEntryId])
-  if (!game) throw new Error('Game not found')
-  if (game.source !== 'NPS') throw new Error('Only NPS downloads are supported')
+export function enqueueGame(gameId) {
+  const sourceInfo = get(`SELECT DISTINCT sv.source FROM games g
+    JOIN game_rom_sets grs ON grs.game_id = g.id
+    JOIN set_versions sv ON sv.id = grs.version_id
+    WHERE g.id = ?`, [gameId])
+  if (!sourceInfo) throw new Error('Game not found')
+  if (sourceInfo.source !== 'NPS') throw new Error('Only NPS downloads are supported')
 
-  // Get all ROMs for this game (game + dlc + update)
-  const roms = all('SELECT * FROM rom_entries WHERE game_entry_id = ? AND pkg_url != ""', [gameEntryId])
+  const roms = all(`SELECT grf.*, grs.version_id FROM game_rom_files grf
+    JOIN game_rom_sets grs ON grs.id = grf.rom_set_id
+    WHERE grs.game_id = ? AND grf.pkg_url != ""`, [gameId])
   if (roms.length === 0) throw new Error('No downloadable files found for this game')
 
   let enqueued = 0
   for (const rom of roms) {
-    const existing = get('SELECT id FROM download_queue WHERE game_entry_id = ? AND filename = ? AND status IN (?, ?)',
-      [gameEntryId, rom.filename, 'pending', 'downloading'])
+    const existing = get('SELECT id FROM download_queue WHERE game_id = ? AND filename = ? AND status IN (?, ?)',
+      [gameId, rom.filename, 'pending', 'downloading'])
     if (existing) continue
 
-    run('INSERT INTO download_queue (game_entry_id, version_id, pkg_url, filename, file_size, expected_sha256, subtype) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [gameEntryId, game.version_id, rom.pkg_url, rom.filename, rom.size || 0, rom.sha1 || '', rom.subtype || 'game'])
+    run('INSERT INTO download_queue (game_id, version_id, pkg_url, filename, file_size, expected_sha256, subtype) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [gameId, rom.version_id, rom.pkg_url, rom.filename, rom.size || 0, rom.sha1 || '', rom.subtype || 'game'])
     enqueued++
   }
 
@@ -49,7 +53,6 @@ export function subscribeSSE(res) {
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
   })
-  // Send current queue state
   const queue = getQueue()
   res.write(`data: ${JSON.stringify({ type: 'queue', queue })}\n\n`)
   subscribers.add(res)
@@ -80,12 +83,11 @@ export async function processNext() {
     run('UPDATE download_queue SET status = ?, progress = 0 WHERE id = ?', ['downloading', item.id])
     broadcastQueue()
 
-    // Find the collection directory for this version
     const col = get(`SELECT c.folder, c.slug FROM collections c
       JOIN collection_versions cv ON cv.collection_id = c.id
       WHERE cv.version_id = ? LIMIT 1`, [item.version_id])
     const colFolder = col?.folder || col?.slug || String(item.version_id)
-    const game = get('SELECT platform FROM game_entries WHERE id = ?', [item.game_entry_id])
+    const game = get('SELECT platform FROM games WHERE id = ?', [item.game_id])
     const platform = game?.platform || 'Games'
 
     const romsDir = path.join(dataDir, 'roms', colFolder, platform)
@@ -96,17 +98,15 @@ export async function processNext() {
     const tempFile = path.join(dataDir, 'downloads', `.${item.filename}.part`)
     const finalFile = path.join(subPath, item.filename)
 
-    // Skip if already exists
     if (fs.existsSync(finalFile)) {
       run('UPDATE download_queue SET status = ?, progress = 100, completed_at = datetime(\'now\') WHERE id = ?', ['completed', item.id])
       broadcastQueue()
-      await checkGameComplete(item.game_entry_id)
+      await checkGameComplete(item.game_id)
       currentJob = null
       processNext()
       return
     }
 
-    // Download with streaming
     const resp = await fetch(item.pkg_url, { signal: AbortSignal.timeout(120000) })
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
 
@@ -139,19 +139,17 @@ export async function processNext() {
 
     const sha256 = hash.digest('hex')
 
-    // Verify SHA-256
     if (item.expected_sha256 && sha256 !== item.expected_sha256) {
       fs.unlinkSync(tempFile)
       throw new Error(`SHA-256 mismatch: expected ${item.expected_sha256}, got ${sha256}`)
     }
 
-    // Move to final location
     fs.renameSync(tempFile, finalFile)
 
     run('UPDATE download_queue SET status = ?, progress = 100, completed_at = datetime(\'now\') WHERE id = ?', ['completed', item.id])
     broadcastQueue()
 
-    await checkGameComplete(item.game_entry_id)
+    await checkGameComplete(item.game_id)
   } catch (err) {
     const retries = (item.retry_count || 0) + 1
     if (retries >= 3) {
@@ -166,24 +164,28 @@ export async function processNext() {
   }
 }
 
-async function checkGameComplete(gameEntryId) {
-  const pending = get('SELECT COUNT(*) as cnt FROM download_queue WHERE game_entry_id = ? AND status NOT IN (?, ?)',
-    [gameEntryId, 'completed', 'failed'])
+async function checkGameComplete(gameId) {
+  const pending = get('SELECT COUNT(*) as cnt FROM download_queue WHERE game_id = ? AND status NOT IN (?, ?)',
+    [gameId, 'completed', 'failed'])
   if (pending.cnt > 0) return
 
-  // Run a single-game scan to check if the file was downloaded
   try {
-    const game = get('SELECT g.id, g.version_id, sv.source, c.folder FROM game_entries g JOIN set_versions sv ON sv.id = g.version_id LEFT JOIN collection_versions cv ON cv.version_id = sv.id LEFT JOIN collections c ON c.id = cv.collection_id WHERE g.id = ?', [gameEntryId])
-    if (game && game.folder && game.source === 'NPS') {
-      const collectionDir = path.resolve(dataDir, 'roms', game.folder)
-      execCli(['scan', String(game.version_id), collectionDir, '--game-id', String(game.id)], { binary: 'nps' })
+    const versionRows = all(`SELECT grs.version_id, sv.source, c.folder FROM games g
+      JOIN game_rom_sets grs ON grs.game_id = g.id
+      JOIN set_versions sv ON sv.id = grs.version_id
+      LEFT JOIN collection_versions cv ON cv.version_id = grs.version_id
+      LEFT JOIN collections c ON c.id = cv.collection_id
+      WHERE g.id = ?`, [gameId])
+    for (const row of versionRows) {
+      if (row.folder && row.source === 'NPS') {
+        const collectionDir = path.resolve(dataDir, 'roms', row.folder)
+        execCli(['scan', String(row.version_id), collectionDir, '--game-id', String(gameId)], { binary: 'nps' })
+      }
     }
   } catch (_) {}
-  // Update game_state - set available=1 since download completed
-  run(`INSERT INTO game_state (game_entry_id, available, updated_at)
-    SELECT ge.id, 1, datetime('now') FROM game_entries ge
-    WHERE ge.id = ?
-    ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [gameEntryId])
+  run(`INSERT INTO game_state (game_id, available, updated_at)
+    VALUES (?, 1, datetime('now'))
+    ON CONFLICT(game_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [gameId])
   broadcastQueue()
 }
 

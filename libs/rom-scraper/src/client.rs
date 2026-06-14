@@ -34,102 +34,76 @@ impl HttpClient {
     }
 
     pub async fn get_text(&self, url: &str) -> crate::Result<String> {
-        let resp = self
-            .inner
-            .get(url)
-            .header("User-Agent", &self.user_agent)
-            .send()
-            .await?;
-        let status = resp.status();
-        if !status.is_success() {
-            return Err(crate::Error::Source(format!(
-                "HTTP {} from {}",
-                status.as_u16(),
-                url
-            )));
+        for i in 1..=3 {
+            let resp = self.inner.get(url).header("User-Agent", &self.user_agent).send().await?;
+            let status = resp.status().as_u16();
+            if status == 200 { return Ok(resp.text().await?); }
+            if status != 429 { return Err(crate::Error::Source(format!("HTTP {} from {}", status, url))); }
+            let secs = retry_after(&resp, i);
+            tokio::time::sleep(Duration::from_secs(secs)).await;
         }
-        Ok(resp.text().await?)
+        Err(crate::Error::Source(format!("Rate limited on {}", url)))
     }
 
     pub async fn get_bytes(&self, url: &str) -> crate::Result<Vec<u8>> {
-        let resp = self
-            .inner
-            .get(url)
-            .header("User-Agent", &self.user_agent)
-            .send()
-            .await?;
-        let status = resp.status();
-        if !status.is_success() {
-            return Err(crate::Error::Source(format!(
-                "HTTP {} from {}",
-                status.as_u16(),
-                url
-            )));
+        for i in 1..=3 {
+            let resp = self.inner.get(url).header("User-Agent", &self.user_agent).send().await?;
+            let status = resp.status().as_u16();
+            if status == 200 { return Ok(resp.bytes().await?.to_vec()); }
+            if status != 429 { return Err(crate::Error::Source(format!("HTTP {} from {}", status, url))); }
+            let secs = retry_after(&resp, i);
+            tokio::time::sleep(Duration::from_secs(secs)).await;
         }
-        Ok(resp.bytes().await?.to_vec())
+        Err(crate::Error::Source(format!("Rate limited on {}", url)))
     }
 
-    pub async fn get_json<T: serde::de::DeserializeOwned>(
-        &self,
-        url: &str,
-    ) -> crate::Result<T> {
-        let resp = self
-            .inner
-            .get(url)
-            .header("User-Agent", &self.user_agent)
-            .send()
-            .await?;
-        let status = resp.status();
-        if !status.is_success() {
-            return Err(crate::Error::Source(format!(
-                "HTTP {} from {}",
-                status.as_u16(),
-                url
-            )));
+    pub async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> crate::Result<T> {
+        for i in 1..=3 {
+            let resp = self.inner.get(url).header("User-Agent", &self.user_agent).send().await?;
+            let status = resp.status().as_u16();
+            if status == 200 { return Ok(resp.json().await?); }
+            if status != 429 { return Err(crate::Error::Source(format!("HTTP {} from {}", status, url))); }
+            let secs = retry_after(&resp, i);
+            tokio::time::sleep(Duration::from_secs(secs)).await;
         }
-        Ok(resp.json().await?)
+        Err(crate::Error::Source(format!("Rate limited on {}", url)))
     }
 
     pub async fn head(&self, url: &str) -> crate::Result<reqwest::Response> {
-        let resp = self
-            .inner
-            .head(url)
+        let resp = self.inner.head(url)
             .header("User-Agent", &self.user_agent)
-            .send()
-            .await?;
-        let status = resp.status();
-        if !status.is_success() {
-            return Err(crate::Error::Source(format!(
-                "HTTP {} from {}",
-                status.as_u16(),
-                url
-            )));
+            .send().await?;
+        let status = resp.status().as_u16();
+        if status == 200 { Ok(resp) } else {
+            Err(crate::Error::Source(format!("HTTP {} from {}", status, url)))
         }
-        Ok(resp)
     }
 
     pub async fn post_form_json<T: serde::de::DeserializeOwned>(
-        &self,
-        url: &str,
-        params: &[(&str, &str)],
+        &self, url: &str, params: &[(&str, &str)],
     ) -> crate::Result<T> {
-        let resp = self
-            .inner
-            .post(url)
-            .header("User-Agent", &self.user_agent)
-            .form(params)
-            .send()
-            .await?;
-        let status = resp.status();
-        if !status.is_success() {
-            return Err(crate::Error::Source(format!(
-                "HTTP {} from {}",
-                status.as_u16(),
-                url
-            )));
+        for i in 1..=3 {
+            let resp = self.inner.post(url)
+                .header("User-Agent", &self.user_agent)
+                .form(params)
+                .send().await?;
+            let status = resp.status().as_u16();
+            if status == 200 { return Ok(resp.json().await?); }
+            if status != 429 { return Err(crate::Error::Source(format!("HTTP {} from {}", status, url))); }
+            let secs = retry_after(&resp, i);
+            tokio::time::sleep(Duration::from_secs(secs)).await;
         }
-        Ok(resp.json().await?)
+        Err(crate::Error::Source(format!("Rate limited on {}", url)))
     }
+}
+
+fn retry_after(resp: &reqwest::Response, attempt: u32) -> u64 {
+    let header = resp.headers().get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(10);
+    let adaptive = 2u64.pow(attempt);
+    header.min(60).max(adaptive.min(30))
 }
 
 impl Default for HttpClient {

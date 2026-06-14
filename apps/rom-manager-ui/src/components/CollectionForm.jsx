@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button,
   Radio, RadioGroup, FormControlLabel, Chip,
-  Box, Typography, CircularProgress, Alert,
+  Box, Typography, CircularProgress, Alert, FormControl, FormLabel, Select, MenuItem,
 } from '@mui/material';
 import {
   getAvailableVersions, getPlatforms, importDat,
@@ -45,6 +45,7 @@ export default function CollectionForm() {
   const [knownPlatforms, setKnownPlatforms] = useState([]);
   const [npsPlatforms, setNpsPlatforms] = useState([]);
   const [selectedNpsPlatforms, setSelectedNpsPlatforms] = useState([]);
+  const [scrapeMode, setScrapeMode] = useState(targetData?.scrape_mode || 'parent');
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -97,7 +98,7 @@ export default function CollectionForm() {
           await saveCollection(payload, null);
         }
       } else {
-        const payload = { name: name.trim(), slug, platform, logo: logo || 'folder', folder: folder || slug };
+        const payload = { name: name.trim(), slug, platform, logo: logo || 'folder', folder: folder || slug, scrape_mode: scrapeMode };
         if (datasetMode === 'preset' && selectedPreset) {
           payload.dataset_preset = selectedPreset.slug;
         }
@@ -207,6 +208,14 @@ export default function CollectionForm() {
             />
           ))}
         </Box>
+
+        <FormControl fullWidth size="small" sx={{ mb: 2 }}>
+          <FormLabel>Scrape Scope</FormLabel>
+          <Select value={scrapeMode} onChange={e => setScrapeMode(e.target.value)}>
+            <MenuItem value="parent">Parent-based — all clones share media from parent game</MenuItem>
+            <MenuItem value="individual">Individual — scrape each variant by its own name</MenuItem>
+          </Select>
+        </FormControl>
       </DialogContent>
       <DialogActions>
         <Button onClick={closeCollectionForm}>Cancel</Button>

@@ -41,7 +41,7 @@ export function getCollections() { return fetchJson('/collections'); }
 export function createCollection(data) { return fetchWithBody('/collections', 'POST', data); }
 export function updateCollection(id, data) { return fetchWithBody(`/collections/${id}`, 'PUT', data); }
 export function deleteCollection(id) { return fetchWithBody(`/collections/${id}`, 'DELETE'); }
-export function getCollectionGames(id, { limit, offset, sort, order, q, parents_only, favourites_only, roms_only, version_id } = {}) {
+export function getCollectionGames(id, { limit, offset, sort, order, q, parents_only, favourites_only, roms_only, version_id, year, manufacturer } = {}) {
   const p = new URLSearchParams();
   if (limit) p.set('limit', limit);
   if (offset) p.set('offset', offset);
@@ -52,6 +52,8 @@ export function getCollectionGames(id, { limit, offset, sort, order, q, parents_
   if (favourites_only) p.set('favourites_only', favourites_only);
   if (roms_only) p.set('roms_only', roms_only);
   if (version_id) p.set('version_id', version_id);
+  if (year) p.set('year', year);
+  if (manufacturer) p.set('manufacturer', manufacturer);
   return fetchJson(`/collections/${id}/games${p.toString() ? '?' + p.toString() : ''}`);
 }
 
@@ -118,8 +120,8 @@ export function getGameSetGames(id, { limit, offset, sort, order, q } = {}) {
   if (q) p.set('q', q);
   return fetchJson(`/game-sets/${id}/games${p.toString() ? '?' + p.toString() : ''}`);
 }
-export function addGameSetGames(id, gameEntryIds) {
-  return fetchWithBody(`/game-sets/${id}/games`, 'POST', { game_entry_ids: gameEntryIds });
+export function addGameSetGames(id, gameIds) {
+  return fetchWithBody(`/game-sets/${id}/games`, 'POST', { game_entry_ids: gameIds });
 }
 export function removeGameSetGame(id, gameId) {
   return fetchWithBody(`/game-sets/${id}/games/${gameId}`, 'DELETE');
@@ -129,7 +131,7 @@ export function exportGameSet(id) { return fetchJson(`/game-sets/${id}/exports`)
 // ==============================
 // Games (global)
 // ==============================
-export function getGames({ limit, offset, sort, order, q, collection_id, version_id, parents_only, favourites_only, roms_only } = {}) {
+export function getGames({ limit, offset, sort, order, q, collection_id, version_id, parents_only, favourites_only, roms_only, year, manufacturer } = {}) {
   const p = new URLSearchParams();
   if (limit) p.set('limit', limit);
   if (offset) p.set('offset', offset);
@@ -141,6 +143,8 @@ export function getGames({ limit, offset, sort, order, q, collection_id, version
   if (parents_only) p.set('parents_only', parents_only);
   if (favourites_only) p.set('favourites_only', favourites_only);
   if (roms_only) p.set('roms_only', roms_only);
+  if (year) p.set('year', year);
+  if (manufacturer) p.set('manufacturer', manufacturer);
   return fetchJson(`/games?${p.toString()}`);
 }
 
@@ -148,7 +152,8 @@ export function getGame(id) { return fetchJson(`/games/${id}`); }
 export function updateGameRating(id, data) {
   return fetchWithBody(`/games/${id}/rating`, 'PUT', data);
 }
-export function coverUrl(id) { return `${BASE}/games/${id}/cover?_=${Date.now()}`; }
+export function coverUrl(id) { return `${BASE}/games/${id}/media?type=title`; }
+export function screenshotUrl(id) { return `${BASE}/games/${id}/media?type=ingame`; }
 export function playUrl(gameId) { return `${BASE}/games/${gameId}/play`; }
 export function recordPlay(gameId) { return fetchWithBody(`/games/${gameId}/play`, 'POST', {}); }
 export function getRecentlyPlayed() { return fetchJson('/games/recently-played'); }
@@ -259,8 +264,8 @@ export function saveSettings(data) { return fetchWithBody('/settings', 'PUT', da
 // ==============================
 // Downloads
 // ==============================
-export function enqueueDownload(gameEntryId) {
-  return fetchWithBody('/downloads/enqueue', 'POST', { game_entry_id: gameEntryId });
+export function enqueueDownload(gameId) {
+  return fetchWithBody('/downloads/enqueue', 'POST', { game_id: gameId });
 }
 export function downloadGameFromIA(gameId) {
   return fetchWithBody(`/games/${gameId}/download-ia`, 'POST');

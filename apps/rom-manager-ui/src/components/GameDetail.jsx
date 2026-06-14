@@ -6,7 +6,7 @@ import {
 } from '@mui/material';
 import { ArrowBack, PlayArrow, Download, CloudDownload, Check, Close } from '@mui/icons-material';
 import { useNavigate, useParams } from 'react-router-dom';
-import { getGame, coverUrl, playUrl, scrapeGameMetadata,
+import { getGame, coverUrl, screenshotUrl, playUrl, scrapeGameMetadata,
   downloadGameFromIA, getIaAuthStatus, enqueueDownload, getGameAvailability,
   subscribeJobSSE, subscribeDownloadSSE } from '../api.js';
 import EmulatorModal from './EmulatorModal.jsx';
@@ -17,7 +17,7 @@ function Transition(props) {
 }
 
 export default function GameDetail() {
-  const { gameId } = useParams();
+  const { id: collectionId, gameId } = useParams();
   const navigate = useNavigate();
   const [game, setGame] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -25,6 +25,7 @@ export default function GameDetail() {
   const [scrapeError, setScrapeError] = useState(null);
   const [scrapedTitle, setScrapedTitle] = useState(null);
   const [lightbox, setLightbox] = useState(null);
+  const [videoLightbox, setVideoLightbox] = useState(null);
   const [coverFailed, setCoverFailed] = useState(false);
   const [showEmulator, setShowEmulator] = useState(false);
   const [iaAuth, setIaAuth] = useState(null);
@@ -33,6 +34,7 @@ export default function GameDetail() {
   const [downloadJobId, setDownloadJobId] = useState(null);
   const [romAvailability, setRomAvailability] = useState(null);
   const dataLoadedRef = useRef(null);
+  const autoScrapedRef = useRef(false);
 
   useEffect(() => {
     if (!gameId) return;
@@ -40,6 +42,11 @@ export default function GameDetail() {
     getGame(gameId).then(data => {
       setGame(data);
       dataLoadedRef.current = data;
+      // Auto-scrape if the game has never been scraped (no synopsis, no covers)
+      if (!autoScrapedRef.current && !data.synopsis && !data.covers?.length) {
+        autoScrapedRef.current = true;
+        setTimeout(() => handleScrape(), 500);
+      }
     }).catch(() => {}).finally(() => setLoading(false));
     getIaAuthStatus().then(setIaAuth).catch(() => {});
     getGameAvailability(gameId).then(setRomAvailability).catch(() => {});
@@ -111,7 +118,7 @@ export default function GameDetail() {
 
       const es = subscribeDownloadSSE({
         onQueue: (queue) => {
-          const items = (queue || []).filter(i => i.game_entry_id === parseInt(gameId));
+          const items = (queue || []).filter(i => i.game_id === parseInt(gameId));
           if (items.length === 0) return;
           const item = items[0];
           if (item.status === 'downloading') {
@@ -181,7 +188,8 @@ export default function GameDetail() {
               </Button>
             ) : null}
             <Button variant="contained" size="small" startIcon={<PlayArrow />}
-              onClick={() => setShowEmulator(true)} disabled={!game}>
+              onClick={() => setShowEmulator(true)}
+              disabled={!game || (hasAvailableRoms === false && !showDownloadDialog)}>
               Play
             </Button>
           </Toolbar>
@@ -196,12 +204,12 @@ export default function GameDetail() {
             <>
               <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
                 <Box sx={{ width: { xs: '100%', sm: 200 }, flexShrink: 0 }}>
-                  <Box sx={{ position: 'relative', borderRadius: 1, overflow: 'hidden', bgcolor: 'action.hover' }}>
+                  <Box sx={{ position: 'relative', borderRadius: 1, overflow: 'hidden', bgcolor: '#111', aspectRatio: '3/4' }}>
                     {!coverFailed && (game.covers?.[0] || game.cover_url) ? (
-                      <img src={coverUrl(game.id)} alt="" style={{ width: '100%', display: 'block', cursor: 'pointer' }}
+                      <img src={coverUrl(game.id)} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', cursor: 'pointer' }}
                         onClick={() => setLightbox(coverUrl(game.id))} onError={() => setCoverFailed(true)} />
                     ) : (
-                      <Box sx={{ aspectRatio: '3/4', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'text.secondary' }}>
+                      <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'text.secondary' }}>
                         <Typography>No cover</Typography>
                       </Box>
                     )}
@@ -213,10 +221,13 @@ export default function GameDetail() {
                   <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
                     {game.source && <Chip label={game.source} size="small" />}
                     {game.region && <Chip label={game.region} size="small" variant="outlined" />}
-                    {game.year && <Chip label={game.year} size="small" />}
+                    {game.year && <Chip label={game.year} size="small" onClick={() => navigate(`/collections/${collectionId || ''}/browse?year=${game.year}`)} sx={{ cursor: 'pointer' }} />}
                     {game.platform && <Chip label={game.platform} size="small" color="primary" variant="outlined" />}
-                    {game.manufacturer && <Chip label={game.manufacturer} size="small" />}
-                    {game.cloneof && <Chip label={`Clone of: ${game.cloneof}`} size="small" variant="outlined" />}
+                    {game.manufacturer && <Chip label={game.manufacturer} size="small" onClick={() => navigate(`/collections/${collectionId || ''}/browse?manufacturer=${encodeURIComponent(game.manufacturer)}`)} sx={{ cursor: 'pointer' }} />}
+                    {game.cloneof && <Chip label={`Clone of: ${game.cloneof}`} size="small" variant="outlined"
+                      onClick={() => game.parent?.id && navigate(`/collections/${collectionId || ''}/game/${game.parent.id}`, { replace: true })}
+                      sx={{ cursor: game.parent?.id ? 'pointer' : 'default' }}
+                    />}
                     {game.synopsis && <Chip label="Scraped" size="small" color="success" />}
                   </Box>
                   <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
@@ -238,7 +249,7 @@ export default function GameDetail() {
                   <ImageList cols={4} gap={8} sx={{ mb: 2 }}>
                     {game.screenshots.slice(0, 12).map((url, i) => (
                       <ImageListItem key={i} sx={{ cursor: 'pointer' }}>
-                        <img src={url} alt="" loading="lazy" style={{ borderRadius: 4 }}
+                        <img src={i === 0 ? screenshotUrl(game.id) : url} alt="" loading="lazy" style={{ borderRadius: 4 }}
                           onClick={() => setLightbox(url)} />
                       </ImageListItem>
                     ))}
@@ -246,18 +257,32 @@ export default function GameDetail() {
                 </>
               )}
 
-              {game.variants?.length > 0 && (
+              {game.videos?.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>Video</Typography>
+                  <Box sx={{ borderRadius: 1, overflow: 'hidden', width: '25%', bgcolor: '#000', cursor: 'pointer' }}
+                    onClick={() => setVideoLightbox(game.videos[0])}>
+                    <video
+                      src={game.videos[0]}
+                      autoPlay muted playsInline loop
+                      preload="auto"
+                      style={{ width: '100%', display: 'block', pointerEvents: 'none' }}
+                    />
+                  </Box>
+                </Box>
+              )}
+
+              {game.clones?.length > 0 && (
                 <>
-                  <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>Variants</Typography>
-                  {game.variants.map(v => (
-                    <Box key={v.id} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ cursor: 'pointer', color: 'primary.main' }}
-                        onClick={() => navigate(`/collections/${game.collection_id}/game/${v.id}`)}>
-                        {v.name}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">{v.rom_name}</Typography>
-                    </Box>
-                  ))}
+                  <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>Variants ({game.clones.length})</Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                    {game.clones.map(v => (
+                      <Chip key={v.id} label={v.name} size="small" variant="outlined" color="primary"
+                        onClick={() => navigate(`/collections/${collectionId || ''}/game/${v.id}`, { replace: true })}
+                        title={v.description}
+                      />
+                    ))}
+                  </Box>
                 </>
               )}
 
@@ -284,7 +309,7 @@ export default function GameDetail() {
                                 {rom.name || rom.filename}
                               </Typography>
                             </TableCell>
-                            <TableCell>{rom.merge_target ? 'Split' : 'Parent'}</TableCell>
+                            <TableCell>{rom.subtype === 'chd' ? 'CHD' : rom.subtype === 'sample' ? 'Sample' : rom.merge_target ? 'Split' : 'ROM'}</TableCell>
                             <TableCell>{rom.size ? `${(rom.size / 1024).toFixed(0)}KB` : ''}</TableCell>
                             <TableCell>
                               <Chip label={rom.status || 'unknown'} size="small" color={
@@ -312,6 +337,14 @@ export default function GameDetail() {
       {lightbox && (
         <Dialog open maxWidth="lg" onClose={() => setLightbox(null)}>
           <img src={lightbox} alt="" style={{ width: '100%', maxHeight: '90vh', objectFit: 'contain' }} />
+        </Dialog>
+      )}
+
+      {videoLightbox && (
+        <Dialog open maxWidth="lg" onClose={() => setVideoLightbox(null)}
+          PaperProps={{ sx: { bgcolor: '#000' } }}>
+          <video src={videoLightbox} controls autoPlay
+            style={{ width: '100%', display: 'block' }} />
         </Dialog>
       )}
 

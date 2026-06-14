@@ -20,11 +20,12 @@ router.get('/api/status', async (req, res) => {
   try {
     const db = getDb();
     const v = db.exec("SELECT COUNT(*) as c FROM set_versions")[0].values[0][0];
-    const g = db.exec("SELECT COUNT(*) as c FROM game_entries")[0].values[0][0];
-    const r = db.exec("SELECT COUNT(*) as c FROM rom_entries")[0].values[0][0];
+    const g = db.exec("SELECT COUNT(*) as c FROM games")[0].values[0][0];
+    const r = db.exec("SELECT COUNT(*) as c FROM game_rom_files")[0].values[0][0];
     const c = db.exec("SELECT COUNT(*) as c FROM collections")[0].values[0][0];
     const gs = db.exec("SELECT COUNT(*) as c FROM game_sets")[0].values[0][0];
-    res.json({ versions: v, games: g, roms: r, collections: c, game_sets: gs });
+    const rs = db.exec("SELECT COUNT(*) as c FROM game_rom_sets")[0].values[0][0];
+    res.json({ versions: v, games: g, roms: r, collections: c, game_sets: gs, game_rom_sets: rs });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -36,7 +37,7 @@ router.get('/api/collections', async (req, res) => {
     const rows = all('SELECT c.* FROM collections c ORDER BY c.name');
     const result = rows.map(c => {
       const versions = all(`SELECT sv.id, sv.source, sv.version, sv.dir, sv.created_at,
-          (SELECT COUNT(*) FROM game_entries WHERE version_id = sv.id) as total_games
+          (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games
         FROM collection_versions cv
         JOIN set_versions sv ON sv.id = cv.version_id
         WHERE cv.collection_id = ?
@@ -47,8 +48,8 @@ router.get('/api/collections', async (req, res) => {
       let available = 0;
       if (vids.length) {
         const ph = vids.map(() => '?').join(',');
-        total = get(`SELECT COUNT(*) as c FROM game_entries WHERE version_id IN (${ph})`, vids).c;
-        available = get(`SELECT COUNT(*) as c FROM game_entries ge JOIN game_state gs ON gs.game_entry_id = ge.id WHERE ge.version_id IN (${ph}) AND gs.available = 1`, vids).c;
+        total = get(`SELECT COUNT(*) as c FROM game_rom_sets WHERE version_id IN (${ph})`, vids).c;
+        available = get(`SELECT COUNT(*) as c FROM game_rom_sets grs JOIN game_state gs ON gs.game_id = grs.game_id WHERE grs.version_id IN (${ph}) AND gs.available = 1`, vids).c;
       }
       return { ...c, total_games: total, available_games: available, versions };
     });
@@ -59,7 +60,7 @@ router.get('/api/collections', async (req, res) => {
 router.post('/api/collections', async (req, res) => {
   await dbReady;
   try {
-    let { name, slug, platform, logo, folder, has_dataset, dataset_preset, uploaded_version_id } = req.body;
+    let { name, slug, platform, logo, folder, has_dataset, dataset_preset, scrape_mode, uploaded_version_id } = req.body;
     if (!name || !slug) return res.status(400).json({ error: 'name and slug required' });
     let finalSlug = slug;
     let counter = 1;
@@ -70,8 +71,8 @@ router.post('/api/collections', async (req, res) => {
     while (get('SELECT id FROM collections WHERE folder = ?', [finalFolder])) {
       finalFolder = `${finalFolder}-${counter++}`;
     }
-    run('INSERT INTO collections (name, slug, platform, logo, folder, has_dataset, dataset_preset) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [name, finalSlug, platform || null, logo || '', finalFolder, has_dataset ? 1 : 0, dataset_preset || null]);
+    run('INSERT INTO collections (name, slug, platform, logo, folder, has_dataset, dataset_preset, scrape_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [name, finalSlug, platform || null, logo || '', finalFolder, has_dataset ? 1 : 0, dataset_preset || null, scrape_mode || 'auto']);
     const col = get('SELECT * FROM collections WHERE slug = ?', [finalSlug]);
     if (uploaded_version_id) {
       run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [col.id, uploaded_version_id]);
@@ -83,7 +84,7 @@ router.post('/api/collections', async (req, res) => {
 router.put('/api/collections/:id', async (req, res) => {
   await dbReady;
   try {
-    const { name, slug, platform, logo, folder } = req.body;
+    const { name, slug, platform, logo, folder, scrape_mode } = req.body;
     const col = get('SELECT * FROM collections WHERE id = ?', [req.params.id]);
     if (!col) return res.status(404).json({ error: 'Collection not found' });
 
@@ -96,6 +97,7 @@ router.put('/api/collections/:id', async (req, res) => {
     if (platform != null) { sets.push('platform = ?'); vals.push(platform); }
     if (logo != null) { sets.push('logo = ?'); vals.push(logo); }
     if (folder != null) { sets.push('folder = ?'); vals.push(folder); }
+    if (scrape_mode != null) { sets.push('scrape_mode = ?'); vals.push(scrape_mode); }
     sets.push("updated_at = datetime('now')");
     vals.push(req.params.id);
     if (sets.length) run(`UPDATE collections SET ${sets.join(', ')} WHERE id = ?`, vals);
@@ -124,8 +126,8 @@ router.delete('/api/collections/:id', async (req, res) => {
       WHERE NOT EXISTS (SELECT 1 FROM collection_versions cv WHERE cv.version_id = sv.id)
     `);
     for (const v of orphaned) {
-      run('DELETE FROM rom_entries WHERE game_entry_id IN (SELECT id FROM game_entries WHERE version_id = ?)', [v.id]);
-      run('DELETE FROM game_entries WHERE version_id = ?', [v.id]);
+      run('DELETE FROM game_rom_files WHERE rom_set_id IN (SELECT id FROM game_rom_sets WHERE version_id = ?)', [v.id]);
+      run('DELETE FROM game_rom_sets WHERE version_id = ?', [v.id]);
       run('DELETE FROM set_versions WHERE id = ?', [v.id]);
     }
     res.json({ ok: true, orphaned_versions: orphaned.length });
@@ -136,7 +138,7 @@ router.get('/api/collections/:id/games', async (req, res) => {
   await dbReady;
   try {
     const { id } = req.params;
-    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, parents_only, favourites_only, roms_only, version_id } = req.query;
+    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, parents_only, favourites_only, roms_only, version_id, year, manufacturer } = req.query;
     const collection = get('SELECT * FROM collections WHERE id = ?', [id]);
     if (!collection) return res.status(404).json({ error: 'not found' });
 
@@ -145,7 +147,7 @@ router.get('/api/collections/:id/games', async (req, res) => {
 
     const vids = version_id ? [Number(version_id)] : versions.map(v => v.version_id);
     const ph = vids.map(() => '?').join(',');
-    const sortCol = sort === 'rating' ? 'MAX(COALESCE(r.rating, 0))' : sort === 'play_count' ? 'MAX(COALESCE(r.play_count, 0))' : 'g.name';
+    const sortCol = sort === 'rating' ? 'MAX(COALESCE(gs.rating, 0))' : sort === 'play_count' ? 'MAX(COALESCE(gs.play_count, 0))' : sort === 'year' ? 'CAST(g.year AS INTEGER)' : sort === 'manufacturer' ? 'g.manufacturer' : 'g.name';
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
 
     let whereExtra = '';
@@ -155,44 +157,53 @@ router.get('/api/collections/:id/games', async (req, res) => {
       extraParams.push(`%${q}%`, `%${q}%`);
     }
     if (parents_only === 'true') {
-      whereExtra += ' AND g.cloneof IS NULL';
+      whereExtra += ' AND g.parent_game_id IS NULL';
     }
 
     // For roms_only filter, use game_state.available flag
     if (roms_only === 'true') {
-      whereExtra += ' AND COALESCE(r.available, 0) = 1';
+      whereExtra += ' AND COALESCE(gs.available, 0) = 1';
     }
     // For favourites_only filter, use game_state.favourite flag
     if (favourites_only === 'true') {
-      whereExtra += ' AND COALESCE(r.favourite, 0) = 1';
+      whereExtra += ' AND COALESCE(gs.favourite, 0) = 1';
+    }
+    if (year) {
+      whereExtra += ' AND g.year = ?';
+      extraParams.push(year);
+    }
+    if (manufacturer) {
+      whereExtra += ' AND g.manufacturer = ?';
+      extraParams.push(manufacturer);
     }
 
     // Always LEFT JOIN game_state for available/favourite/rating data
-    const joinClause = 'LEFT JOIN game_state r ON r.game_entry_id = g.id';
+    const joinClause = 'LEFT JOIN game_state gs ON gs.game_id = g.id';
 
-    const total = get(`SELECT COUNT(DISTINCT g.name || '|' || g.region) as c FROM game_entries g ${joinClause} WHERE g.version_id IN (${ph}) ${whereExtra}`, [...vids, ...extraParams]).c;
+    const total = get(`SELECT COUNT(DISTINCT g.id) as c FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id ${joinClause} WHERE grs.version_id IN (${ph}) ${whereExtra}`, [...vids, ...extraParams]).c;
 
     let games = all(`
-      SELECT g.name, g.description, g.year, g.manufacturer, g.cloneof, g.platform, g.region,
-        MIN(g.id) as id, MIN(g.version_id) as version_id, MIN(sv.source) as source, MIN(sv.version) as version,
-        GROUP_CONCAT(sv.source || '||' || sv.version, '||') as versions_tags,
-        MAX(COALESCE(r.rating, 0)) as rating,
-        MAX(COALESCE(r.favourite, 0)) as favourite,
-        MAX(COALESCE(r.play_count, 0)) as play_count
-      FROM game_entries g
-      JOIN set_versions sv ON sv.id = g.version_id
+      SELECT g.name, g.description, g.year, g.manufacturer, parent_g.name as cloneof, g.platform,
+        MIN(g.id) as id, MIN(grs.version_id) as version_id, MIN(sv.source) as source, MIN(sv.version) as version,
+        GROUP_CONCAT(sv.source || '||' || sv.version, ',') as versions_tags,
+        MAX(COALESCE(gs.rating, 0)) as rating,
+        MAX(COALESCE(gs.favourite, 0)) as favourite,
+        MAX(COALESCE(gs.play_count, 0)) as play_count
+      FROM games g
+      JOIN game_rom_sets grs ON grs.game_id = g.id
+      JOIN set_versions sv ON sv.id = grs.version_id
+      LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
       ${joinClause}
-      WHERE g.version_id IN (${ph}) ${whereExtra}
-      GROUP BY g.name, g.region
-      ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?
+      WHERE grs.version_id IN (${ph}) ${whereExtra}
+      GROUP BY g.id
+      ORDER BY ${sortCol} ${sortDir} NULLS LAST LIMIT ? OFFSET ?
     `, [...vids, ...extraParams, Number(limit), Number(offset)]);
 
     games = games.map(g => {
-      const tags = g.versions_tags ? g.versions_tags.split('||') : [];
-      const versions = [];
-      for (let i = 0; i < tags.length; i += 2) versions.push(tags[i + 1]);
+      const tags = g.versions_tags || '';
+      const versions = tags.split(',').filter(Boolean).map(p => { const [, v] = p.split('||'); return v || p; });
       delete g.versions_tags;
-      return { ...g, versions, regions: g.region ? [g.region] : [] };
+      return { ...g, versions, regions: [] };
     });
     // Attach covers/screenshots from game_media
     const gameNames = [...new Set(games.map(g => g.name))];
@@ -214,7 +225,7 @@ router.get('/api/collections/:id/games', async (req, res) => {
 
     const collectionVersions = all(`
       SELECT sv.id, sv.source, sv.version, sv.created_at,
-        (SELECT COUNT(*) FROM game_entries WHERE version_id = sv.id) as total_games
+        (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games
       FROM set_versions sv
       JOIN collection_versions cv ON cv.version_id = sv.id
       WHERE cv.collection_id = ?
@@ -229,7 +240,7 @@ router.get('/api/collections/:id/versions', async (req, res) => {
   await dbReady;
   try {
     const versions = all(`
-      SELECT sv.*, (SELECT COUNT(*) FROM game_entries WHERE version_id = sv.id) as total_games
+      SELECT sv.*, (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games
       FROM set_versions sv
       JOIN collection_versions cv ON cv.version_id = sv.id
       WHERE cv.collection_id = ?
@@ -267,19 +278,20 @@ router.post('/api/collections/:id/scan', async (req, res) => {
     setTimeout(() => {
       try {
         // Reset available=0 for all games in this version before scan
-        runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
-          SELECT ge.id, 0, datetime('now') FROM game_entries ge
-          WHERE ge.version_id = ?
-          ON CONFLICT(game_entry_id) DO UPDATE SET available = 0, updated_at = datetime('now')`, [version_id]);
+        runNow(`INSERT INTO game_state (game_id, available, updated_at)
+          SELECT grs.game_id, 0, datetime('now') FROM game_rom_sets grs
+          WHERE grs.version_id = ?
+          ON CONFLICT(game_id) DO UPDATE SET available = 0, updated_at = datetime('now')`, [version_id]);
         const result = execCli(['scan', String(version_id), dir]);
         // Update game_state.available from scan result JSON
         const matchedNames = (result?.matches || []).map(m => m.name);
         if (matchedNames.length > 0) {
           const ph = matchedNames.map(() => '?').join(',');
-          runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
-            SELECT ge.id, 1, datetime('now') FROM game_entries ge
-            WHERE ge.version_id = ? AND ge.name IN (${ph})
-            ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id, ...matchedNames]);
+          runNow(`INSERT INTO game_state (game_id, available, updated_at)
+            SELECT g.id, 1, datetime('now') FROM games g
+            JOIN game_rom_sets grs ON grs.game_id = g.id
+            WHERE grs.version_id = ? AND g.name IN (${ph})
+            ON CONFLICT(game_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id, ...matchedNames]);
         }
         doneJob(jobId, result);
       } catch (e) {
@@ -346,27 +358,45 @@ router.post('/api/collections/:id/build', async (req, res) => {
           reloadDb();
 
           // Parse CLI JSON output
-          const matchedNames = (scanResult?.matches || []).map(m => m.name);
+          const matchedNames = new Set((scanResult?.matches || []).map(m => m.name));
           const missingNames = scanResult?.missing_names || [];
-          const allNames = [...new Set([...matchedNames, ...missingNames])];
+
+          // Also scan for CHD directories and sample zips
+          const scanDir = path.join(collectionDir, sv.version);
+          const romsDir = path.join(scanDir, 'roms');
+          const samplesDir = path.join(scanDir, 'samples');
+          if (fs.existsSync(romsDir)) {
+            for (const entry of fs.readdirSync(romsDir, { withFileTypes: true })) {
+              if (entry.isDirectory()) matchedNames.add(entry.name);
+            }
+          }
+          if (fs.existsSync(samplesDir)) {
+            for (const entry of fs.readdirSync(samplesDir)) {
+              if (entry.endsWith('.zip')) matchedNames.add(entry.replace(/\.zip$/, ''));
+            }
+          }
+
+          const matchedNamesArr = [...matchedNames];
+          const allNames = [...new Set([...matchedNamesArr, ...missingNames])];
 
           // Update game_state from scan results
-          runNow(`UPDATE game_state SET available = 0, updated_at = datetime('now') WHERE game_entry_id IN (SELECT id FROM game_entries WHERE version_id = ?)`, [version_id]);
-          if (matchedNames.length > 0) {
-            const ph = matchedNames.map(() => '?').join(',');
-            runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
-              SELECT ge.id, 1, datetime('now') FROM game_entries ge
-              WHERE ge.version_id = ? AND ge.name IN (${ph})
-              ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id, ...matchedNames]);
+          runNow(`UPDATE game_state SET available = 0, updated_at = datetime('now') WHERE game_id IN (SELECT game_id FROM game_rom_sets WHERE version_id = ?)`, [version_id]);
+          if (matchedNamesArr.length > 0) {
+            const ph = matchedNamesArr.map(() => '?').join(',');
+            runNow(`INSERT INTO game_state (game_id, available, updated_at)
+              SELECT g.id, 1, datetime('now') FROM games g
+              JOIN game_rom_sets grs ON grs.game_id = g.id
+              WHERE grs.version_id = ? AND g.name IN (${ph})
+              ON CONFLICT(game_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id, ...matchedNamesArr]);
           }
 
           // Calculate exist/reused/missing
-          const total = get('SELECT COUNT(DISTINCT name) as c FROM game_entries WHERE version_id = ?', [version_id]).c;
-          const matched = get('SELECT COUNT(DISTINCT ge.name) as c FROM game_entries ge JOIN game_state gs ON gs.game_entry_id = ge.id WHERE ge.version_id = ? AND gs.available = 1', [version_id]).c;
+          const total = get('SELECT COUNT(DISTINCT g.name) as c FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ?', [version_id]).c;
+          const matched = get('SELECT COUNT(DISTINCT g.name) as c FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id JOIN game_state gs ON gs.game_id = g.id WHERE grs.version_id = ? AND gs.available = 1', [version_id]).c;
           let reused = 0;
           const priorVersions = all('SELECT DISTINCT sv.version, sv.id FROM set_versions sv JOIN collection_versions cv ON cv.version_id = sv.id WHERE cv.collection_id = ? AND sv.id < ? ORDER BY sv.id', [col.id, version_id]);
           if (priorVersions.length > 0 && fs.existsSync(collectionDir)) {
-            const currentNames = new Set(all('SELECT DISTINCT name FROM game_entries WHERE version_id = ?', [version_id]).map(r => r.name));
+            const currentNames = new Set(all('SELECT DISTINCT g.name FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ?', [version_id]).map(r => r.name));
             for (const pv of priorVersions) {
               const pvRoms = path.join(collectionDir, pv.version, 'roms');
               if (!fs.existsSync(pvRoms)) continue;
@@ -379,21 +409,23 @@ router.post('/api/collections/:id/build', async (req, res) => {
               } catch {}
             }
           }
-          doneJob(jobId, { exists: matched, reused, missing: total - matched });
+          doneJob(jobId, { found: matched, missing: total - matched, total });
         } else if (isNps) {
           // NPS build
           fs.mkdirSync(collectionDir, { recursive: true });
           const result = execCli(['build', String(version_id), collectionDir, '--input-dir', collectionDir], { binary: 'nps' });
           reloadDb();
-          runNow(`UPDATE game_state SET available = 0, updated_at = datetime('now') WHERE game_entry_id IN (SELECT id FROM game_entries WHERE version_id = ?)`, [version_id]);
+          runNow(`UPDATE game_state SET available = 0, updated_at = datetime('now') WHERE game_id IN (SELECT game_id FROM game_rom_sets WHERE version_id = ?)`, [version_id]);
           if (fs.existsSync(collectionDir)) {
             const found = fs.readdirSync(collectionDir, { recursive: true });
             for (const f of found) {
               if (f.endsWith('.pkg')) {
                 const fname = path.basename(f);
-                runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
-                  SELECT r.game_entry_id, 1, datetime('now') FROM rom_entries r WHERE r.filename = ?
-                  ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [fname]);
+                runNow(`INSERT INTO game_state (game_id, available, updated_at)
+                  SELECT grs.game_id, 1, datetime('now') FROM game_rom_files grf
+                  JOIN game_rom_sets grs ON grs.id = grf.rom_set_id
+                  WHERE grf.filename = ?
+                  ON CONFLICT(game_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [fname]);
               }
             }
           }
@@ -415,16 +447,17 @@ router.post('/api/collections/:id/build', async (req, res) => {
                 }
               }
               if (fs.existsSync(collectionDir)) scanDir(collectionDir);
-              runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
-                SELECT ge.id, 0, datetime('now') FROM game_entries ge WHERE ge.version_id = ?
-                ON CONFLICT(game_entry_id) DO UPDATE SET available = 0, updated_at = datetime('now')`, [version_id]);
+              runNow(`INSERT INTO game_state (game_id, available, updated_at)
+                SELECT grs.game_id, 0, datetime('now') FROM game_rom_sets grs WHERE grs.version_id = ?
+                ON CONFLICT(game_id) DO UPDATE SET available = 0, updated_at = datetime('now')`, [version_id]);
               if (foundGames.size > 0) {
                 const names = [...foundGames];
                 const ph = names.map(() => '?').join(',');
-                runNow(`INSERT INTO game_state (game_entry_id, available, updated_at)
-                  SELECT ge.id, 1, datetime('now') FROM game_entries ge
-                  WHERE ge.version_id = ? AND ge.name IN (${ph})
-                  ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id, ...names]);
+                runNow(`INSERT INTO game_state (game_id, available, updated_at)
+                  SELECT g.id, 1, datetime('now') FROM games g
+                  JOIN game_rom_sets grs ON grs.game_id = g.id
+                  WHERE grs.version_id = ? AND g.name IN (${ph})
+                  ON CONFLICT(game_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id, ...names]);
               }
             } catch (_) {}
             doneJob(jobId, result);
@@ -486,7 +519,7 @@ router.post('/api/collections/:id/builds', async (req, res) => {
       return res.status(400).json({ error: `Cannot start new build: version ${incVersion?.version || 'unknown'} is currently '${incomplete.status}'. Complete it first.` });
     }
 
-    const total = get('SELECT COUNT(*) as c FROM game_entries WHERE version_id = ?', [version_id]).c;
+    const total = get('SELECT COUNT(*) as c FROM game_rom_sets WHERE version_id = ?', [version_id]).c;
     const existing = get('SELECT id FROM collection_builds WHERE collection_id = ? AND version_id = ?', [colId, version_id]);
     if (existing) {
       runNow("UPDATE collection_builds SET status = 'building', format = ?, games_total = ?, started_at = datetime('now') WHERE id = ?", [format, total, existing.id]);
@@ -560,18 +593,19 @@ router.post('/api/collections/:id/builds/:buildId/run', async (req, res) => {
         if (fs.existsSync(buildDir)) scanDir(buildDir);
         const versionId = build.version_id;
         runNow(`
-          INSERT INTO game_state (game_entry_id, available, updated_at)
-          SELECT ge.id, 0, datetime('now') FROM game_entries ge WHERE ge.version_id = ?
-          ON CONFLICT(game_entry_id) DO UPDATE SET available = 0, updated_at = datetime('now')
+          INSERT INTO game_state (game_id, available, updated_at)
+          SELECT grs.game_id, 0, datetime('now') FROM game_rom_sets grs WHERE grs.version_id = ?
+          ON CONFLICT(game_id) DO UPDATE SET available = 0, updated_at = datetime('now')
         `, [versionId]);
         if (foundGames.size > 0) {
           const names = [...foundGames];
           const ph = names.map(() => '?').join(',');
           runNow(`
-            INSERT INTO game_state (game_entry_id, available, updated_at)
-            SELECT ge.id, 1, datetime('now') FROM game_entries ge
-            WHERE ge.version_id = ? AND ge.name IN (${ph})
-            ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')
+            INSERT INTO game_state (game_id, available, updated_at)
+            SELECT g.id, 1, datetime('now') FROM games g
+            JOIN game_rom_sets grs ON grs.game_id = g.id
+            WHERE grs.version_id = ? AND g.name IN (${ph})
+            ON CONFLICT(game_id) DO UPDATE SET available = 1, updated_at = datetime('now')
           `, [versionId, ...names]);
         }
       } catch (_) {}
@@ -608,10 +642,13 @@ router.post('/api/collections/:id/exports', async (req, res) => {
     if (!version) return res.status(404).json({ error: 'Version not found' });
 
     const games = all(`
-      SELECT g.*, r.filename as rom_filename, r.size, r.crc32, r.md5, r.sha1, r.status as rom_status, r.merge_target
-      FROM game_entries g
-      LEFT JOIN rom_entries r ON r.game_entry_id = g.id
-      WHERE g.version_id = ?
+      SELECT g.id, g.name, g.description, g.year, g.manufacturer, parent_g.name as cloneof, g.platform,
+        grf.filename as rom_filename, grf.size, grf.crc32, grf.md5, grf.sha1, grf.status as rom_status, grf.merge_target
+      FROM games g
+      LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
+      JOIN game_rom_sets grs ON grs.game_id = g.id
+      LEFT JOIN game_rom_files grf ON grf.rom_set_id = grs.id
+      WHERE grs.version_id = ?
       ORDER BY g.name
     `, [targetVersionId]);
 
@@ -767,7 +804,7 @@ router.post('/api/collections/:id/scrape-all', async (req, res) => {
     const ph = vids.map(() => '?').join(',');
 
     // Get all unscraped games (no manufacturer or year set)
-    const unscraped = all(`SELECT id, name FROM game_entries WHERE version_id IN (${ph}) AND (manufacturer IS NULL OR manufacturer = '') AND (year IS NULL OR year = '')`, vids);
+    const unscraped = all(`SELECT g.id, g.name FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id IN (${ph}) AND (g.manufacturer IS NULL OR g.manufacturer = '') AND (g.year IS NULL OR g.year = '')`, vids);
 
     if (unscraped.length === 0) return res.json({ jobId: null, total: 0, message: 'All games already have metadata' });
 

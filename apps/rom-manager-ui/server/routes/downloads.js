@@ -5,9 +5,9 @@ const router = Router()
 
 router.post('/api/downloads/enqueue', (req, res) => {
   try {
-    const { game_entry_id } = req.body
-    if (!game_entry_id) return res.status(400).json({ error: 'game_entry_id required' })
-    const result = enqueueGame(game_entry_id)
+    const { game_id } = req.body
+    if (!game_id) return res.status(400).json({ error: 'game_id required' })
+    const result = enqueueGame(game_id)
     res.json({ ok: true, ...result })
   } catch (e) { res.status(400).json({ error: e.message }) }
 })

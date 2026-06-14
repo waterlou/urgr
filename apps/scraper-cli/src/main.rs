@@ -27,6 +27,7 @@ struct SearchResult {
     title: String,
     platform: String,
     release_date: Option<String>,
+    source: String,
 }
 
 #[derive(Serialize)]
@@ -44,6 +45,7 @@ struct ScrapeMatch {
     rating: Option<f32>,
     covers: Vec<String>,
     screenshots: Vec<String>,
+    videos: Vec<String>,
     roms: Vec<RomEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
     downloaded: Option<Vec<String>>,
@@ -63,6 +65,7 @@ struct DetailOutput {
     genres: Vec<String>,
     covers: Vec<String>,
     screenshots: Vec<String>,
+    videos: Vec<String>,
     roms: Vec<RomEntry>,
 }
 
@@ -106,6 +109,7 @@ fn game_to_match(game: &rom_scraper::Game) -> ScrapeMatch {
         rating: game.rating,
         covers: game.media.covers.iter().map(|m| m.url.clone()).collect(),
         screenshots: game.media.screenshots.iter().map(|m| m.url.clone()).collect(),
+        videos: game.media.videos.iter().map(|m| m.url.clone()).collect(),
         roms: game.roms.iter().map(|r| RomEntry {
             filename: r.filename.clone(),
             crc: r.crc32.clone(),
@@ -171,7 +175,7 @@ fn print_usage() {
     eprintln!("  test                           Test connectivity to all configured providers");
     eprintln!();
     eprintln!("OPTIONS:");
-    eprintln!("  --source <s>       Provider: thegamesdb (default), screenscraper, igdb");
+    eprintln!("  --source <s>       Provider: thegamesdb (default), screenscraper, igdb, arcadedb, libretro-thumbnails");
     eprintln!("                     (default: thegamesdb, or SCRAPER_SOURCE env var)");
     eprintln!("  --platform <p>     Platform filter (e.g., nes, snes, arcade)");
     eprintln!("  --download         Download cover/screenshot media to data/media/<game-id>/");
@@ -366,6 +370,22 @@ async fn cmd_test() -> ExitCode {
         }
     }
 
+    // ArcadeDB (always on, no auth needed)
+    {
+        let url = "https://adb.arcadeitalia.net/service_scraper.php?ajax=query_mame&game_name=sf2";
+        match client.get_text(&url).await {
+            Ok(body) => {
+                let has_results = body.contains("title") || body.contains("result");
+                results.push(HealthResult {
+                    name: "arcadedb".into(),
+                    status: if has_results { "ok".into() } else { "error".into() },
+                    message: if has_results { "API returned results".into() } else { "Empty response".into() },
+                });
+            }
+            Err(e) => results.push(HealthResult { name: "arcadedb".into(), status: "error".into(), message: e.to_string() }),
+        }
+    }
+
     // VGMuseum (always on, needs browser UA)
     {
         let url = "https://www.vgmuseum.com/images/nes_b.html";
@@ -387,6 +407,21 @@ async fn cmd_test() -> ExitCode {
                 });
             }
             Err(e) => results.push(HealthResult { name: "vgmuseum".into(), status: "error".into(), message: e.to_string() }),
+        }
+    }
+
+    // LibretroThumbnails (always on)
+    {
+        match client.head("https://thumbnails.libretro.com/").await {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                results.push(HealthResult {
+                    name: "libretro-thumbnails".into(),
+                    status: if status < 500 { "ok".into() } else { "error".into() },
+                    message: format!("Libretro thumbnails reachable (HTTP {})", status),
+                });
+            }
+            Err(e) => results.push(HealthResult { name: "libretro-thumbnails".into(), status: "error".into(), message: e.to_string() }),
         }
     }
 
@@ -457,6 +492,7 @@ async fn cmd_search(args: &[String]) -> ExitCode {
                 title: g.title.clone(),
                 platform: g.platform.name.clone(),
                 release_date: g.release_date.clone(),
+                source: g.source.to_string(),
             }).collect();
             print_json(&serde_json::json!({"results": results}));
             ExitCode::SUCCESS
@@ -582,6 +618,7 @@ async fn cmd_detail(args: &[String]) -> ExitCode {
                 genres: game.genres.clone(),
                 covers: game.media.covers.iter().map(|c| c.url.clone()).collect(),
                 screenshots: game.media.screenshots.iter().map(|s| s.url.clone()).collect(),
+                videos: game.media.videos.iter().map(|v| v.url.clone()).collect(),
                 roms: game.roms.iter().map(|r| RomEntry {
                     filename: r.filename.clone(),
                     crc: r.crc32.clone(),
@@ -635,11 +672,13 @@ fn parse_source(args: &[String]) -> Option<rom_scraper::ScrapeSource> {
             "screenscraper" => Some(rom_scraper::ScrapeSource::ScreenScraper),
             "igdb" => Some(rom_scraper::ScrapeSource::Igdb),
             "thegamesdb" => Some(rom_scraper::ScrapeSource::TheGamesDb),
+            "arcadedb" => Some(rom_scraper::ScrapeSource::ArcadeDb),
+            "libretro-thumbnails" => Some(rom_scraper::ScrapeSource::LibretroThumbnails),
             "no-intro-pictures" => Some(rom_scraper::ScrapeSource::NoIntroPictures),
             "sony-store" => Some(rom_scraper::ScrapeSource::SonyStore),
             "vgmuseum" => Some(rom_scraper::ScrapeSource::Vgmuseum),
             _ => {
-                eprintln!("Unknown source '{}'. Valid: screenscraper, igdb, thegamesdb, no-intro-pictures, sony-store, vgmuseum", val);
+                eprintln!("Unknown source '{}'. Valid: screenscraper, igdb, thegamesdb, arcadedb, libretro-thumbnails, no-intro-pictures, sony-store, vgmuseum", val);
                 None
             }
         };
@@ -650,6 +689,8 @@ fn parse_source(args: &[String]) -> Option<rom_scraper::ScrapeSource> {
             "screenscraper" => Some(rom_scraper::ScrapeSource::ScreenScraper),
             "igdb" => Some(rom_scraper::ScrapeSource::Igdb),
             "thegamesdb" => Some(rom_scraper::ScrapeSource::TheGamesDb),
+            "arcadedb" => Some(rom_scraper::ScrapeSource::ArcadeDb),
+            "libretro-thumbnails" => Some(rom_scraper::ScrapeSource::LibretroThumbnails),
             "no-intro-pictures" => Some(rom_scraper::ScrapeSource::NoIntroPictures),
             "sony-store" => Some(rom_scraper::ScrapeSource::SonyStore),
             "vgmuseum" => Some(rom_scraper::ScrapeSource::Vgmuseum),
@@ -923,6 +964,7 @@ mod tests {
             genres: vec!["Adventure".into()],
             covers: vec![],
             screenshots: vec![],
+            videos: vec![],
             roms: vec![],
         };
         let json = serde_json::to_value(&out).unwrap();
@@ -939,9 +981,11 @@ mod tests {
             title: "Mario".into(),
             platform: "SNES".into(),
             release_date: Some("1990-11-21".into()),
+            source: "thegamesdb".into(),
         };
         let json = serde_json::to_value(&r).unwrap();
         assert_eq!(json["id"], "7");
+        assert_eq!(json["source"], "thegamesdb");
         assert_eq!(json["release_date"], "1990-11-21");
     }
 }

@@ -36,14 +36,27 @@ export default function GameBrowser() {
   const activeId = paramId;
   const isRootCollection = activeView === 'collection' && !location.pathname.includes('/browse') && !location.pathname.includes('/game/');
 
+  // Read all filters from URL search params (persist across navigation)
+  const searchParams = new URLSearchParams(location.search);
+  const urlQ = searchParams.get('q') || '';
+  const urlYear = searchParams.get('year') || '';
+  const urlManufacturer = searchParams.get('manufacturer') || '';
+  const urlSort = searchParams.get('sort') || 'name';
+  const urlOrder = searchParams.get('order') || 'asc';
+  const urlParents = searchParams.get('parents_only') === 'true';
+  const urlFavs = searchParams.get('favourites_only') === 'true';
+  const urlRoms = searchParams.get('roms_only') === 'true';
+
   const [viewMode, setViewMode] = useState('grid');
-  const [sortField, setSortField] = useState('name');
-  const [sortOrder, setSortOrder] = useState('asc');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [parentsOnly, setParentsOnly] = useState(() => localStorage.getItem('rom-manager-parents-only') === 'true');
-  const [favouritesOnly, setFavouritesOnly] = useState(() => localStorage.getItem('rom-manager-favourites-only') === 'true');
-  const [romsOnly, setRomsOnly] = useState(() => localStorage.getItem('rom-manager-roms-only') === 'true');
+  const [sortField, setSortField] = useState(urlSort);
+  const [sortOrder, setSortOrder] = useState(urlOrder);
+  const [searchQuery, setSearchQuery] = useState(urlQ);
+  const [searchOpen, setSearchOpen] = useState(!!urlQ);
+  const [parentsOnly, setParentsOnly] = useState(() => localStorage.getItem('rom-manager-parents-only') === 'true' || urlParents);
+  const [favouritesOnly, setFavouritesOnly] = useState(() => localStorage.getItem('rom-manager-favourites-only') === 'true' || urlFavs);
+  const [romsOnly, setRomsOnly] = useState(() => localStorage.getItem('rom-manager-roms-only') === 'true' || urlRoms);
+  const [yearFilter, setYearFilter] = useState(urlYear);
+  const [manufacturerFilter, setManufacturerFilter] = useState(urlManufacturer);
   const [listImageMode, setListImageMode] = useState(() => localStorage.getItem('rom-manager-list-image') || 'cover');
   const [batchShow, setBatchShow] = useState(false);
   const [batchOverwrite, setBatchOverwrite] = useState(false);
@@ -60,21 +73,48 @@ export default function GameBrowser() {
 
   useEffect(() => {
     loadGames(activeView, activeId, sortField, sortOrder, searchQuery,
-      parentsOnly, favouritesOnly, romsOnly, selectedVersionId, activeView === 'collection' ? 'games' : undefined);
-  }, [activeView, activeId, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, romsOnly, selectedVersionId, loadGames]);
+      parentsOnly, favouritesOnly, romsOnly, selectedVersionId, activeView === 'collection' ? 'games' : undefined,
+      yearFilter || urlYear, manufacturerFilter || urlManufacturer);
+  }, [activeView, activeId, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, romsOnly, selectedVersionId, loadGames, yearFilter, manufacturerFilter, urlYear, urlManufacturer]);
 
   useEffect(() => {
     if (!sentinelRef.current) return;
     const observer = new IntersectionObserver(([entry]) => {
       if (entry.isIntersecting && hasMore && !loading) {
         loadMore(activeView, activeId, sortField, sortOrder, searchQuery,
-          parentsOnly, favouritesOnly, romsOnly, selectedVersionId);
+          parentsOnly, favouritesOnly, romsOnly, selectedVersionId, yearFilter || urlYear, manufacturerFilter || urlManufacturer);
       }
     }, { rootMargin: '200px' });
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
   }, [hasMore, loading, activeView, activeId, sortField, sortOrder, searchQuery,
-    parentsOnly, favouritesOnly, romsOnly, selectedVersionId, loadMore]);
+    parentsOnly, favouritesOnly, romsOnly, selectedVersionId, loadMore, yearFilter, manufacturerFilter, urlYear, urlManufacturer]);
+
+  // Sync filters to URL so they survive navigation
+  useEffect(() => {
+    if (activeView !== 'collection') return;
+    const p = new URLSearchParams(location.search);
+    if (searchQuery) p.set('q', searchQuery); else p.delete('q');
+    if (sortField !== 'name') p.set('sort', sortField); else p.delete('sort');
+    if (sortOrder !== 'asc') p.set('order', sortOrder); else p.delete('order');
+    if (parentsOnly) p.set('parents_only', 'true'); else p.delete('parents_only');
+    if (favouritesOnly) p.set('favourites_only', 'true'); else p.delete('favourites_only');
+    if (romsOnly) p.set('roms_only', 'true'); else p.delete('roms_only');
+    if (yearFilter) p.set('year', yearFilter); else p.delete('year');
+    if (manufacturerFilter) p.set('manufacturer', manufacturerFilter); else p.delete('manufacturer');
+    const qs = p.toString();
+    const current = location.search.replace(/^\?/, '');
+    if (qs !== current) navigate(location.pathname + (qs ? '?' + qs : ''), { replace: true });
+  }, [searchQuery, sortField, sortOrder, parentsOnly, favouritesOnly, romsOnly, yearFilter, manufacturerFilter, activeView]);
+
+  // Save/restore scroll position
+  const scrollKey = `scroll-${activeView}-${activeId || ''}`;
+  useEffect(() => {
+    if (loading) return;
+    const saved = sessionStorage.getItem(scrollKey);
+    if (saved) window.scrollTo(0, parseInt(saved, 10));
+    return () => sessionStorage.setItem(scrollKey, String(window.scrollY));
+  }, [scrollKey, loading]);
 
   // Batch scrape
   async function startBatchScrape() {
@@ -165,6 +205,15 @@ export default function GameBrowser() {
             <Chip label="ROMs" size="small" color={romsOnly ? 'primary' : 'default'}
               onClick={() => { const v = !romsOnly; setRomsOnly(v); localStorage.setItem('rom-manager-roms-only', v); }} />
           </Tooltip>
+
+          {(yearFilter || urlYear) && (
+            <Chip label={`Year: ${yearFilter || urlYear}`} size="small" color="primary"
+              onDelete={() => setYearFilter('')} />
+          )}
+          {(manufacturerFilter || urlManufacturer) && (
+            <Chip label={`Mfg: ${manufacturerFilter || urlManufacturer}`} size="small" color="primary"
+              onDelete={() => setManufacturerFilter('')} />
+          )}
 
           <Select size="small" value={listImageMode} onChange={e => { setListImageMode(e.target.value); localStorage.setItem('rom-manager-list-image', e.target.value); }}
             sx={{ minWidth: 80 }}>

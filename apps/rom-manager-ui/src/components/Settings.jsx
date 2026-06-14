@@ -148,7 +148,7 @@ export default function Settings() {
                   <Link href="https://thegamesdb.net/" target="_blank" rel="noopener">TheGamesDB</Link> · <Link href="https://www.igdb.com/" target="_blank" rel="noopener">IGDB</Link> · <Link href="https://www.screenscraper.fr/" target="_blank" rel="noopener">ScreenScraper</Link>
                 </Typography>
                 <Typography variant="body2" sx={{ mb: 1 }}>
-                  <Link href="https://www.vgmuseum.com/" target="_blank" rel="noopener">VGMuseum</Link> · <Link href="https://github.com/teeedubb/no-intro-pictures" target="_blank" rel="noopener">NoIntroPictures</Link> · <Link href="https://store.playstation.com/" target="_blank" rel="noopener">SonyStore</Link>
+                  <Link href="https://www.vgmuseum.com/" target="_blank" rel="noopener">VGMuseum</Link> · <Link href="https://github.com/teeedubb/no-intro-pictures" target="_blank" rel="noopener">NoIntroPictures</Link> · <Link href="https://store.playstation.com/" target="_blank" rel="noopener">SonyStore</Link> · <Link href="https://adb.arcadeitalia.net/" target="_blank" rel="noopener">ArcadeDB</Link>
                 </Typography>
                 <Typography variant="subtitle2" sx={{ mb: 1 }}>Data Sources</Typography>
                 <Typography variant="body2" sx={{ mb: 0.5 }}>

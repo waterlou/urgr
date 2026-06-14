@@ -302,7 +302,7 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
     // Build CRC map: game name → list of expected CRC32 strings
     let mut expected_crcs: HashMap<String, Vec<String>> = HashMap::new();
     for game in &games {
-        if let Ok(roms) = db.list_roms_for_game(game.id) {
+        if let Ok(roms) = db.list_roms_for_game(game.id, version_id) {
             let crcs: Vec<String> = roms.iter()
                 .filter_map(|r| r.crc32.as_deref())
                 .filter(|c| !c.is_empty())

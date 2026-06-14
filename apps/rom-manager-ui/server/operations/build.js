@@ -38,8 +38,6 @@ export class BuildOperation extends Operation {
     this.updateProgress(0, 'Scanning ROMs...');
     this.updateProgress(50, 'Scanning ROMs...');
 
-    // Delegate to the original build/scan endpoint logic
-    // This preserves the exact exist/reused counting from the original code
     const { default: { collectionBuildScan } = {} } = await import('../routes/collections.js').catch(() => ({}));
     if (collectionBuildScan) {
       const result = await collectionBuildScan(this.collectionId, version_id);
@@ -48,7 +46,6 @@ export class BuildOperation extends Operation {
       return;
     }
 
-    // Fallback: run the scan directly with original logic
     const col = this.collectionId ? get('SELECT id, slug, folder FROM collections WHERE id = ?', [this.collectionId]) : null;
     const sv = get('SELECT source, version FROM set_versions WHERE id = ?', [version_id]);
     if (!col || !sv) throw new Error('Collection or version not found');
@@ -56,30 +53,27 @@ export class BuildOperation extends Operation {
     const collectionDir = path.resolve(import.meta.dirname, '..', '..', '..', '..', 'data', 'roms', col.folder || col.slug);
     const scanDir = dir || path.join(collectionDir, sv.version);
 
-    // Reset availability
-    run('UPDATE game_state SET available = 0 WHERE game_entry_id IN (SELECT id FROM game_entries WHERE version_id = ?)', [version_id]);
+    run('UPDATE game_state SET available = 0 WHERE game_id IN (SELECT game_id FROM game_rom_sets WHERE version_id = ?)', [version_id]);
 
     const scanResult = execCli(['scan', String(version_id), scanDir]);
 
-    // Update availability from scan result JSON
     const matchedNames = (scanResult?.matches || []).map(m => m.name);
     if (matchedNames.length > 0) {
       const ph = matchedNames.map(() => '?').join(',');
-      run(`INSERT INTO game_state (game_entry_id, available, updated_at)
-        SELECT ge.id, 1, datetime('now') FROM game_entries ge
-        WHERE ge.version_id = ? AND ge.name IN (${ph})
-        ON CONFLICT(game_entry_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id, ...matchedNames]);
+      run(`INSERT INTO game_state (game_id, available, updated_at)
+        SELECT g.id, 1, datetime('now') FROM games g
+        JOIN game_rom_sets grs ON grs.game_id = g.id
+        WHERE grs.version_id = ? AND g.name IN (${ph})
+        ON CONFLICT(game_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id, ...matchedNames]);
     }
 
-    // Count results
-    const total = get('SELECT COUNT(*) as c FROM game_entries WHERE version_id = ?', [version_id]).c;
-    const matched = get('SELECT COUNT(*) as c FROM game_entries ge JOIN game_state gs ON gs.game_entry_id = ge.id WHERE ge.version_id = ? AND gs.available = 1', [version_id]).c;
+    const total = get('SELECT COUNT(*) as c FROM game_rom_sets WHERE version_id = ?', [version_id]).c;
+    const matched = get('SELECT COUNT(*) as c FROM game_rom_sets grs JOIN game_state gs ON gs.game_id = grs.game_id WHERE grs.version_id = ? AND gs.available = 1', [version_id]).c;
 
-    // Calculate reuse: check if matched files exist in prior version dirs
     let reused = 0;
     const priorVersions = all('SELECT DISTINCT sv.version, sv.id FROM set_versions sv JOIN collection_versions cv ON cv.version_id = sv.id WHERE cv.collection_id = ? AND sv.id < ? ORDER BY sv.id', [this.collectionId, version_id]);
     if (priorVersions.length > 0 && fs.existsSync(collectionDir)) {
-      const currentNames = new Set(all('SELECT DISTINCT name FROM game_entries WHERE version_id = ?', [version_id]).map(r => r.name));
+      const currentNames = new Set(all('SELECT DISTINCT g.name FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ?', [version_id]).map(r => r.name));
       for (const pv of priorVersions) {
         const pvRoms = path.join(collectionDir, pv.version, 'roms');
         if (!fs.existsSync(pvRoms)) continue;
@@ -126,15 +120,13 @@ export class BuildOperation extends Operation {
       },
     });
 
-    // Update game_state availability
-    run('UPDATE game_state SET available = 0 WHERE game_entry_id IN (SELECT id FROM game_entries WHERE version_id = ?)', [version_id]);
+    run('UPDATE game_state SET available = 0 WHERE game_id IN (SELECT game_id FROM game_rom_sets WHERE version_id = ?)', [version_id]);
 
-    // Scan output directory for .zip files
     if (dir && fs.existsSync(dir)) {
       const files = fs.readdirSync(dir).filter(f => f.endsWith('.zip'));
       for (const f of files) {
         const name = path.basename(f, '.zip');
-        run('UPDATE game_state SET available = 1 WHERE game_entry_id IN (SELECT id FROM game_entries WHERE name = ? AND version_id = ?)', [name, version_id]);
+        run(`UPDATE game_state SET available = 1 WHERE game_id IN (SELECT g.id FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE g.name = ? AND grs.version_id = ?)`, [name, version_id]);
       }
     }
 

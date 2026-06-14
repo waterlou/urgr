@@ -114,7 +114,7 @@ export default function BuildManager({ collectionId, collection }) {
           ) : (
             <Box>
               <Typography variant="body2">
-                Added: {buildResult.added} · Existed: {buildResult.existed} · Reused: {buildResult.reused} · Missing: {buildResult.missing}
+                Added: {buildResult.added} · Existed: {buildResult.exists} · Reused: {buildResult.reused} · Missing: {buildResult.missing}
               </Typography>
               {buildResult.missing_games?.length > 0 && (
                 <>

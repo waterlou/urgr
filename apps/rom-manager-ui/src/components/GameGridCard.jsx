@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Card, CardMedia, CardContent, Typography, Box, IconButton, Rating, Chip,
   Menu, MenuItem, ListItemIcon, ListItemText,
@@ -9,8 +9,17 @@ import {
 import { updateGameRating } from '../api.js';
 import { coverUrl } from '../api.js';
 
+function hashColor(name) {
+  let hash = 0;
+  for (let i = 0; i < (name || '').length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 45%, 30%)`;
+}
+
 export default function GameGridCard({ game, onSelect, onRating, onFavourite, onAddToGameSet, onRemoveFromGameSet, gameSets, gameSetId, listImageMode, onPlay }) {
   const [anchorEl, setAnchorEl] = useState(null);
+  const [imgFailed, setImgFailed] = useState(false);
+  const bg = useMemo(() => hashColor(game.name), [game.name]);
 
   async function handleRating(e, v) {
     const newRating = v === null ? 0 : Math.round(v * 2);
@@ -25,16 +34,26 @@ export default function GameGridCard({ game, onSelect, onRating, onFavourite, on
     onFavourite?.(game.id, { favourite: newFav });
   }
 
+  const showImage = listImageMode !== 'none' && !imgFailed && (game.covers?.[0] || game.cover_url);
+
   return (
     <Card sx={{ position: 'relative', cursor: 'pointer', '&:hover': { boxShadow: 6 } }} onClick={() => onSelect?.(game)}>
-      <Box sx={{ position: 'relative', aspectRatio: '3/4', bgcolor: '#111', overflow: 'hidden' }}>
-        {listImageMode === 'screenshot' && game.screenshots?.[0] ? (
-          <CardMedia component="img" image={game.screenshots[0]} sx={{ height: '100%', objectFit: 'cover' }} />
-        ) : listImageMode !== 'none' ? (
-          <CardMedia component="img" image={coverUrl(game.id)} sx={{ height: '100%', objectFit: 'cover' }}
-            onError={(e) => { e.target.style.display = 'none'; }}
-          />
-        ) : null}
+      <Box sx={{ position: 'relative', aspectRatio: '1/1', bgcolor: '#111', overflow: 'hidden' }}>
+        {showImage ? (
+          listImageMode === 'screenshot' && game.screenshots?.[0] ? (
+            <CardMedia component="img" image={game.screenshots[0]} sx={{ width: '100%', height: '100%', objectFit: 'contain', p: 0.5 }} />
+          ) : (
+            <CardMedia component="img" image={coverUrl(game.id)} sx={{ width: '100%', height: '100%', objectFit: 'contain', p: 0.5 }}
+              onError={() => setImgFailed(true)}
+            />
+          )
+        ) : (
+          <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: bg }}>
+            <Typography sx={{ fontSize: 48, fontWeight: 700, color: 'rgba(255,255,255,0.25)', userSelect: 'none' }}>
+              {(game.name || '?')[0].toUpperCase()}
+            </Typography>
+          </Box>
+        )}
         <Box sx={{ position: 'absolute', top: 4, right: 4, display: 'flex', gap: 0.5 }}>
           <IconButton size="small" sx={{ bgcolor: 'rgba(0,0,0,0.5)', color: game.favourite ? 'warning.main' : '#fff' }}
             onClick={handleFav}>
