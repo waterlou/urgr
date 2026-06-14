@@ -14,6 +14,7 @@ import iaRouter from './routes/ia.js';
 import miscRouter from './routes/misc.js';
 import downloadsRouter from './routes/downloads.js';
 import operationsRouter from './routes/operations.js';
+import filesystemRouter from './routes/filesystem.js';
 import { loadFromEnv } from './ia-auth.js';
 
 const app = express();
@@ -33,6 +34,7 @@ app.use(iaRouter);             // /api/ia/*
 app.use(miscRouter);           // /api/jobs/*, /api/settings/*
 app.use(downloadsRouter);      // /api/downloads/*
 app.use(operationsRouter);     // /api/operations/*
+app.use(filesystemRouter);     // /api/filesystem/*
 
 // =============================================================================
 // Global error handler
