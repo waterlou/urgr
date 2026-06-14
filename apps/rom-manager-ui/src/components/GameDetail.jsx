@@ -290,24 +290,41 @@ export default function GameDetail() {
                 <>
                   <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>ROM Files</Typography>
                   <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
-                    <Table size="small">
+                    <Table size="small" sx={{ tableLayout: 'fixed' }}>
                       <TableHead>
                         <TableRow>
-                          <TableCell>Filename</TableCell>
-                          <TableCell>Type</TableCell>
-                          <TableCell>Size</TableCell>
-                          <TableCell>Status</TableCell>
-                          <TableCell>Available</TableCell>
-                          <TableCell>CRC</TableCell>
+                          <TableCell sx={{ width: '40%' }}>Filename</TableCell>
+                          <TableCell sx={{ width: 70 }}>Type</TableCell>
+                          <TableCell sx={{ width: 80 }}>Size</TableCell>
+                          <TableCell sx={{ width: 90 }}>Status</TableCell>
+                          <TableCell sx={{ width: 60, textAlign: 'center' }}>Available</TableCell>
+                          <TableCell sx={{ width: 100 }}>CRC</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
                         {game.roms.map((rom, i) => (
                           <TableRow key={i}>
                             <TableCell>
-                              <Typography variant="body2" fontFamily="monospace" fontSize={12}>
-                                {rom.name || rom.filename}
-                              </Typography>
+                              {(() => {
+                                const raw = rom.name || rom.filename || '';
+                                const dot = raw.lastIndexOf('.');
+                                const base = dot > 0 ? raw.slice(0, dot) : raw;
+                                const ext = dot > 0 ? raw.slice(dot) : '';
+                                return (
+                                  <Box sx={{ display: 'flex', overflow: 'hidden' }}>
+                                    <Typography variant="body2" fontFamily="monospace" fontSize={12}
+                                      noWrap sx={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+                                      {base}
+                                    </Typography>
+                                    {ext && (
+                                      <Typography variant="body2" fontFamily="monospace" fontSize={12}
+                                        sx={{ flexShrink: 0 }}>
+                                        {ext}
+                                      </Typography>
+                                    )}
+                                  </Box>
+                                );
+                              })()}
                             </TableCell>
                             <TableCell>{rom.subtype === 'chd' ? 'CHD' : rom.subtype === 'sample' ? 'Sample' : rom.merge_target ? 'Split' : 'ROM'}</TableCell>
                             <TableCell>{rom.size ? `${(rom.size / 1024).toFixed(0)}KB` : ''}</TableCell>
