@@ -30,7 +30,7 @@ const CACHE_SOURCES = [
   },
   {
     name: 'sony-store',
-    hostPattern: 'playstation.com',
+    hostPattern: 'playstation',
     cacheDir: path.join(dataDir, 'media', 'sony-store'),
     mountPrefix: '/media/sony-store/',
     timeout: 10000,

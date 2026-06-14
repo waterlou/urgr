@@ -5,9 +5,6 @@ use crate::config::Config;
 use crate::error::Result;
 use crate::models::{Game, HashType, Media, MediaItem, MediaType, Platform, ScrapeSource};
 
-const REGIONS: &[&str] = &["us", "eu", "jp"];
-const LANGS: &[&str] = &["en", "en-3", "ja"];
-
 pub struct SonyStore {
     client: HttpClient,
     priority: u32,
@@ -74,51 +71,38 @@ impl crate::sources::GameScraper for SonyStore {
     async fn get_game_detail(&self, game_id: &str) -> Result<Game> {
         let mut screenshots = Vec::new();
 
-        'outer: for region in REGIONS {
-            for lang in LANGS {
-                let url = format!(
-                    "https://store.playstation.com/store/api/chihiro/00_09_000/container/{}/{}/{}",
-                    region, lang, game_id
-                );
-                match self.client.get_json::<serde_json::Value>(&url).await {
-                    Ok(data) => {
-                        if let Some(metadata) = data.get("metadata") {
-                            // Hero image
-                            if let Some(hero) = metadata.get("hero_image") {
-                                if let Some(urls) = hero.get("urls") {
-                                    if let Some(arr) = urls.as_array() {
-                                        for img in arr {
-                                            if let Some(url) = img.get("url").and_then(|u| u.as_str()) {
-                                                screenshots.push(MediaItem {
-                                                    url: url.to_string(),
-                                                    kind: MediaType::Screenshot,
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            // Screenshots
-                            if let Some(screens) = metadata.get("screens") {
-                                if let Some(arr) = screens.as_array() {
-                                    for screen in arr {
-                                        if let Some(url) = screen.get("url").and_then(|u| u.as_str()) {
-                                            screenshots.push(MediaItem {
-                                                url: url.to_string(),
-                                                kind: MediaType::Screenshot,
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                            if !screenshots.is_empty() {
-                                screenshots.truncate(5);
-                                break 'outer;
+        let regions: &[(&str, &str, &str)] = &[
+            ("US", "US", "en"),
+            ("EU", "GB", "en"),
+            ("JP", "JP", "ja"),
+            ("ASIA", "SG", "en"),
+        ];
+
+        let timestamp = "1534563384000";
+
+        for (region_name, country, lang) in regions {
+            let url = format!(
+                "https://store.playstation.com/store/api/chihiro/00_09_000/container/{}/{}/19/{}/{}",
+                country, lang, game_id, timestamp
+            );
+            match self.client.get_json::<serde_json::Value>(&url).await {
+                Ok(data) => {
+                    if let Some(images) = data.get("images").and_then(|i| i.as_array()) {
+                        for img in images {
+                            if let Some(url) = img.get("url").and_then(|u| u.as_str()) {
+                                screenshots.push(MediaItem {
+                                    url: url.to_string(),
+                                    kind: MediaType::Screenshot,
+                                });
                             }
                         }
                     }
-                    Err(_) => continue,
+                    if !screenshots.is_empty() {
+                        screenshots.truncate(5);
+                        break;
+                    }
                 }
+                Err(_) => continue,
             }
         }
 
