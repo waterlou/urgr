@@ -8,7 +8,7 @@ import {
   getCollectionBuilds, startCollectionBuild, runCollectionBuild, collectionBuild,
   subscribeJobSSE, cancelJob,
 } from '../api.js';
-
+import DirectoryBrowserModal from './DirectoryBrowserModal.jsx';
 
 export default function BuildManager({ collectionId, collection }) {
   const [builds, setBuilds] = useState([]);
@@ -27,6 +27,7 @@ export default function BuildManager({ collectionId, collection }) {
   const [buildScanResult, setBuildScanResult] = useState(null);
   const [buildResult, setBuildResult] = useState(null);
   const [showMissing, setShowMissing] = useState(false);
+  const [dirBrowserOpen, setDirBrowserOpen] = useState(false);
   const eventSourcesRef = useRef({});
 
   useEffect(() => {
@@ -89,6 +90,9 @@ export default function BuildManager({ collectionId, collection }) {
           onChange={e => setBuildImportDir(e.target.value)}
           placeholder="/path/to/roms" sx={{ minWidth: 200 }}
         />
+        <Button size="small" variant="outlined" onClick={() => setDirBrowserOpen(true)} sx={{ whiteSpace: 'nowrap' }}>
+          Browse...
+        </Button>
         <Button variant="contained" onClick={handleBuild} disabled={!buildVersion || buildRunning}>
           {buildRunning ? <CircularProgress size={14} /> : 'Build'}
         </Button>
@@ -220,6 +224,15 @@ export default function BuildManager({ collectionId, collection }) {
           </TableBody>
         </Table>
       </TableContainer>
+      <DirectoryBrowserModal
+        open={dirBrowserOpen}
+        onClose={() => setDirBrowserOpen(false)}
+        onSelect={(path) => {
+          setBuildImportDir(path);
+          setDirBrowserOpen(false);
+        }}
+        initialPath={buildImportDir}
+      />
     </Box>
   );
 }
