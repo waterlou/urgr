@@ -141,3 +141,5 @@ export async function getMedia(url, gameName, mediaType) {
 
   return null;
 }
+
+export { CACHE_SOURCES, findLocalFile };
