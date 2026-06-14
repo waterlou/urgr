@@ -1,17 +1,17 @@
 import {
   Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText,
-  Collapse, IconButton, Tooltip, Divider, Typography, Box,
+  Collapse, IconButton, Tooltip, Divider, Typography, Box, useMediaQuery,
 } from '@mui/material';
+import { useTheme, useColorScheme } from '@mui/material/styles';
 import {
   Home as HomeIcon, SportsEsports, Add, Edit, Delete, Folder,
   Inventory2, Download, Settings as SettingsIcon, DarkMode, LightMode,
   ExpandLess, ExpandMore, PlaylistPlay, Science,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useCollections } from '../contexts/CollectionContext.jsx';
 import { useUI } from '../contexts/UIContext.jsx';
-import { useColorScheme } from '@mui/material/styles';
 import IconDisplay from './IconDisplay.jsx';
 
 const DRAWER_WIDTH = 270;
@@ -20,10 +20,17 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { collections, gameSets, queueCount, operationCount, deleteCollection, deleteGameSet } = useCollections();
-  const { openCollectionForm, openGameSetForm, openSettings } = useUI();
+  const { sidebarOpen, closeSidebar, openCollectionForm, openGameSetForm, openSettings } = useUI();
   const { mode, setMode } = useColorScheme();
+  const theme = useTheme();
+  const isSmallScreen = useMediaQuery(theme.breakpoints.down('md'));
   const [collOpen, setCollOpen] = useState(true);
   const [gsOpen, setGsOpen] = useState(true);
+
+  // Auto-close sidebar on navigation for small screens
+  useEffect(() => {
+    if (isSmallScreen) closeSidebar();
+  }, [location.pathname, isSmallScreen]);
 
   function handleNav(path) {
     navigate(path);
@@ -45,10 +52,12 @@ export default function Sidebar() {
 
   return (
     <Drawer
-      variant="permanent"
+      variant={isSmallScreen ? 'temporary' : 'permanent'}
+      open={isSmallScreen ? sidebarOpen : undefined}
+      onClose={isSmallScreen ? closeSidebar : undefined}
       sx={{
-        width: DRAWER_WIDTH,
-        flexShrink: 0,
+        width: isSmallScreen ? undefined : DRAWER_WIDTH,
+        flexShrink: isSmallScreen ? undefined : 0,
         '& .MuiDrawer-paper': { width: DRAWER_WIDTH, boxSizing: 'border-box' },
       }}
     >
