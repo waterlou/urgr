@@ -1026,12 +1026,9 @@ async function serveGameMedia(req, res, mediaType, dbField, opts = {}) {
         if (urls.length > 0) {
           const result = await getMedia(urls[0], game.name, mediaType);
           if (result) {
-            // If we cached it locally, update DB so future requests hit express.static directly
-            if (result.cachedPath && !urls[0].startsWith('/media/arcadedb/')) {
-              const relPath = path.relative(path.join(dataDir, 'media', 'arcadedb'), result.cachedPath);
-              const localUrl = '/media/arcadedb/' + relPath;
+            if (result.localUrl) {
               run(`UPDATE game_media SET ${dbField} = ? WHERE name = ? AND platform = ?`,
-                [JSON.stringify([localUrl]), canonical, mediaPlat]);
+                [JSON.stringify([result.localUrl]), canonical, mediaPlat]);
             }
             const etag = createHash('md5').update(result.data).digest('hex');
             res.set('ETag', `"${etag}"`);

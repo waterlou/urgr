@@ -3,8 +3,6 @@ import fsp from 'fs/promises';
 import path from 'path';
 import { dataDir } from './paths.js';
 
-const ARCADEDB_CACHE = path.join(dataDir, 'media', 'arcadedb');
-
 const MIME_MAP = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.png': 'image/png',
@@ -15,15 +13,37 @@ const MIME_MAP = {
 
 const EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4'];
 
-// Find a locally cached file by game name and media type, probing extensions
-async function findLocalFile(gameName, mediaType) {
-  const dir = path.join(ARCADEDB_CACHE, gameName);
+const CACHE_SOURCES = [
+  {
+    name: 'arcadedb',
+    hostPattern: 'adb.arcadeitalia.net',
+    cacheDir: path.join(dataDir, 'media', 'arcadedb'),
+    mountPrefix: '/media/arcadedb/',
+    timeout: 15000,
+  },
+  {
+    name: 'libretro-thumbnails',
+    hostPattern: 'thumbnails.libretro.com',
+    cacheDir: path.join(dataDir, 'media', 'libretro-thumbnails'),
+    mountPrefix: '/media/libretro-thumbnails/',
+    timeout: 10000,
+  },
+  {
+    name: 'sony-store',
+    hostPattern: 'image.api.playstation.com',
+    cacheDir: path.join(dataDir, 'media', 'sony-store'),
+    mountPrefix: '/media/sony-store/',
+    timeout: 10000,
+  },
+];
+
+async function findLocalFile(cacheDir, gameName, mediaType) {
+  const dir = path.join(cacheDir, gameName);
   try {
     await fsp.access(dir);
   } catch {
     return null;
   }
-  // Try exact match from list first
   for (const ext of EXTENSIONS) {
     const fp = path.join(dir, mediaType + ext);
     try {
@@ -31,7 +51,6 @@ async function findLocalFile(gameName, mediaType) {
       return fp;
     } catch { continue; }
   }
-  // Fallback: scan directory
   try {
     const entries = await fsp.readdir(dir);
     const entry = entries.find(f => f.startsWith(mediaType + '.'));
@@ -44,10 +63,9 @@ async function findLocalFile(gameName, mediaType) {
 async function readCached(localPath) {
   const data = await fsp.readFile(localPath);
   const ext = path.extname(localPath).toLowerCase();
-  return { data, mime: MIME_MAP[ext] || 'application/octet-stream', cachedPath: localPath };
+  return { data, mime: MIME_MAP[ext] || 'application/octet-stream' };
 }
 
-// Fetch a URL with a timeout, returning the buffer and content-type
 async function fetchWithTimeout(url, timeoutMs) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -71,38 +89,44 @@ function extFromContentType(contentType) {
   return '.jpg';
 }
 
-// Get media: returns { data: Buffer, mime: string, cachedPath?: string } from cache or remote
 export async function getMedia(url, gameName, mediaType) {
-  // 1. Already a local path — read from cache
-  if (url.startsWith('/media/arcadedb/')) {
-    const localPath = await findLocalFile(gameName, mediaType);
-    if (localPath) return readCached(localPath);
-  }
-
-  // 2. Remote ArcadeDB URL — check cache first, fetch on miss
-  if (typeof url === 'string' && url.includes('adb.arcadeitalia.net')) {
-    const cached = await findLocalFile(gameName, mediaType);
-    if (cached) return readCached(cached);
-
-    // Cache miss — fetch and save
-    const result = await fetchWithTimeout(url, 15000);
-    if (result) {
-      const { buf, contentType } = result;
-      const ext = extFromContentType(contentType);
-      const cacheDir = path.join(ARCADEDB_CACHE, gameName);
-      const cachedPath = path.join(cacheDir, mediaType + ext);
-      try {
-        await fsp.mkdir(cacheDir, { recursive: true });
-        await fsp.writeFile(cachedPath, buf);
-      } catch (e) {
-        // Cache write failure is non-fatal — we can still return the fetched data
-        return { data: buf, mime: MIME_MAP[ext] || contentType || 'application/octet-stream' };
-      }
-      return { data: buf, mime: MIME_MAP[ext] || contentType || 'application/octet-stream', cachedPath };
+  for (const source of CACHE_SOURCES) {
+    if (url.startsWith(source.mountPrefix)) {
+      const localPath = await findLocalFile(source.cacheDir, gameName, mediaType);
+      if (localPath) return readCached(localPath);
     }
   }
 
-  // 3. Other remote URL — fetch directly
+  for (const source of CACHE_SOURCES) {
+    if (typeof url === 'string' && url.includes(source.hostPattern)) {
+      const cached = await findLocalFile(source.cacheDir, gameName, mediaType);
+      if (cached) {
+        const relPath = path.relative(source.cacheDir, cached);
+        const localData = await readCached(cached);
+        return { ...localData, localUrl: source.mountPrefix + relPath };
+      }
+
+      const result = await fetchWithTimeout(url, source.timeout);
+      if (result) {
+        const { buf, contentType } = result;
+        const ext = extFromContentType(contentType);
+        const gameDir = path.join(source.cacheDir, gameName);
+        const cachedPath = path.join(gameDir, mediaType + ext);
+        try {
+          await fsp.mkdir(gameDir, { recursive: true });
+          await fsp.writeFile(cachedPath, buf);
+        } catch {
+          return { data: buf, mime: MIME_MAP[ext] || contentType || 'application/octet-stream' };
+        }
+        return {
+          data: buf,
+          mime: MIME_MAP[ext] || contentType || 'application/octet-stream',
+          localUrl: source.mountPrefix + gameName + '/' + mediaType + ext,
+        };
+      }
+    }
+  }
+
   const result = await fetchWithTimeout(url, 10000);
   if (result) {
     return { data: result.buf, mime: result.contentType || 'application/octet-stream' };
