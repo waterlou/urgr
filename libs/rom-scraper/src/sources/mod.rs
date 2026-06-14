@@ -1,4 +1,6 @@
+mod arcadedb;
 mod igdb;
+mod libretro_thumbnails;
 mod no_intro_pictures;
 mod screenscraper;
 mod sony_store;
@@ -12,7 +14,9 @@ use crate::error::Result;
 use crate::hasher::RomHashes;
 use crate::models::{Game, HashType, ScrapeSource};
 
+pub use arcadedb::ArcadeDb;
 pub use igdb::Igdb;
+pub use libretro_thumbnails::LibretroThumbnails;
 pub use no_intro_pictures::NoIntroPictures;
 pub use screenscraper::ScreenScraper;
 pub use sony_store::SonyStore;
@@ -58,8 +62,12 @@ impl ScraperRegistry {
         if config.thegamesdb.is_some() {
             scrapers.push(Box::new(TheGamesDb::new(config)));
         }
+        // ArcadeDb is always available (no auth needed)
+        scrapers.push(Box::new(ArcadeDb::new(config)));
         // NoIntroPictures is always available (public GitHub repo, no auth needed)
         scrapers.push(Box::new(NoIntroPictures::new(config)));
+        // LibretroThumbnails is always available (public server, no auth needed)
+        scrapers.push(Box::new(LibretroThumbnails::new(config)));
         // SonyStore is always available (public PSN API, no auth needed)
         scrapers.push(Box::new(SonyStore::new(config)));
         // Vgmuseum is always available (public website, no auth needed)
