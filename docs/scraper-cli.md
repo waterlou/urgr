@@ -8,7 +8,7 @@ Retro game metadata scraper supporting multiple providers.
 |---------|-------------|
 | `hash <file>` | Compute ROM hashes (CRC32, MD5, SHA1) |
 | `search <query>` | Search games by name |
-| `scrape <file>` | Match a ROM file, return metadata + optional media download |
+| `scrape <file>` | Match a ROM file, return metadata |
 | `detail <game-id>` | Get full game details by ID |
 | `test` | Check connectivity to all configured providers |
 
@@ -18,7 +18,6 @@ Retro game metadata scraper supporting multiple providers.
 |------|-------------|
 | `--source <s>` | Provider: `thegamesdb` (default), `screenscraper`, `igdb`, `no-intro-pictures`, `sony-store`, `vgmuseum` |
 | `--platform <p>` | Platform filter (e.g. `nes`, `snes`, `arcade`) |
-| `--download` | Download cover/screenshot media to `data/media/<platform>-<year>-<title_slug>/` |
 
 ## Environment
 
@@ -53,7 +52,6 @@ Credentials may be set in `.env` (CWD) or `data/.env`. The server **Settings UI*
 3. Try hash-based lookup against all providers (priority order)
 4. Fall back to filename-based search across all providers
 5. **Enrich:** call `get_game_detail()` for full metadata (description, genres, screenshots, etc.)
-6. If `--download`: download cover and screenshot images
 
 ## scrape Output Fields
 
@@ -71,7 +69,6 @@ Credentials may be set in `.env` (CWD) or `data/.env`. The server **Settings UI*
 | `covers` | ✅ Box art URLs | ✅ Cover URLs (`https:` prefixed) |
 | `screenshots` | ⬜ None | ✅ Screenshot URLs |
 | `release_date` | ✅ | ✅ |
-| `downloaded` | Only with `--download` | Only with `--download` |
 
 ## Examples
 
@@ -86,11 +83,8 @@ scraper-cli search "Zelda" --source thegamesdb
 # Scrape a ROM file (matches by hash first, then filename, enriches via detail)
 scraper-cli scrape ~/roms/smb.zip
 
-# Scrape + download cover images
-scraper-cli scrape ~/roms/smb.zip --download
-
 # Scrape using a specific provider
-scraper-cli scrape ~/roms/smb.zip --download --source igdb
+scraper-cli scrape ~/roms/smb.zip --source igdb
 
 # Get full game detail by provider ID
 scraper-cli detail 1070 --source igdb
@@ -148,7 +142,6 @@ JSON array of matches with `id`, `title`, `platform` (full name), `release_date`
 JSON object with:
 - `hashes` — CRC32, MD5, SHA1, file size, filename, parsed title/region
 - `matched` — full metadata (description, publisher, developer, genres, rating, covers, screenshots, roms)
-  - `downloaded` — list of local file paths (only present when `--download` used)
 
 ### `detail`
 JSON with full game metadata including `synopsis` (truncated to 500 chars).
@@ -179,10 +172,8 @@ JSON with full game metadata including `synopsis` (truncated to 500 chars).
 
 ## Test Coverage
 
-30 unit tests in `apps/scraper-cli/src/main.rs`:
-- `slugify` — 6 tests (basic, uppercase, special chars, slugged, truncation, trim underscores)
-- `normalize_url` — 3 tests (https, protocol-relative, http)
+20 unit tests in `apps/scraper-cli/src/main.rs`:
 - `truncate` — 5 tests (short, exact, long, empty, zero)
 - `parse_source` — 8 tests (flags, env var, fallback, override)
-- `game_to_match` — 4 tests (fields, covers/screenshots, roms, downloaded)
+- `game_to_match` — 3 tests (fields, covers/screenshots, roms)
 - Serialization — 3 tests (ScrapeMatch, DetailOutput, SearchResult)

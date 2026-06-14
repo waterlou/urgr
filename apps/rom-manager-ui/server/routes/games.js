@@ -1028,7 +1028,7 @@ async function serveGameMedia(req, res, mediaType, dbField, opts = {}) {
           if (result) {
             // If we cached it locally, update DB so future requests hit express.static directly
             if (result.cachedPath && !urls[0].startsWith('/media/arcadedb/')) {
-              const relPath = path.relative(path.join(dataDir, 'arcadedb'), result.cachedPath);
+              const relPath = path.relative(path.join(dataDir, 'media', 'arcadedb'), result.cachedPath);
               const localUrl = '/media/arcadedb/' + relPath;
               run(`UPDATE game_media SET ${dbField} = ? WHERE name = ? AND platform = ?`,
                 [JSON.stringify([localUrl]), canonical, mediaPlat]);

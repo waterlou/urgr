@@ -340,7 +340,6 @@ ia-cli search "MAME 0.287 roms"
 |------|-------------|
 | `--source <s>` | Provider: `thegamesdb` (default), `screenscraper`, `igdb`, `no-intro-pictures`, `sony-store`, `vgmuseum` |
 | `--platform <p>` | Platform filter (e.g., `nes`, `snes`, `arcade`) |
-| `--download` | Download cover/screenshot images to `data/media/` |
 
 ### Providers
 
@@ -357,7 +356,7 @@ ia-cli search "MAME 0.287 roms"
 
 Credentials via `.env` (CWD) or `data/.env`. See [`docs/scraper-cli.md`](scraper-cli.md) for full setup.
 
-### `scrape <file> [--download] [--source <s>]`
+### `scrape <file> [--source <s>]`
 
 **Flow:**
 1. Compute ROM hashes (CRC32, MD5, SHA1)
@@ -365,7 +364,6 @@ Credentials via `.env` (CWD) or `data/.env`. See [`docs/scraper-cli.md`](scraper
 3. Try hash-based lookup in the provider
 4. Fall back to filename-based search
 5. Call `get_game_detail` to enrich with full metadata (description, screenshots, genres, etc.)
-6. If `--download`: download cover and screenshot images to `data/media/<platform>-<year>-<title>/`
 
 ### Output fields (`scrape` match)
 
@@ -426,7 +424,7 @@ build-cli scan 1 /roms/mame --db roms.db
 build-cli verify 1 /roms/mame --fallback 2 --db roms.db
 
 # 5. Scrape metadata for a ROM
-scraper-cli scrape /roms/mame/sf2.zip --source igdb --download
+scraper-cli scrape /roms/mame/sf2.zip --source igdb
 
 # 6. Import a new version
 parse-cli import mame0262.xml mame 0.262 --db roms.db

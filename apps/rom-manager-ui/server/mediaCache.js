@@ -3,7 +3,7 @@ import fsp from 'fs/promises';
 import path from 'path';
 import { dataDir } from './paths.js';
 
-const ARCADEDB_CACHE = path.join(dataDir, 'arcadedb');
+const ARCADEDB_CACHE = path.join(dataDir, 'media', 'arcadedb');
 
 const MIME_MAP = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
