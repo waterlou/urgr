@@ -91,7 +91,7 @@ export default function VersionManager({ collectionId, collection }) {
                 const ver = d.id || d.numeric || d.version || d;
                 const isKey = showAll && (MAME_MILESTONES.has(d.version) || d.version === latestVer);
                 return (
-                  <Chip key={ver} label={d.version || d} size="small"
+                  <Chip key={ver} label={d.numeric && d.numeric !== d.version ? `${d.numeric} (${d.version})` : (d.version || d)} size="small"
                     sx={isKey ? { fontWeight: 700 } : undefined}
                     onClick={() => handleImport(ver, isMame ? 'MAME' : 'FBNeo')}
                     disabled={importingVer === ver}
