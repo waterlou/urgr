@@ -88,7 +88,7 @@ export default function VersionsTab({ collectionId, collection }) {
                 items = items.filter(d => keyVers.has(d.version));
               }
               return items.slice(0, showAll ? undefined : 10).map(d => {
-                const ver = d.id || d.version || d.numeric || d;
+                const ver = d.id || d.numeric || d.version || d;
                 const isKey = showAll && (MAME_MILESTONES.has(d.version) || d.version === latestVer);
                 return (
                   <Chip key={ver} label={d.version || d} size="small"

@@ -780,7 +780,7 @@ router.post('/api/versions/import-online', async (req, res) => {
             const nickname = parenMatch ? parenMatch[1].trim() : null;
             const ver = cellText.replace(/\([^)]+\)/g, '').replace(/[()]/g, '').trim().split(/\s+/)[0];
             const parsed = parseMameVersion(ver);
-            if (fmtVersion(parsed) === version) {
+            if (fmtVersion(parsed) === version || (nickname && nickname.trim() === version)) {
               const linkMatch = rowMatch[1].match(/<a[^>]+href="([^"]+)"/i);
               if (linkMatch) url = linkMatch[1].replace(/&amp;/g, '&');
               break;
@@ -1102,7 +1102,10 @@ router.get('/api/versions/available', async (req, res) => {
 
     const _urls = {};
     for (const r of rows) {
-      if (r.url) _urls[r.numeric] = r.url;
+      if (r.url) {
+        _urls[r.numeric] = r.url;
+        if (r.version && r.version !== r.numeric) _urls[r.version] = r.url;
+      }
     }
     const result = {
       source: 'MAME',
