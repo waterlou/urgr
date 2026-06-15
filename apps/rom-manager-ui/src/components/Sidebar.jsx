@@ -95,7 +95,6 @@ export default function Sidebar() {
             {Array.isArray(collections) && collections.map(col => (
               <ListItem key={col.id} disablePadding secondaryAction={
                 <Box>
-                  <IconButton size="small" onClick={() => openCollectionForm(col)}><Edit fontSize="small" /></IconButton>
                   <IconButton size="small" onClick={() => confirmDeleteCollection(col)}><Delete fontSize="small" /></IconButton>
                 </Box>
               }>

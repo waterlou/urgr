@@ -60,7 +60,7 @@ router.get('/api/collections', async (req, res) => {
 router.post('/api/collections', async (req, res) => {
   await dbReady;
   try {
-    let { name, slug, platform, logo, folder, has_dataset, dataset_preset, scrape_mode, uploaded_version_id } = req.body;
+    let { name, slug, platform, logo, folder, has_dataset, dataset_preset, scrape_mode, scrape_source_priority, uploaded_version_id } = req.body;
     if (!name || !slug) return res.status(400).json({ error: 'name and slug required' });
     let finalSlug = slug;
     let counter = 1;
@@ -71,8 +71,8 @@ router.post('/api/collections', async (req, res) => {
     while (get('SELECT id FROM collections WHERE folder = ?', [finalFolder])) {
       finalFolder = `${finalFolder}-${counter++}`;
     }
-    run('INSERT INTO collections (name, slug, platform, logo, folder, has_dataset, dataset_preset, scrape_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [name, finalSlug, platform || null, logo || '', finalFolder, has_dataset ? 1 : 0, dataset_preset || null, scrape_mode || 'auto']);
+    run('INSERT INTO collections (name, slug, platform, logo, folder, has_dataset, dataset_preset, scrape_mode, scrape_source_priority) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [name, finalSlug, platform || null, logo || '', finalFolder, has_dataset ? 1 : 0, dataset_preset || null, scrape_mode || 'auto', scrape_source_priority || null]);
     const col = get('SELECT * FROM collections WHERE slug = ?', [finalSlug]);
     if (uploaded_version_id) {
       run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [col.id, uploaded_version_id]);
@@ -84,7 +84,7 @@ router.post('/api/collections', async (req, res) => {
 router.put('/api/collections/:id', async (req, res) => {
   await dbReady;
   try {
-    const { name, slug, platform, logo, folder, scrape_mode } = req.body;
+    const { name, slug, platform, logo, folder, scrape_mode, scrape_source_priority } = req.body;
     const col = get('SELECT * FROM collections WHERE id = ?', [req.params.id]);
     if (!col) return res.status(404).json({ error: 'Collection not found' });
 
@@ -98,6 +98,7 @@ router.put('/api/collections/:id', async (req, res) => {
     if (logo != null) { sets.push('logo = ?'); vals.push(logo); }
     if (folder != null) { sets.push('folder = ?'); vals.push(folder); }
     if (scrape_mode != null) { sets.push('scrape_mode = ?'); vals.push(scrape_mode); }
+    if (scrape_source_priority !== undefined) { sets.push('scrape_source_priority = ?'); vals.push(scrape_source_priority); }
     sets.push("updated_at = datetime('now')");
     vals.push(req.params.id);
     if (sets.length) run(`UPDATE collections SET ${sets.join(', ')} WHERE id = ?`, vals);
