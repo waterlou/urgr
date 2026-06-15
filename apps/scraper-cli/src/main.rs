@@ -45,6 +45,7 @@ struct ScrapeMatch {
     rating: Option<f32>,
     covers: Vec<String>,
     screenshots: Vec<String>,
+    fanarts: Vec<String>,
     videos: Vec<String>,
     roms: Vec<RomEntry>,
 }
@@ -63,6 +64,7 @@ struct DetailOutput {
     genres: Vec<String>,
     covers: Vec<String>,
     screenshots: Vec<String>,
+    fanarts: Vec<String>,
     videos: Vec<String>,
     roms: Vec<RomEntry>,
 }
@@ -99,6 +101,7 @@ fn game_to_match(game: &rom_scraper::Game) -> ScrapeMatch {
         rating: game.rating,
         covers: game.media.covers.iter().map(|m| m.url.clone()).collect(),
         screenshots: game.media.screenshots.iter().map(|m| m.url.clone()).collect(),
+        fanarts: game.media.fanarts.iter().map(|m| m.url.clone()).collect(),
         videos: game.media.videos.iter().map(|m| m.url.clone()).collect(),
         roms: game.roms.iter().map(|r| RomEntry {
             filename: r.filename.clone(),
@@ -557,6 +560,7 @@ async fn cmd_detail(args: &[String]) -> ExitCode {
                 genres: game.genres.clone(),
                 covers: game.media.covers.iter().map(|c| c.url.clone()).collect(),
                 screenshots: game.media.screenshots.iter().map(|s| s.url.clone()).collect(),
+                fanarts: game.media.fanarts.iter().map(|f| f.url.clone()).collect(),
                 videos: game.media.videos.iter().map(|v| v.url.clone()).collect(),
                 roms: game.roms.iter().map(|r| RomEntry {
                     filename: r.filename.clone(),
@@ -774,9 +778,11 @@ mod tests {
         let mut game = make_game("456", "Game", "Arcade", "");
         game.media.covers.push(MediaItem { url: "https://example.com/cover.jpg".into(), kind: MediaType::Cover2D });
         game.media.screenshots.push(MediaItem { url: "//example.com/shot.jpg".into(), kind: MediaType::Screenshot });
+        game.media.fanarts.push(MediaItem { url: "https://example.com/fanart.jpg".into(), kind: MediaType::Fanart });
         let m = game_to_match(&game);
         assert_eq!(m.covers, vec!["https://example.com/cover.jpg"]);
         assert_eq!(m.screenshots, vec!["//example.com/shot.jpg"]);
+        assert_eq!(m.fanarts, vec!["https://example.com/fanart.jpg"]);
     }
 
     #[test]
@@ -845,6 +851,7 @@ mod tests {
             genres: vec!["Adventure".into()],
             covers: vec![],
             screenshots: vec![],
+            fanarts: vec![],
             videos: vec![],
             roms: vec![],
         };

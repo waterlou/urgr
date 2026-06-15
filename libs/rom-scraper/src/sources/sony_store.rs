@@ -66,10 +66,16 @@ impl crate::sources::GameScraper for SonyStore {
         Ok(vec![])
     }
 
-    /// get_game_detail: fetch screenshots from Sony PlayStation Store API
+    /// get_game_detail: fetch hero/fanart images from Sony PlayStation Store API
     /// game_id format: the content_id (e.g. "UP4395-PCSE00890_00-10SECNINJAVITAUS")
+    ///
+    /// PSN API image types:
+    ///   type=1: 240×240 icon (logo — skipped)
+    ///   type=2: 80×80 box art thumbnail (too small — skipped)
+    ///   type=9: 160×160 tiny promo image (looks like a logo — skipped)
+    ///   type=10: 1024+×1024+ hero/promo image (stored as fanart)
     async fn get_game_detail(&self, game_id: &str) -> Result<Game> {
-        let mut screenshots = Vec::new();
+        let mut fanarts = Vec::new();
 
         let regions: &[(&str, &str, &str)] = &[
             ("US", "US", "en"),
@@ -80,7 +86,7 @@ impl crate::sources::GameScraper for SonyStore {
 
         let timestamp = "1534563384000";
 
-        for (region_name, country, lang) in regions {
+        for (_region_name, country, lang) in regions {
             let url = format!(
                 "https://store.playstation.com/store/api/chihiro/00_09_000/container/{}/{}/19/{}/{}",
                 country, lang, game_id, timestamp
@@ -90,15 +96,18 @@ impl crate::sources::GameScraper for SonyStore {
                     if let Some(images) = data.get("images").and_then(|i| i.as_array()) {
                         for img in images {
                             if let Some(url) = img.get("url").and_then(|u| u.as_str()) {
-                                screenshots.push(MediaItem {
-                                    url: url.to_string(),
-                                    kind: MediaType::Screenshot,
-                                });
+                                let img_type = img.get("type").and_then(|t| t.as_i64()).unwrap_or(0);
+                                if img_type == 10 {
+                                    fanarts.push(MediaItem {
+                                        url: url.to_string(),
+                                        kind: MediaType::Fanart,
+                                    });
+                                }
                             }
                         }
                     }
-                    if !screenshots.is_empty() {
-                        screenshots.truncate(5);
+                    if !fanarts.is_empty() {
+                        fanarts.truncate(3);
                         break;
                     }
                 }
@@ -123,7 +132,7 @@ impl crate::sources::GameScraper for SonyStore {
             players: None,
             rating: None,
             roms: vec![],
-            media: Media { screenshots, ..Default::default() },
+            media: Media { fanarts, ..Default::default() },
             source: ScrapeSource::SonyStore,
         })
     }

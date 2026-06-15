@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS game_media (
     synopsis    TEXT DEFAULT '',
     covers      TEXT DEFAULT '[]',
     screenshots TEXT DEFAULT '[]',
+    fanarts     TEXT DEFAULT '[]',
     videos      TEXT DEFAULT '[]',
     scraped_at  TEXT,
     PRIMARY KEY (name, platform)
@@ -227,6 +228,8 @@ export function initDb(dbPath) {
 
   // Migration: add videos column to game_media
   try { db.run("ALTER TABLE game_media ADD COLUMN videos TEXT DEFAULT '[]'"); } catch (_) {}
+  // Migration: add fanarts column to game_media
+  try { db.run("ALTER TABLE game_media ADD COLUMN fanarts TEXT DEFAULT '[]'"); } catch (_) {}
   // Migration: add scrape_mode column to collections
   try { db.run("ALTER TABLE collections ADD COLUMN scrape_mode TEXT DEFAULT 'auto'"); } catch (_) {}
 
