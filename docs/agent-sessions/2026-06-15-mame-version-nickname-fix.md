@@ -10,8 +10,8 @@ The progettosnaps.net MAME DATs page lists beta versions like `0.41 (0.37b5)` wh
 
 ## Files Changed
 - `apps/rom-manager-ui/server/routes/versions.js` — `_urls` cache now also indexes by nickname; HTML fallback comparison also checks nickname
-- `apps/rom-manager-ui/src/components/VersionManager.jsx` — Prefer `d.numeric` over `d.version` for import calls
-- `apps/rom-manager-ui/src/components/CollectionEdit/VersionsTab.jsx` — Same preference change
+- `apps/rom-manager-ui/src/components/VersionManager.jsx` — Prefer `d.numeric` over `d.version` for import calls; show `"0.41 (0.37b5)"` in chip label when version differs from numeric
+- `apps/rom-manager-ui/src/components/CollectionEdit/VersionsTab.jsx` — Same changes
 
 ## Branch
 `agent/mame-version-nickname-fix`
