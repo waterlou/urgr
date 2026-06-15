@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, TextField, Button, Chip, Alert, FormControl, FormLabel, Select, MenuItem,
+  Dialog, DialogTitle, DialogContent, DialogActions,
 } from '@mui/material';
 import { useCollections } from '../../contexts/CollectionContext.jsx';
 import { LOGO_ICONS } from '../../lib/collectionConstants.js';
@@ -18,6 +19,8 @@ export default function GeneralTab({ collection }) {
   const [scrapeMode, setScrapeMode] = useState(collection?.scrape_mode || 'parent');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const [confirmSlug, setConfirmSlug] = useState('');
 
   function handleNameChange(v) {
     setName(v);
@@ -43,11 +46,16 @@ export default function GeneralTab({ collection }) {
     }
   }
 
+  function openDeleteDialog() {
+    setConfirmSlug('');
+    setShowDelete(true);
+  }
+
   function handleDelete() {
-    if (window.confirm(`Are you sure you want to delete "${collection.name}"? This cannot be undone.`)) {
-      deleteCollection(collection.id);
-      navigate('/');
-    }
+    if (confirmSlug !== collection.slug) return;
+    deleteCollection(collection.id);
+    setShowDelete(false);
+    navigate('/');
   }
 
   useEffect(() => {
@@ -99,8 +107,30 @@ export default function GeneralTab({ collection }) {
         <Button variant="contained" onClick={handleSave} disabled={saving}>
           {saving ? 'Saving...' : 'Save'}
         </Button>
-        <Button color="error" onClick={handleDelete}>Delete Collection</Button>
+        <Button color="error" onClick={openDeleteDialog}>Delete Collection</Button>
       </Box>
+
+      <Dialog open={showDelete} onClose={() => setShowDelete(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete "{collection.name}"?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            This cannot be undone. Type <strong>{collection.slug}</strong> to confirm.
+          </Typography>
+          <TextField
+            autoFocus fullWidth size="small"
+            placeholder={collection.slug}
+            value={confirmSlug}
+            onChange={e => setConfirmSlug(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && confirmSlug === collection.slug) handleDelete(); }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowDelete(false)}>Cancel</Button>
+          <Button color="error" disabled={confirmSlug !== collection.slug} onClick={handleDelete}>
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

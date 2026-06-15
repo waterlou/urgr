@@ -19,7 +19,7 @@ const DRAWER_WIDTH = 270;
 export default function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { collections, gameSets, queueCount, operationCount, deleteCollection, deleteGameSet } = useCollections();
+  const { collections, gameSets, queueCount, operationCount, deleteGameSet } = useCollections();
   const { sidebarOpen, closeSidebar, openCollectionForm, openGameSetForm, openSettings } = useUI();
   const { mode, setMode } = useColorScheme();
   const theme = useTheme();
@@ -34,13 +34,6 @@ export default function Sidebar() {
 
   function handleNav(path) {
     navigate(path);
-  }
-
-  function confirmDeleteCollection(col) {
-    if (window.confirm(`Are you sure you want to delete "${col.name}"? This cannot be undone.`)) {
-      deleteCollection(col.id);
-      if (location.pathname.startsWith(`/collections/${col.id}`)) navigate('/');
-    }
   }
 
   function confirmDeleteGameSet(gs) {
@@ -93,11 +86,7 @@ export default function Sidebar() {
               </ListItem>
             )}
             {Array.isArray(collections) && collections.map(col => (
-              <ListItem key={col.id} disablePadding secondaryAction={
-                <Box>
-                  <IconButton size="small" onClick={() => confirmDeleteCollection(col)}><Delete fontSize="small" /></IconButton>
-                </Box>
-              }>
+              <ListItem key={col.id} disablePadding>
                 <ListItemButton selected={location.pathname.startsWith(`/collections/${col.id}`)} sx={{ pl: 4 }} onClick={() => handleNav(`/collections/${col.id}`)}>
                   <ListItemIcon sx={{ minWidth: 32 }}><IconDisplay name={col.logo} fallback="folder" size={20} /></ListItemIcon>
                   <ListItemText primary={col.name} primaryTypographyProps={{ variant: 'body2', noWrap: true }} />
