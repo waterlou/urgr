@@ -55,6 +55,14 @@ const arcadeMediaDir = path.join(dataDir, 'media', 'arcadedb');
 fs.mkdirSync(arcadeMediaDir, { recursive: true });
 app.use('/media/arcadedb', express.static(arcadeMediaDir));
 
+const libretroDir = path.join(dataDir, 'media', 'libretro-thumbnails');
+fs.mkdirSync(libretroDir, { recursive: true });
+app.use('/media/libretro-thumbnails', express.static(libretroDir));
+
+const sonyStoreDir = path.join(dataDir, 'media', 'sony-store');
+fs.mkdirSync(sonyStoreDir, { recursive: true });
+app.use('/media/sony-store', express.static(sonyStoreDir));
+
 app.use((req, res) => {
   const filePath = path.join(distDir, 'index.html');
   if (fs.existsSync(filePath)) {
