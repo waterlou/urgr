@@ -192,13 +192,13 @@ Searches and scrapes game metadata from online providers. Outputs JSON to stdout
 |---------|-------------|
 | `hash <file>` | Compute ROM hashes |
 | `search <query>` | Search games by name |
-| `scrape <file> [--download]` | Match a ROM, enrich via detail, optional media download |
+| `scrape <file>` | Match a ROM and enrich via detail |
 | `detail <game-id> --source <s>` | Full game details by provider ID |
 | `test` | Check connectivity to all configured providers |
 
 **Providers:** TheGamesDB (default, built-in key), IGDB (needs Client ID/Secret), ScreenScraper (untested, needs dev account), VGMuseum (always-on, screenshots only), NoIntroPictures (always-on, box art), SonyStore (always-on, PSN screenshots).
 
-**scrape flow:** hash → filename parse → hash search → name search → `get_game_detail` enrichment → optional download.
+**scrape flow:** hash → filename parse → hash search → name search → `get_game_detail` enrichment.
 
 **Config:** `.env` or `data/.env`. Settings UI saves to `data/.env`.
 
@@ -464,7 +464,7 @@ build-cli scan 1 /roms/mame --db data/roms.db
 build-cli verify 1 /roms/mame --db data/roms.db
 
 # 5. Scrape metadata for individual ROMs
-scraper-cli scrape /roms/mame/sf2.zip --source igdb --download
+scraper-cli scrape /roms/mame/sf2.zip --source igdb
 
 # 6. Import new version, diff, upgrade
 parse-cli import mame0263.xml mame 0.263 --db data/roms.db

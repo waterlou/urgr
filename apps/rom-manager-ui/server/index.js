@@ -51,7 +51,7 @@ app.use('/assets', express.static(path.join(distDir, 'assets')));
 
 app.use('/icons', express.static(iconsDir));
 
-const arcadeMediaDir = path.join(dataDir, 'arcadedb');
+const arcadeMediaDir = path.join(dataDir, 'media', 'arcadedb');
 fs.mkdirSync(arcadeMediaDir, { recursive: true });
 app.use('/media/arcadedb', express.static(arcadeMediaDir));
 

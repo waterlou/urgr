@@ -47,8 +47,6 @@ struct ScrapeMatch {
     screenshots: Vec<String>,
     videos: Vec<String>,
     roms: Vec<RomEntry>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    downloaded: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -82,14 +80,6 @@ struct HealthResult {
     message: String,
 }
 
-fn normalize_url(u: &str) -> String {
-    if u.starts_with("//") {
-        format!("https:{}", u)
-    } else {
-        u.to_string()
-    }
-}
-
 fn print_json<T: Serialize>(value: &T) {
     println!("{}", serde_json::to_string_pretty(value).unwrap());
 }
@@ -114,7 +104,6 @@ fn game_to_match(game: &rom_scraper::Game) -> ScrapeMatch {
             filename: r.filename.clone(),
             crc: r.crc32.clone(),
         }).collect(),
-        downloaded: None,
     }
 }
 
@@ -123,42 +112,6 @@ async fn enrich_game(registry: &ScraperRegistry, game: rom_scraper::Game) -> rom
         Ok(Some(detail)) => detail,
         _ => game,
     }
-}
-
-fn slugify(s: &str) -> String {
-    s.to_lowercase().chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
-        .collect::<String>()
-        .trim_matches('_')
-        .chars()
-        .take(64)
-        .collect()
-}
-
-async fn download_media(urls: &[String], platform: &str, release_date: &Option<String>, title: &str, client: &HttpClient) -> Vec<String> {
-    let platform_slug = if platform.is_empty() { "unknown" } else { platform };
-    let year = release_date.as_ref().and_then(|d| d.get(..4)).unwrap_or("0000");
-    let dir_name = format!("{}-{}-{}", slugify(platform_slug), year, slugify(title));
-    let base = std::path::Path::new("data").join("media").join(&dir_name);
-    std::fs::create_dir_all(&base).ok();
-    let mut local_paths = Vec::new();
-    for url in urls {
-        let normalized = normalize_url(url);
-        let filename = normalized.rsplit('/').next().unwrap_or("unknown");
-        let dest = base.join(filename);
-        if dest.exists() {
-            local_paths.push(dest.to_string_lossy().to_string());
-            continue;
-        }
-        match client.get_bytes(&normalized).await {
-            Ok(bytes) => {
-                std::fs::write(&dest, &bytes).ok();
-                local_paths.push(dest.to_string_lossy().to_string());
-            }
-            Err(e) => eprintln!("Download failed for {}: {}", normalized, e),
-        }
-    }
-    local_paths
 }
 
 fn print_usage() {
@@ -170,7 +123,7 @@ fn print_usage() {
     eprintln!("COMMANDS:");
     eprintln!("  hash <file>                    Compute ROM hashes (CRC32, MD5, SHA1)");
     eprintln!("  search <query> [--source <s>]  Search games by name");
-    eprintln!("  scrape <file> [--download] [--source <s>]   Match a ROM file and optionally download media");
+    eprintln!("  scrape <file> [--source <s>]                Match a ROM file and return metadata");
     eprintln!("  detail <game-id> [--source <s>] Get full game details by ID");
     eprintln!("  test                           Test connectivity to all configured providers");
     eprintln!();
@@ -178,7 +131,6 @@ fn print_usage() {
     eprintln!("  --source <s>       Provider: thegamesdb (default), screenscraper, igdb, arcadedb, libretro-thumbnails");
     eprintln!("                     (default: thegamesdb, or SCRAPER_SOURCE env var)");
     eprintln!("  --platform <p>     Platform filter (e.g., nes, snes, arcade)");
-    eprintln!("  --download         Download cover/screenshot media to data/media/<game-id>/");
     eprintln!();
     eprintln!("ENVIRONMENT:");
     eprintln!("  All providers need credentials. May be set in .env or as env vars.");
@@ -506,7 +458,7 @@ async fn cmd_search(args: &[String]) -> ExitCode {
 
 async fn cmd_scrape(args: &[String]) -> ExitCode {
     if args.len() < 2 {
-        eprintln!("Usage: scraper-cli scrape <file> [--download] [--source <s>]");
+        eprintln!("Usage: scraper-cli scrape <file> [--source <s>]");
         return ExitCode::FAILURE;
     }
     let path = PathBuf::from(&args[1]);
@@ -514,7 +466,6 @@ async fn cmd_scrape(args: &[String]) -> ExitCode {
         eprintln!("File not found: {}", path.display());
         return ExitCode::FAILURE;
     }
-    let download = args.iter().any(|a| a == "--download");
     let source = parse_source(args);
     let config = build_config();
     let registry = ScraperRegistry::new(&config);
@@ -572,18 +523,6 @@ async fn cmd_scrape(args: &[String]) -> ExitCode {
                         }
                     }
                 }
-            }
-        }
-    }
-
-    if download {
-        if let Some(ref mut m) = matched {
-            let client = HttpClient::new();
-            let mut all = Vec::new();
-            all.extend(download_media(&m.covers, &m.platform, &m.release_date, &m.title, &client).await);
-            all.extend(download_media(&m.screenshots, &m.platform, &m.release_date, &m.title, &client).await);
-            if !all.is_empty() {
-                m.downloaded = Some(all);
             }
         }
     }
@@ -737,56 +676,6 @@ mod tests {
         }
     }
 
-    // ---- slugify ----
-
-    #[test]
-    fn test_slugify_basic() {
-        assert_eq!(slugify("hello world"), "hello_world");
-    }
-
-    #[test]
-    fn test_slugify_uppercase() {
-        assert_eq!(slugify("Super Mario World"), "super_mario_world");
-    }
-
-    #[test]
-    fn test_slugify_special_chars() {
-        assert_eq!(slugify("Donkey Kong 64!"), "donkey_kong_64");
-    }
-
-    #[test]
-    fn test_slugify_already_slug() {
-        assert_eq!(slugify("the-legend-of-zelda"), "the-legend-of-zelda");
-    }
-
-    #[test]
-    fn test_slugify_truncates() {
-        let long = "a".repeat(100);
-        assert!(slugify(&long).len() <= 64);
-    }
-
-    #[test]
-    fn test_slugify_leading_trailing_underscores() {
-        assert_eq!(slugify("___hello___"), "hello");
-    }
-
-    // ---- normalize_url ----
-
-    #[test]
-    fn test_normalize_url_https() {
-        assert_eq!(normalize_url("https://example.com/img.jpg"), "https://example.com/img.jpg");
-    }
-
-    #[test]
-    fn test_normalize_url_protocol_relative() {
-        assert_eq!(normalize_url("//images.igdb.com/img.jpg"), "https://images.igdb.com/img.jpg");
-    }
-
-    #[test]
-    fn test_normalize_url_http() {
-        assert_eq!(normalize_url("http://cdn.example.com/img.jpg"), "http://cdn.example.com/img.jpg");
-    }
-
     // ---- truncate ----
 
     #[test]
@@ -909,13 +798,6 @@ mod tests {
     }
 
     #[test]
-    fn test_game_to_match_downloaded_none() {
-        let game = make_game("0", "No Download", "NES", "");
-        let m = game_to_match(&game);
-        assert!(m.downloaded.is_none());
-    }
-
-    #[test]
     fn test_game_to_match_metadata() {
         let mut game = make_game("1", "Metroid", "SNES", "snes");
         game.description = "A classic game.".to_string();
@@ -946,7 +828,6 @@ mod tests {
         assert_eq!(json["title"], "Test");
         assert_eq!(json["platform"], "SNES");
         assert_eq!(json["platform_short"], "snes");
-        assert!(json.get("downloaded").is_none());
     }
 
     #[test]
