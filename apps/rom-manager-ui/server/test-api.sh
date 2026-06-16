@@ -75,6 +75,9 @@ test "GET /api/filesystem/browse rejects /etc" GET "/filesystem/browse?path=/etc
 # Versions
 test "GET /api/versions returns list" GET "/versions" "" "isinstance(d, list) and len(d) > 0"
 
+# Cache — covers from known games
+test_cover "GET /api/games/31/cover returns 200 (cached arcadedb)" "/games/31/cover"
+
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ] && echo "All tests passed!" || echo "$FAIL test(s) failed"

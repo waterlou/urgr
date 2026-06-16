@@ -40,6 +40,9 @@ export function getPlatforms() { return fetchJson('/platforms'); }
 export function getCollections() { return fetchJson('/collections'); }
 export function createCollection(data) { return fetchWithBody('/collections', 'POST', data); }
 export function updateCollection(id, data) { return fetchWithBody(`/collections/${id}`, 'PUT', data); }
+export function updateScrapePriority(id, enabledSources) {
+  return fetchWithBody(`/collections/${id}`, 'PUT', { scrape_source_priority: JSON.stringify(enabledSources) });
+}
 export function deleteCollection(id) { return fetchWithBody(`/collections/${id}`, 'DELETE'); }
 export function getCollectionGames(id, { limit, offset, sort, order, q, parents_only, favourites_only, roms_only, version_id, year, manufacturer } = {}) {
   const p = new URLSearchParams();

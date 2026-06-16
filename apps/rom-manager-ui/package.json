@@ -11,6 +11,8 @@
     "test": "npx playwright test",
     "test:api": "bash server/test-api.sh",
     "test:nps": "node --test server/test-nps.mjs",
+    "test:cache": "node --test server/test-cache.mjs",
+    "test:version-sort": "node --test server/test-version-sort.mjs",
     "test:ui": "npx playwright test",
     "electron:dev": "concurrently \"node server/index.js\" \"wait-on http://localhost:3001 && electron .\"",
     "electron:build": "vite build && electron-builder",

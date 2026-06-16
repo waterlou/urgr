@@ -30,9 +30,16 @@ const CACHE_SOURCES = [
   },
   {
     name: 'sony-store',
-    hostPattern: 'image.api.playstation.com',
+    hostPattern: 'playstation',
     cacheDir: path.join(dataDir, 'media', 'sony-store'),
     mountPrefix: '/media/sony-store/',
+    timeout: 10000,
+  },
+  {
+    name: 'igdb',
+    hostPattern: 'images.igdb.com',
+    cacheDir: path.join(dataDir, 'media', 'igdb'),
+    mountPrefix: '/media/igdb/',
     timeout: 10000,
   },
 ];
@@ -134,3 +141,5 @@ export async function getMedia(url, gameName, mediaType) {
 
   return null;
 }
+
+export { CACHE_SOURCES, findLocalFile };

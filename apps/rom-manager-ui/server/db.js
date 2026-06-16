@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS collections (
     has_dataset INTEGER NOT NULL DEFAULT 0,
     dataset_preset TEXT,
     scrape_mode TEXT DEFAULT 'auto',
+    scrape_source_priority TEXT DEFAULT NULL,
     created_at  TEXT DEFAULT (datetime('now')),
     updated_at  TEXT DEFAULT (datetime('now'))
 );
@@ -125,6 +126,7 @@ CREATE TABLE IF NOT EXISTS game_media (
     synopsis    TEXT DEFAULT '',
     covers      TEXT DEFAULT '[]',
     screenshots TEXT DEFAULT '[]',
+    fanarts     TEXT DEFAULT '[]',
     videos      TEXT DEFAULT '[]',
     scraped_at  TEXT,
     PRIMARY KEY (name, platform)
@@ -227,8 +229,12 @@ export function initDb(dbPath) {
 
   // Migration: add videos column to game_media
   try { db.run("ALTER TABLE game_media ADD COLUMN videos TEXT DEFAULT '[]'"); } catch (_) {}
+  // Migration: add fanarts column to game_media
+  try { db.run("ALTER TABLE game_media ADD COLUMN fanarts TEXT DEFAULT '[]'"); } catch (_) {}
   // Migration: add scrape_mode column to collections
   try { db.run("ALTER TABLE collections ADD COLUMN scrape_mode TEXT DEFAULT 'auto'"); } catch (_) {}
+  // Migration: add scrape_source_priority column to collections
+  try { db.run("ALTER TABLE collections ADD COLUMN scrape_source_priority TEXT DEFAULT NULL"); } catch (_) {}
 
   // Create recently_played table (simple cross-version list)
   try {
