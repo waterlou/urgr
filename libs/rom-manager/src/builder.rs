@@ -853,6 +853,18 @@ pub fn build_version(
         }
     }
 
+    // ── Phase 7b: Preserve previously-missing games not reprocessed ──
+    {
+        let processed: std::collections::HashSet<String> = need_copy.iter().cloned().collect();
+        let missing_names: std::collections::HashSet<String> = missing.iter().map(|m| m.name.clone()).collect();
+        for old_mg in &status.missing_reasons {
+            if !processed.contains(&old_mg.name) && !missing_names.contains(&old_mg.name) {
+                missing.push(old_mg.clone());
+                info!("  {}: preserved as missing (not in current diff)", old_mg.name);
+            }
+        }
+    }
+
     // ── Phase 8: Save status + report ──
     status.matched = added + status.matched;
 
