@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, Select, MenuItem, FormControl, InputLabel,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Paper, Chip, LinearProgress, CircularProgress, Collapse, TextField,
+  Paper, Chip, LinearProgress, CircularProgress, TextField,
 } from '@mui/material';
 import {
   getCollectionBuilds, startCollectionBuild, runCollectionBuild, collectionBuild,
@@ -11,6 +12,7 @@ import {
 import DirectoryBrowserModal from './DirectoryBrowserModal.jsx';
 
 export default function BuildManager({ collectionId, collection }) {
+  const navigate = useNavigate();
   const [builds, setBuilds] = useState([]);
   const [buildProgress, setBuildProgress] = useState({});
   const [buildVersion, setBuildVersion] = useState('');
@@ -26,7 +28,7 @@ export default function BuildManager({ collectionId, collection }) {
   const [buildScanRunning, setBuildScanRunning] = useState(false);
   const [buildScanResult, setBuildScanResult] = useState(null);
   const [buildResult, setBuildResult] = useState(null);
-  const [showMissing, setShowMissing] = useState(false);
+
   const [dirBrowserOpen, setDirBrowserOpen] = useState(false);
   const eventSourcesRef = useRef({});
 
@@ -122,52 +124,53 @@ export default function BuildManager({ collectionId, collection }) {
                 Added: {buildResult.added} · Existed: {buildResult.exists} · Reused: {buildResult.reused} · Missing: {buildResult.missing}
               </Typography>
               {buildResult.missing_games?.length > 0 && (
-                <>
-                  <Button size="small" onClick={() => setShowMissing(!showMissing)}>
-                    {showMissing ? 'Hide' : 'Show'} missing games ({buildResult.missing_games.length})
-                  </Button>
-                  <Collapse in={showMissing}>
-                    <Box sx={{ maxHeight: 200, overflow: 'auto' }}>
-                      {(function() {
-                        const reasons = buildResult.missing_reasons || [];
-                        const fileNotFound = reasons.filter(r => r.reason?.FileNotFound !== undefined);
-                        const crcMismatch = reasons.filter(r => r.reason?.CrcMismatch !== undefined);
-                        return (
-                          <>
-                            {fileNotFound.length > 0 && (
-                              <Box sx={{ mb: 1 }}>
-                                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-                                  File not found ({fileNotFound.length}):
+                <Box sx={{ mt: 1.5 }}>
+                  <Typography variant="caption" fontWeight={600} sx={{ mb: 0.5, display: 'block' }}>
+                    Missing games ({buildResult.missing_games.length})
+                  </Typography>
+                  <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 300 }}>
+                    <Table size="small" stickyHeader>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Game</TableCell>
+                          <TableCell sx={{ width: 100 }}>Status</TableCell>
+                          <TableCell sx={{ width: 180 }}>Details</TableCell>
+                          <TableCell sx={{ width: 60 }}></TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {(buildResult.missing_reasons || []).map(r => {
+                          const isFileNotFound = r.reason?.FileNotFound !== undefined;
+                          const isCrc = r.reason?.CrcMismatch !== undefined;
+                          return (
+                            <TableRow key={r.name} hover sx={{ cursor: 'pointer' }}
+                              onClick={() => navigate(`/collections/${collectionId}?q=${r.name}`)}>
+                              <TableCell>
+                                <Typography variant="body2" fontFamily="monospace" fontSize={13}>{r.name}</Typography>
+                              </TableCell>
+                              <TableCell>
+                                <Chip label={isFileNotFound ? 'Missing' : 'CRC Error'} size="small"
+                                  color={isFileNotFound ? 'error' : 'warning'} />
+                              </TableCell>
+                              <TableCell>
+                                <Typography variant="caption" color="text.secondary">
+                                  {isFileNotFound ? 'File not found in import' :
+                                   isCrc ? `${r.reason.CrcMismatch.matched}/${r.reason.CrcMismatch.expected} ROMs verified` : ''}
                                 </Typography>
-                                {fileNotFound.map(r => (
-                                  <Typography key={r.name} variant="caption" display="block" sx={{ pl: 2 }}>
-                                    {r.name}
-                                  </Typography>
-                                ))}
-                              </Box>
-                            )}
-                            {crcMismatch.length > 0 && (
-                              <Box>
-                                <Typography variant="caption" color="warning.main" sx={{ fontWeight: 600 }}>
-                                  CRC mismatch ({crcMismatch.length}):
-                                </Typography>
-                                {crcMismatch.map(r => {
-                                  const m = r.reason.CrcMismatch.matched;
-                                  const e = r.reason.CrcMismatch.expected;
-                                  return (
-                                    <Typography key={r.name} variant="caption" display="block" sx={{ pl: 2 }}>
-                                      {r.name} — {m}/{e} ROMs verified
-                                    </Typography>
-                                  );
-                                })}
-                              </Box>
-                            )}
-                          </>
-                        );
-                      })()}
-                    </Box>
-                  </Collapse>
-                </>
+                              </TableCell>
+                              <TableCell>
+                                <Button size="small" variant="outlined"
+                                  onClick={(e) => { e.stopPropagation(); navigate(`/collections/${collectionId}?q=${r.name}`); }}>
+                                  View
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </Box>
               )}
             </Box>
           )}
