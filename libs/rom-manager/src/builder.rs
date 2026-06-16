@@ -9,7 +9,7 @@ use tracing::info;
 
 use crate::db::Database;
 use crate::error::{Error, Result};
-use crate::models::{Game, MissingGame, MissingReason, ParsedGame, ParsedRom, RomFile, SetVersion};
+use crate::models::{Game, MissingGame, MissingReason, ParsedGame, ParsedRom, RomDetail, RomFile, SetVersion};
 use rom_scraper::compute_hashes_from_bytes;
 
 const STATUS_FILENAME: &str = "_build_status.json";
@@ -147,26 +147,67 @@ impl ImportIndex {
         if patches.is_empty() { None } else { Some((path.clone(), patches)) }
     }
 
-    /// After find_match fails, determine the detailed reason
-    fn explain_missing(&self, game_name: &str, expected_roms: &[RomFile]) -> MissingReason {
-        let path = self.name_to_path.get(game_name);
-        if path.is_none() {
-            return MissingReason::FileNotFound;
-        }
-        let zip_crc_set = match self.zip_crcs.get(game_name) {
-            Some(s) => s,
-            None => return MissingReason::CrcMismatch { matched: 0, expected: expected_roms.len() },
-        };
+    /// After find_match fails, determine the detailed reason and per-ROM details.
+    fn explain_missing(&self, game_name: &str, expected_roms: &[RomFile]) -> (MissingReason, Vec<RomDetail>) {
         let non_merge: Vec<&RomFile> = expected_roms.iter()
             .filter(|r| r.merge_target.is_none())
             .collect();
         let expected_count = non_merge.len();
-        let matched = non_merge.iter()
-            .filter_map(|r| r.crc32.as_deref())
-            .filter(|c| !c.is_empty())
-            .filter(|ec| zip_crc_set.contains(*ec))
-            .count();
-        MissingReason::CrcMismatch { matched, expected: expected_count }
+
+        let path = match self.name_to_path.get(game_name) {
+            Some(p) => p,
+            None => {
+                let details = non_merge.iter().map(|r| RomDetail {
+                    filename: r.filename.clone(),
+                    expected_crc: r.crc32.clone().unwrap_or_default(),
+                    actual_crc: None,
+                    status: "missing".to_string(),
+                }).collect();
+                return (MissingReason::FileNotFound, details);
+            }
+        };
+
+        let zip_crc_set = match self.zip_crcs.get(game_name) {
+            Some(s) => s,
+            None => {
+                let details = non_merge.iter().map(|r| RomDetail {
+                    filename: r.filename.clone(),
+                    expected_crc: r.crc32.clone().unwrap_or_default(),
+                    actual_crc: None,
+                    status: "missing".to_string(),
+                }).collect();
+                return (MissingReason::CrcMismatch { matched: 0, expected: expected_count }, details);
+            }
+        };
+
+        // Read actual zip CRCs by filename for detailed comparison
+        let zip_file_crcs = read_zip_crc_by_filename(path);
+
+        let mut matched = 0usize;
+        let mut details = Vec::with_capacity(non_merge.len());
+        for rom in &non_merge {
+            let exp_crc = rom.crc32.clone().unwrap_or_default();
+            let crc_found = !exp_crc.is_empty() && zip_crc_set.contains(&exp_crc);
+            if crc_found { matched += 1; }
+
+            // Find actual CRC: if matched by CRC it's the expected value,
+            // otherwise look for filename match in the zip
+            let actual_crc = if crc_found {
+                Some(exp_crc.clone())
+            } else {
+                zip_file_crcs.get(&rom.filename).cloned()
+            };
+
+            let status = if crc_found { "match" } else { "mismatch" };
+            details.push(RomDetail {
+                filename: rom.filename.clone(),
+                expected_crc: exp_crc,
+                actual_crc,
+                status: status.to_string(),
+            });
+        }
+
+        (MissingReason::CrcMismatch { matched, expected: expected_count }, details)
     }
 
     /// Try to find a matching import zip by content (CRC32 hashes).
@@ -240,6 +281,39 @@ fn compute_zip_crcs(zip_path: &Path) -> std::collections::HashSet<String> {
         }
     }
     crcs
+}
+
+/// Compute filename→CRC32 mapping for all files inside a zip (no extraction).
+fn read_zip_crc_by_filename(zip_path: &Path) -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    let data = match std::fs::read(zip_path) {
+        Ok(d) => d,
+        Err(_) => return map,
+    };
+    let mut pos = 0;
+    while pos + 30 <= data.len() {
+        if data[pos] != 0x50 || data[pos + 1] != 0x4b { break; }
+        let sig = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]);
+        if sig == 0x04034b50 {
+            let name_len = u16::from_le_bytes([data[pos+26], data[pos+27]]) as usize;
+            let extra_len = u16::from_le_bytes([data[pos+28], data[pos+29]]) as usize;
+            let crc = u32::from_le_bytes([data[pos+14], data[pos+15], data[pos+16], data[pos+17]]);
+            if name_len > 0 {
+                let name_bytes = &data[pos+30..pos+30+name_len];
+                let name = String::from_utf8_lossy(name_bytes).to_string();
+                if !name.ends_with('/') {
+                    map.insert(name, format!("{:08X}", crc));
+                }
+            }
+            let comp_size = u32::from_le_bytes([data[pos+18], data[pos+19], data[pos+20], data[pos+21]]) as usize;
+            pos += 30 + name_len + extra_len + comp_size;
+        } else if sig == 0x02014b50 || sig == 0x06054b50 || sig == 0x06064b50 {
+            break;
+        } else {
+            pos += 1;
+        }
+    }
+    map
 }
 
 /// For a given source zip path, discover CHD files in a same-named sibling directory.
@@ -650,7 +724,7 @@ pub fn build_version(
             }
             matched_by_hash += 1;
         } else {
-            let reason = index.explain_missing(game_name, &expected_roms);
+            let (reason, rom_details) = index.explain_missing(game_name, &expected_roms);
             if verbose {
                 match &reason {
                     MissingReason::FileNotFound => eprintln!("  {game_name}: file not found in import"),
@@ -658,7 +732,7 @@ pub fn build_version(
                         eprintln!("  {game_name}: CRC mismatch ({matched}/{expected} ROMs verified)"),
                 }
             }
-            missing.push(MissingGame { name: game_name.clone(), reason });
+            missing.push(MissingGame { name: game_name.clone(), reason, rom_details });
         }
     }
 

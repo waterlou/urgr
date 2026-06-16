@@ -450,7 +450,7 @@ router.post('/api/collections/:id/build', async (req, res) => {
             }
           }
           runNow("UPDATE collection_builds SET status = 'complete', games_built = ?, completed_at = datetime('now') WHERE id = ?", [matched, buildId]);
-          doneJob(jobId, { found: matched, missing: totalDb - matched, total: totalDb });
+          doneJob(jobId, { found: matched, missing: totalDb - matched, total: totalDb, missing_names: missingNames, matched_names: matchedNamesArr });
         } else if (isNps) {
           // NPS build
           fs.mkdirSync(collectionDir, { recursive: true });

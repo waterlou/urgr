@@ -1,18 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, Select, MenuItem, FormControl, InputLabel,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Paper, Chip, LinearProgress, CircularProgress, TextField,
+  Dialog, DialogTitle, DialogContent, DialogActions,
 } from '@mui/material';
-import {
-  getCollectionBuilds, startCollectionBuild, runCollectionBuild, collectionBuild,
-  subscribeJobSSE, cancelJob,
-} from '../api.js';
+import { getCollectionBuilds, collectionBuild, subscribeJobSSE } from '../api.js';
 import DirectoryBrowserModal from './DirectoryBrowserModal.jsx';
 
 export default function BuildManager({ collectionId, collection }) {
-  const navigate = useNavigate();
   const [builds, setBuilds] = useState([]);
   const [buildProgress, setBuildProgress] = useState({});
   const [buildVersion, setBuildVersion] = useState('');
@@ -31,6 +27,8 @@ export default function BuildManager({ collectionId, collection }) {
 
   const [dirBrowserOpen, setDirBrowserOpen] = useState(false);
   const eventSourcesRef = useRef({});
+
+  const [romDetailGame, setRomDetailGame] = useState(null);
 
   useEffect(() => {
     if (collectionId) getCollectionBuilds(collectionId).then(setBuilds).catch(() => {});
@@ -77,6 +75,10 @@ export default function BuildManager({ collectionId, collection }) {
 
   const versions = collection?.versions || [];
 
+  function openRomDetail(r) {
+    setRomDetailGame(r);
+  }
+
   return (
     <Box sx={{ mb: 3 }}>
       <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>Build</Typography>
@@ -120,57 +122,15 @@ export default function BuildManager({ collectionId, collection }) {
             <Typography color="error">{buildResult.error}</Typography>
           ) : (
             <Box>
-              <Typography variant="body2">
+              <Typography variant="body2" sx={{ mb: 1 }}>
                 Added: {buildResult.added} · Existed: {buildResult.exists} · Reused: {buildResult.reused} · Missing: {buildResult.missing}
               </Typography>
               {buildResult.missing_games?.length > 0 && (
-                <Box sx={{ mt: 1.5 }}>
-                  <Typography variant="caption" fontWeight={600} sx={{ mb: 0.5, display: 'block' }}>
-                    Missing games ({buildResult.missing_games.length})
-                  </Typography>
-                  <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 300 }}>
-                    <Table size="small" stickyHeader>
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>Game</TableCell>
-                          <TableCell sx={{ width: 100 }}>Status</TableCell>
-                          <TableCell sx={{ width: 180 }}>Details</TableCell>
-                          <TableCell sx={{ width: 60 }}></TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {(buildResult.missing_reasons || []).map(r => {
-                          const isFileNotFound = r.reason?.FileNotFound !== undefined;
-                          const isCrc = r.reason?.CrcMismatch !== undefined;
-                          return (
-                            <TableRow key={r.name} hover sx={{ cursor: 'pointer' }}
-                              onClick={() => navigate(`/collections/${collectionId}?q=${r.name}`)}>
-                              <TableCell>
-                                <Typography variant="body2" fontFamily="monospace" fontSize={13}>{r.name}</Typography>
-                              </TableCell>
-                              <TableCell>
-                                <Chip label={isFileNotFound ? 'Missing' : 'CRC Error'} size="small"
-                                  color={isFileNotFound ? 'error' : 'warning'} />
-                              </TableCell>
-                              <TableCell>
-                                <Typography variant="caption" color="text.secondary">
-                                  {isFileNotFound ? 'File not found in import' :
-                                   isCrc ? `${r.reason.CrcMismatch.matched}/${r.reason.CrcMismatch.expected} ROMs verified` : ''}
-                                </Typography>
-                              </TableCell>
-                              <TableCell>
-                                <Button size="small" variant="outlined"
-                                  onClick={(e) => { e.stopPropagation(); navigate(`/collections/${collectionId}?q=${r.name}`); }}>
-                                  View
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                </Box>
+                <MissingGamesTable
+                  missingReasons={buildResult.missing_reasons || []}
+                  collectionId={collectionId}
+                  onRowClick={openRomDetail}
+                />
               )}
             </Box>
           )}
@@ -182,51 +142,21 @@ export default function BuildManager({ collectionId, collection }) {
           {buildScanResult.error ? (
             <Typography color="error">{buildScanResult.error}</Typography>
           ) : (
-            <Typography variant="body2">
-              Found: {buildScanResult.found} · Missing: {buildScanResult.missing} · Total: {buildScanResult.total}
-            </Typography>
+            <Box>
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                Found: {buildScanResult.found} · Missing: {buildScanResult.missing} · Total: {buildScanResult.total}
+              </Typography>
+              {buildScanResult.missing_names?.length > 0 && (
+                <MissingScanTable
+                  missingNames={buildScanResult.missing_names}
+                  collectionId={collectionId}
+                />
+              )}
+            </Box>
           )}
         </Box>
       )}
 
-      <TableContainer component={Paper} variant="outlined">
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Version</TableCell>
-              <TableCell>Format</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Progress</TableCell>
-              <TableCell>Date</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {builds.length === 0 ? (
-              <TableRow><TableCell colSpan={6} align="center">No builds</TableCell></TableRow>
-            ) : builds.map(b => (
-              <TableRow key={b.id}>
-                <TableCell>{b.version || b.version_id}</TableCell>
-                <TableCell>{b.format}</TableCell>
-                <TableCell>
-                  <Chip label={b.status} size="small" color={
-                    b.status === 'completed' ? 'success' : b.status === 'running' ? 'primary' : b.status === 'failed' ? 'error' : 'default'
-                  } />
-                </TableCell>
-                <TableCell>
-                  {b.progress != null && <LinearProgress variant="determinate" value={b.progress} sx={{ width: 100 }} />}
-                </TableCell>
-                <TableCell>{b.created_at ? new Date(b.created_at).toLocaleDateString() : ''}</TableCell>
-                <TableCell>
-                  {(b.status === 'running' || b.status === 'pending') && (
-                    <Button size="small" color="error" onClick={() => cancelJob(b.job_id || b.id).catch(() => {})}>Cancel</Button>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
       <DirectoryBrowserModal
         open={dirBrowserOpen}
         onClose={() => setDirBrowserOpen(false)}
@@ -236,6 +166,171 @@ export default function BuildManager({ collectionId, collection }) {
         }}
         initialPath={buildImportDir}
       />
+
+      <RomDetailDialog
+        game={romDetailGame}
+        onClose={() => setRomDetailGame(null)}
+        collectionId={collectionId}
+      />
     </Box>
+  );
+}
+
+function MissingGamesTable({ missingReasons, collectionId, onRowClick }) {
+  return (
+    <Box sx={{ mt: 1.5 }}>
+      <Typography variant="caption" fontWeight={600} sx={{ mb: 0.5, display: 'block' }}>
+        Missing games ({missingReasons.length})
+      </Typography>
+      <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 300 }}>
+        <Table size="small" stickyHeader>
+          <TableHead>
+            <TableRow>
+              <TableCell>Game</TableCell>
+              <TableCell sx={{ width: 100 }}>Status</TableCell>
+              <TableCell sx={{ width: 180 }}>Details</TableCell>
+              <TableCell sx={{ width: 60 }}></TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {missingReasons.map(r => {
+              const fnf = typeof r.reason === 'string' && r.reason === 'FileNotFound';
+              const crc = r.reason?.CrcMismatch;
+              return (
+                <TableRow key={r.name} hover sx={{ cursor: 'pointer' }}
+                  onClick={() => onRowClick(r)}>
+                  <TableCell>
+                    <Typography variant="body2" fontFamily="monospace" fontSize={13}>{r.name}</Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Chip label={fnf ? 'Missing' : 'CRC Error'} size="small"
+                      color={fnf ? 'error' : 'warning'} />
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="caption" color="text.secondary">
+                      {fnf ? 'File not found in import' :
+                       crc ? `${crc.matched}/${crc.expected} ROMs verified` : ''}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Button size="small" variant="outlined"
+                      onClick={(e) => { e.stopPropagation(); onRowClick(r); }}>
+                      Details
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Box>
+  );
+}
+
+function MissingScanTable({ missingNames, collectionId }) {
+  return (
+    <Box sx={{ mt: 1.5 }}>
+      <Typography variant="caption" fontWeight={600} sx={{ mb: 0.5, display: 'block' }}>
+        Missing games ({missingNames.length})
+      </Typography>
+      <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 300 }}>
+        <Table size="small" stickyHeader>
+          <TableHead>
+            <TableRow>
+              <TableCell>Game</TableCell>
+              <TableCell sx={{ width: 100 }}>Status</TableCell>
+              <TableCell sx={{ width: 180 }}>Details</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {missingNames.map(name => (
+              <TableRow key={name}>
+                <TableCell>
+                  <Typography variant="body2" fontFamily="monospace" fontSize={13}>{name}</Typography>
+                </TableCell>
+                <TableCell>
+                  <Chip label="Missing" size="small" color="error" />
+                </TableCell>
+                <TableCell>
+                  <Typography variant="caption" color="text.secondary">File not found</Typography>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Box>
+  );
+}
+
+function RomDetailDialog({ game, onClose, collectionId }) {
+  if (!game) return null;
+
+  const details = game.rom_details || [];
+  const fnf = typeof game.reason === 'string' && game.reason === 'FileNotFound';
+  const crc = game.reason?.CrcMismatch;
+
+  return (
+    <Dialog open={!!game} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle sx={{ fontFamily: 'monospace', fontSize: 16 }}>
+        {game.name}
+        <Chip
+          label={fnf ? 'Missing' : `CRC Error (${crc?.matched || 0}/${crc?.expected || 0})`}
+          size="small" color={fnf ? 'error' : 'warning'}
+          sx={{ ml: 1.5 }}
+        />
+      </DialogTitle>
+      <DialogContent dividers>
+        {details.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            No ROM details available for this game.
+          </Typography>
+        ) : (
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>ROM File</TableCell>
+                  <TableCell>Expected CRC</TableCell>
+                  <TableCell>Actual CRC</TableCell>
+                  <TableCell>Status</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {details.filter(d => d.filename).map(d => (
+                  <TableRow key={d.filename}>
+                    <TableCell>
+                      <Typography variant="body2" fontFamily="monospace" fontSize={12}>{d.filename}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="caption" fontFamily="monospace">{d.expected_crc || '—'}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="caption" fontFamily="monospace" color={
+                        d.status === 'match' ? 'success.main' : d.actual_crc ? 'warning.main' : 'text.disabled'
+                      }>
+                        {d.actual_crc || '—'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={d.status}
+                        size="small"
+                        color={d.status === 'match' ? 'success' : 'default'}
+                        variant={d.status === 'match' ? 'filled' : 'outlined'}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Close</Button>
+      </DialogActions>
+    </Dialog>
   );
 }

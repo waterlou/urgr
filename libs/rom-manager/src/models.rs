@@ -143,9 +143,20 @@ pub struct VersionDiff {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RomDetail {
+    pub filename: String,
+    pub expected_crc: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actual_crc: Option<String>,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MissingGame {
     pub name: String,
     pub reason: MissingReason,
+    #[serde(default)]
+    pub rom_details: Vec<RomDetail>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
