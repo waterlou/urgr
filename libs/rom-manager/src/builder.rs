@@ -681,14 +681,18 @@ pub fn build_version(
 
         // Get expected ROMs for this game
         let ge = game_map.get(game_name);
-        let expected_roms = if let Some(g) = ge {
+        let expected_roms: Vec<RomFile> = if let Some(g) = ge {
             db.list_roms_for_game(g.id, latest.id)?
         } else {
             Vec::new()
         };
 
+        // Split-format support: compute game's own ROMs (merge_target & parent-inherited excluded)
+        // mirrors verify_game_zip's logic to avoid flagging inherited parent ROMs as errors
+        let check_roms = compute_game_roms(&expected_roms, ge.copied(), &all_games, db, latest.id)?;
+
         // Try to find matching ROM in import folder
-        if let Some(src_path) = index.find_match(game_name, &expected_roms) {
+        if let Some(src_path) = index.find_match(game_name, &check_roms) {
             if verbose { eprintln!("  {game_name}: added (copying from {})", src_path.display()); }
             if !dry_run {
                 info!("  Copying {} → {}", src_path.display(), dest.display());
@@ -707,7 +711,7 @@ pub fn build_version(
                 }
             }
             added += 1;
-        } else if let Some(src_path) = index.find_by_content(game_name, &expected_roms) {
+        } else if let Some(src_path) = index.find_by_content(game_name, &check_roms) {
             // Found by content hash (not by name) — rename already done by find_by_content
             if verbose { eprintln!("  {game_name}: matched by content hash (renamed from {})", src_path.display()); }
             if !dry_run {
@@ -724,7 +728,7 @@ pub fn build_version(
             }
             matched_by_hash += 1;
         } else {
-            let (reason, rom_details) = index.explain_missing(game_name, &expected_roms);
+            let (reason, rom_details) = index.explain_missing(game_name, &check_roms);
             if verbose {
                 match &reason {
                     MissingReason::FileNotFound => eprintln!("  {game_name}: file not found in import"),
@@ -853,15 +857,29 @@ pub fn build_version(
         }
     }
 
-    // ── Phase 7b: Preserve previously-missing games not reprocessed ──
+    // ── Phase 7b: Re-evaluate previously-missing games not in current diff ──
     {
-        let processed: std::collections::HashSet<String> = need_copy.iter().cloned().collect();
+        let processed: std::collections::HashSet<&str> = need_copy.iter().map(|s| s.as_str()).collect();
         let missing_names: std::collections::HashSet<String> = missing.iter().map(|m| m.name.clone()).collect();
         for old_mg in &status.missing_reasons {
-            if !processed.contains(&old_mg.name) && !missing_names.contains(&old_mg.name) {
-                missing.push(old_mg.clone());
-                info!("  {}: preserved as missing (not in current diff)", old_mg.name);
+            if processed.contains(old_mg.name.as_str()) || missing_names.contains(old_mg.name.as_str()) {
+                continue;
             }
+            let ge = game_map.get(&old_mg.name).copied();
+            let expected = ge.map(|g| db.list_roms_for_game(g.id, latest.id)).transpose()?.unwrap_or_default();
+            let check = compute_game_roms(&expected, ge, &all_games, db, latest.id)?;
+            if check.is_empty() {
+                info!("  {}: no own ROMs to check, removing from missing", old_mg.name);
+                continue;
+            }
+            if index.find_match(&old_mg.name, &check).is_some() {
+                info!("  {}: no longer missing (matched by re-evaluation)", old_mg.name);
+                continue;
+            }
+            let (reason, rom_details) = index.explain_missing(&old_mg.name, &check);
+            info!("  {}: still missing ({})", old_mg.name,
+                match &reason { MissingReason::FileNotFound => "FileNotFound", _ => "CrcMismatch" });
+            missing.push(MissingGame { name: old_mg.name.clone(), reason, rom_details });
         }
     }
 
@@ -900,6 +918,37 @@ pub fn build_version(
 }
 
 // ── Helpers ──
+
+/// Compute the set of ROMs that belong to a game (excluding merge_target and parent-inherited).
+/// Mirrors verify_game_zip logic for split-format support.
+fn compute_game_roms(
+    expected_roms: &[RomFile],
+    game: Option<&Game>,
+    all_games: &[Game],
+    db: &Database,
+    version_id: i64,
+) -> Result<Vec<RomFile>> {
+    let mut roms: Vec<&RomFile> = expected_roms.iter()
+        .filter(|r| r.merge_target.is_none()).collect();
+    if let Some(g) = game {
+        if let Some(pid) = g.parent_game_id {
+            if let Some(parent) = all_games.iter().find(|pg| pg.id == pid) {
+                if let Ok(parent_roms) = db.list_roms_for_game(parent.id, version_id) {
+                    let parent_crcs: std::collections::HashSet<&str> = parent_roms.iter()
+                        .filter_map(|r| r.crc32.as_deref())
+                        .filter(|c| !c.is_empty())
+                        .collect();
+                    roms.retain(|r| !r.crc32.as_deref().map_or(false, |c| parent_crcs.contains(c)));
+                }
+            }
+        }
+    }
+    if roms.is_empty() {
+        Ok(expected_roms.iter().filter(|r| r.merge_target.is_none()).cloned().collect())
+    } else {
+        Ok(roms.into_iter().cloned().collect())
+    }
+}
 
 fn read_status(path: &Path) -> Option<BuildStatus> {
     let data = std::fs::read_to_string(path).ok()?;
