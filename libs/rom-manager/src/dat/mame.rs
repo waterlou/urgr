@@ -7,6 +7,15 @@ use quick_xml::Reader;
 use crate::error::{Error, Result};
 use crate::models::{ParsedGame, ParsedRom, ParseStats};
 
+/// Helper: parse a "yes"/"no" MAME attribute into an Option<bool>.
+fn parse_bool_attr(val: Option<&str>) -> Option<bool> {
+    match val {
+        Some("yes") => Some(true),
+        Some("no") => Some(false),
+        _ => None,
+    }
+}
+
 pub fn parse_mame_dat<P: AsRef<Path>>(path: P) -> Result<(Vec<ParsedGame>, ParseStats)> {
     let file = std::fs::File::open(path.as_ref())?;
     let reader = BufReader::new(file);
@@ -23,7 +32,9 @@ pub fn parse_mame_reader<R: BufRead>(reader: R) -> Result<(Vec<ParsedGame>, Pars
 
     loop {
         match xml.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"machine" => {
+            Ok(Event::Start(ref e))
+                if e.name().as_ref() == b"machine" || e.name().as_ref() == b"game" =>
+            {
                 let name = e
                     .attributes()
                     .find(|a| a.as_ref().is_ok_and(|a| a.key.as_ref() == b"name"))
@@ -43,7 +54,30 @@ pub fn parse_mame_reader<R: BufRead>(reader: R) -> Result<(Vec<ParsedGame>, Pars
                     .and_then(|a| a.ok())
                     .and_then(|a| a.unescape_value().ok());
 
-                match parse_machine(&mut xml, &name, cloneof.as_deref(), romof.as_deref()) {
+                let isbios = e
+                    .attributes()
+                    .any(|a| a.as_ref().is_ok_and(|a| a.key.as_ref() == b"isbios" && a.unescape_value().is_ok_and(|v| v == "yes")));
+
+                let isdevice = e
+                    .attributes()
+                    .any(|a| a.as_ref().is_ok_and(|a| a.key.as_ref() == b"isdevice" && a.unescape_value().is_ok_and(|v| v == "yes")));
+
+                let runnable = e
+                    .attributes()
+                    .find(|a| a.as_ref().is_ok_and(|a| a.key.as_ref() == b"runnable"))
+                    .and_then(|a| a.ok())
+                    .and_then(|a| a.unescape_value().ok())
+                    .and_then(|v| parse_bool_attr(Some(&v)));
+
+                match parse_machine(
+                    &mut xml,
+                    &name,
+                    cloneof.as_deref(),
+                    romof.as_deref(),
+                    isbios,
+                    isdevice,
+                    runnable,
+                ) {
                     Ok(game) => {
                         games.push(game);
                     }
@@ -76,11 +110,16 @@ fn parse_machine<R: BufRead>(
     name: &str,
     cloneof: Option<&str>,
     romof: Option<&str>,
+    isbios: bool,
+    isdevice: bool,
+    runnable: Option<bool>,
 ) -> Result<ParsedGame> {
     let mut description = String::new();
     let mut year: Option<String> = None;
     let mut manufacturer: Option<String> = None;
     let mut roms = Vec::new();
+    let mut driver_status: Option<String> = None;
+    let mut driver_emulation: Option<String> = None;
     let mut depth = 1;
 
     loop {
@@ -114,6 +153,18 @@ fn parse_machine<R: BufRead>(
                 b"rom" => {
                     parse_rom_attrs(e, &mut roms);
                 }
+                b"driver" => {
+                    for attr in e.attributes() {
+                        if let Ok(a) = attr {
+                            let val = a.unescape_value().unwrap_or_default().to_string();
+                            match a.key.as_ref() {
+                                b"status" => driver_status = Some(val),
+                                b"emulation" => driver_emulation = Some(val),
+                                _ => {}
+                            }
+                        }
+                    }
+                }
                 _ => {}
             },
             Ok(Event::End(ref _e)) => {
@@ -136,6 +187,11 @@ fn parse_machine<R: BufRead>(
         cloneof: cloneof.map(|s| s.to_string()),
         romof: romof.map(|s| s.to_string()),
         platform: String::new(),
+        isbios,
+        isdevice,
+        runnable,
+        driver_status,
+        driver_emulation,
         roms,
     })
 }
@@ -274,6 +330,11 @@ mod tests {
         assert_eq!(games[0].year.as_deref(), Some("1991"));
         assert_eq!(games[0].manufacturer.as_deref(), Some("Capcom"));
         assert!(games[0].cloneof.is_none());
+        assert!(!games[0].isbios);
+        assert!(!games[0].isdevice);
+        assert!(games[0].runnable.is_none());
+        assert!(games[0].driver_status.is_none());
+        assert!(games[0].driver_emulation.is_none());
         assert_eq!(games[0].roms[0].filename, "sf2.03");
         assert_eq!(games[0].roms[0].size, Some(524288));
         assert_eq!(games[0].roms[0].crc32.as_deref(), Some("3F47A0D8"));
@@ -366,4 +427,91 @@ mod tests {
         assert_eq!(stats.total_games, 0);
         assert!(stats.errors.is_empty());
     }
+
+    #[test]
+    fn test_mame_machine_attributes() {
+        let xml = r#"<?xml version="1.0"?>
+<mame>
+  <machine name="nes" sourcefile="src/mess/drivetime/nes.cpp" isdevice="no" isbios="no" runnable="yes">
+    <description>Nintendo Entertainment System / Famicom</description>
+    <year>1983</year>
+    <manufacturer>Nintendo</manufacturer>
+    <driver status="good" emulation="good"/>
+    <softwarelist name="nes"/>
+    <softwarelist name="famicom"/>
+    <rom name="nes.rom" size="1024" crc="12345678"/>
+  </machine>
+</mame>"#;
+
+        let (games, _) = parse(xml);
+        let g = &games[0];
+        assert_eq!(g.name, "nes");
+        assert!(!g.isbios);
+        assert!(!g.isdevice);
+        assert_eq!(g.runnable, Some(true));
+        assert_eq!(g.driver_status.as_deref(), Some("good"));
+        assert_eq!(g.driver_emulation.as_deref(), Some("good"));
+    }
+
+    #[test]
+    fn test_mame_bios_device() {
+        let xml = r#"<?xml version="1.0"?>
+<mame>
+  <machine name="neogeo" sourcefile="src/mame/drivers/neogeo.cpp" isdevice="no" isbios="yes" runnable="yes">
+    <description>Neo Geo BIOS</description>
+    <year>1990</year>
+    <manufacturer>SNK</manufacturer>
+  </machine>
+  <machine name="some_device" isdevice="yes" runnable="no">
+    <description>A Device</description>
+  </machine>
+</mame>"#;
+
+        let (games, _) = parse(xml);
+        assert!(games[0].isbios);
+        assert!(!games[0].isdevice);
+        assert_eq!(games[0].runnable, Some(true));
+        assert!(games[1].isdevice);
+        assert_eq!(games[1].runnable, Some(false));
+        assert!(!games[1].isbios);
+    }
+
+    #[test]
+    fn test_mame_driver_emulation() {
+        let xml = r#"<?xml version="1.0"?>
+<mame>
+  <machine name="imperfect" isdevice="no" runnable="yes">
+    <description>Imperfect Driver</description>
+    <driver status="imperfect" emulation="preliminary"/>
+  </machine>
+  <machine name="preliminary" isdevice="no" runnable="yes">
+    <description>Preliminary Driver</description>
+    <driver status="preliminary" emulation="good"/>
+  </machine>
+</mame>"#;
+
+        let (games, _) = parse(xml);
+        assert_eq!(games[0].driver_status.as_deref(), Some("imperfect"));
+        assert_eq!(games[0].driver_emulation.as_deref(), Some("preliminary"));
+        assert_eq!(games[1].driver_status.as_deref(), Some("preliminary"));
+        assert_eq!(games[1].driver_emulation.as_deref(), Some("good"));
+    }
+
+    #[test]
+    fn test_mame_game_tag_compatibility() {
+        let xml = r#"<?xml version="1.0"?>
+<mame>
+  <game name="old_game" isbios="no" runnable="yes">
+    <description>Old Style Game</description>
+    <driver status="good" emulation="good"/>
+  </game>
+</mame>"#;
+
+        let (games, _) = parse(xml);
+        assert_eq!(games[0].name, "old_game");
+        assert!(!games[0].isbios);
+        assert_eq!(games[0].runnable, Some(true));
+        assert_eq!(games[0].driver_status.as_deref(), Some("good"));
+    }
+
 }

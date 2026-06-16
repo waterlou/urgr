@@ -127,6 +127,11 @@ pub fn parse_offlinelist_reader<R: BufRead>(reader: R) -> Result<(Vec<ParsedGame
                             cloneof: None,
                             romof: None,
                             platform: system.clone(),
+                            isbios: false,
+                            isdevice: false,
+                            runnable: Some(true),
+                            driver_status: None,
+                            driver_emulation: None,
                             roms: std::mem::take(&mut current_roms),
                         };
                         games.push(game);

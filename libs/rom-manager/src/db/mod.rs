@@ -18,6 +18,7 @@ impl Database {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         conn.execute_batch(schema::CREATE_TABLES)?;
         conn.execute_batch(schema::INDEXES)?;
+        Self::run_migrations(&conn);
         Ok(Self { conn })
     }
 
@@ -26,7 +27,21 @@ impl Database {
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
         conn.execute_batch(schema::CREATE_TABLES)?;
         conn.execute_batch(schema::INDEXES)?;
+        Self::run_migrations(&conn);
         Ok(Self { conn })
+    }
+
+    /// Apply schema migrations, skipping errors for already-existing columns.
+    fn run_migrations(conn: &Connection) {
+        for stmt in schema::MIGRATIONS {
+            if let Err(e) = conn.execute_batch(stmt) {
+                // Ignore "duplicate column" errors from ALTER TABLE
+                let msg = e.to_string();
+                if !msg.contains("duplicate column") {
+                    eprintln!("Migration warning: {}", msg);
+                }
+            }
+        }
     }
 
     // ── Set Versions ──
@@ -176,19 +191,32 @@ impl Database {
     // ── Games ──
 
     pub fn insert_game(&self, game: &ParsedGame) -> Result<i64> {
-        // RETURNING id gives us the rowid of the affected row whether it was inserted
-        // (new row) or updated (ON CONFLICT path). This is the only reliable way to get
-        // the id after a UPSERT — last_insert_rowid() returns the most recent insert
-        // from any table on the connection, which is wrong on the conflict path.
         let id: i64 = self.conn.query_row(
-            "INSERT INTO games (name, description, year, manufacturer, platform) VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO games (name, description, year, manufacturer, platform, isbios, isdevice, runnable, driver_status, driver_emulation)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(name) DO UPDATE SET
                description = excluded.description,
                year = excluded.year,
                manufacturer = excluded.manufacturer,
-               platform = CASE WHEN excluded.platform != '' THEN excluded.platform ELSE platform END
+               platform = CASE WHEN excluded.platform != '' THEN excluded.platform ELSE platform END,
+               isbios = excluded.isbios,
+               isdevice = excluded.isdevice,
+               runnable = COALESCE(excluded.runnable, runnable),
+               driver_status = COALESCE(excluded.driver_status, driver_status),
+               driver_emulation = COALESCE(excluded.driver_emulation, driver_emulation)
              RETURNING id",
-            params![game.name, game.description, game.year, game.manufacturer, game.platform],
+            params![
+                game.name,
+                game.description,
+                game.year,
+                game.manufacturer,
+                game.platform,
+                game.isbios,
+                game.isdevice,
+                game.runnable,
+                game.driver_status,
+                game.driver_emulation,
+            ],
             |r| r.get(0),
         )?;
         Ok(id)
@@ -245,7 +273,9 @@ impl Database {
 
     pub fn list_games(&self, version_id: i64) -> Result<Vec<Game>> {
         let mut stmt = self.conn.prepare(
-            "SELECT g.id, g.name, g.description, g.year, g.manufacturer, g.platform, g.parent_game_id, g.synopsis
+            "SELECT g.id, g.name, g.description, g.year, g.manufacturer, g.platform,
+                    g.parent_game_id, g.synopsis, g.isbios, g.isdevice,
+                    g.runnable, g.driver_status, g.driver_emulation
              FROM games g
              JOIN game_rom_sets grs ON grs.game_id = g.id
              WHERE grs.version_id = ?1
@@ -261,6 +291,11 @@ impl Database {
                 platform: r.get(5)?,
                 parent_game_id: r.get(6)?,
                 synopsis: r.get(7)?,
+                isbios: r.get(8)?,
+                isdevice: r.get(9)?,
+                runnable: r.get(10)?,
+                driver_status: r.get(11)?,
+                driver_emulation: r.get(12)?,
             })
         })?;
         let mut games = Vec::new();
@@ -286,7 +321,9 @@ impl Database {
 
     pub fn get_game(&self, game_id: i64) -> Result<Option<Game>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, description, year, manufacturer, platform, parent_game_id, synopsis
+            "SELECT id, name, description, year, manufacturer, platform,
+                    parent_game_id, synopsis, isbios, isdevice,
+                    runnable, driver_status, driver_emulation
              FROM games WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![game_id], |r| {
@@ -299,6 +336,11 @@ impl Database {
                 platform: r.get(5)?,
                 parent_game_id: r.get(6)?,
                 synopsis: r.get(7)?,
+                isbios: r.get(8)?,
+                isdevice: r.get(9)?,
+                runnable: r.get(10)?,
+                driver_status: r.get(11)?,
+                driver_emulation: r.get(12)?,
             })
         })?;
         match rows.next() {
@@ -351,6 +393,17 @@ impl Database {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    pub fn get_romof(&self, game_id: i64, version_id: i64) -> Result<Option<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT romof FROM game_rom_sets WHERE game_id = ?1 AND version_id = ?2",
+        )?;
+        let mut rows = stmt.query_map(params![game_id, version_id], |r| r.get::<_, Option<String>>(0))?;
+        match rows.next() {
+            Some(row) => Ok(row?),
+            None => Ok(None),
+        }
     }
 
     // ── ROM queries ──
@@ -586,6 +639,11 @@ mod tests {
             cloneof: None,
             romof: None,
             platform: String::new(),
+            isbios: false,
+            isdevice: false,
+            runnable: Some(true),
+            driver_status: None,
+            driver_emulation: None,
             roms: Vec::new(),
         }
     }
@@ -765,6 +823,11 @@ mod tests {
             cloneof: None,
             romof: None,
             platform: String::new(),
+            isbios: false,
+            isdevice: false,
+            runnable: Some(true),
+            driver_status: None,
+            driver_emulation: None,
             roms: Vec::new(),
         }).collect()
     }
@@ -876,6 +939,11 @@ mod tests {
             cloneof: Some("sf2".to_string()),
             romof: None,
             platform: String::new(),
+            isbios: false,
+            isdevice: false,
+            runnable: Some(true),
+            driver_status: None,
+            driver_emulation: None,
             roms: vec![],
         };
         let parent = ParsedGame {
@@ -886,6 +954,11 @@ mod tests {
             cloneof: None,
             romof: None,
             platform: String::new(),
+            isbios: false,
+            isdevice: false,
+            runnable: Some(true),
+            driver_status: None,
+            driver_emulation: None,
             roms: vec![],
         };
 

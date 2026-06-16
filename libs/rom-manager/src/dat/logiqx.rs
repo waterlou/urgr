@@ -43,7 +43,11 @@ pub fn parse_logiqx_reader<R: BufRead>(reader: R) -> Result<(Vec<ParsedGame>, Pa
                     .and_then(|a| a.ok())
                     .and_then(|a| a.unescape_value().ok());
 
-                match parse_game(&mut xml, &name, cloneof.as_deref(), romof.as_deref()) {
+                let isbios = e
+                    .attributes()
+                    .any(|a| a.as_ref().is_ok_and(|a| a.key.as_ref() == b"isbios" && a.unescape_value().is_ok_and(|v| v == "yes")));
+
+                match parse_game(&mut xml, &name, cloneof.as_deref(), romof.as_deref(), isbios) {
                     Ok(parsed_game) => {
                         games.push(parsed_game);
                     }
@@ -76,6 +80,7 @@ fn parse_game<R: BufRead>(
     name: &str,
     cloneof: Option<&str>,
     romof: Option<&str>,
+    isbios: bool,
 ) -> Result<ParsedGame> {
     let mut description = String::new();
     let mut year: Option<String> = None;
@@ -136,6 +141,11 @@ fn parse_game<R: BufRead>(
         cloneof: cloneof.map(|s| s.to_string()),
         romof: romof.map(|s| s.to_string()),
         platform: String::new(),
+        isbios,
+        isdevice: false,
+        runnable: Some(true),
+        driver_status: None,
+        driver_emulation: None,
         roms,
     })
 }

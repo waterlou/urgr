@@ -111,6 +111,11 @@ mod tests {
             cloneof: None,
             romof: None,
             platform: String::new(),
+            isbios: false,
+            isdevice: false,
+            runnable: Some(true),
+            driver_status: None,
+            driver_emulation: None,
             roms: Vec::new(),
         };
         let gid = db.insert_game(&parsed).unwrap();

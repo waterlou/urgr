@@ -2,6 +2,7 @@ mod clrmamepro;
 mod logiqx;
 mod mame;
 mod offlinelist;
+pub mod write;
 
 use std::io::{BufRead, BufReader};
 use std::path::Path;

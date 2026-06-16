@@ -148,7 +148,11 @@ export function getGames({ limit, offset, sort, order, q, collection_id, version
   return fetchJson(`/games?${p.toString()}`);
 }
 
-export function getGame(id) { return fetchJson(`/games/${id}`); }
+export function getGame(id, versionId) {
+  const params = versionId ? `?version_id=${versionId}` : '';
+  return fetchJson(`/games/${id}${params}`);
+}
+
 export function updateGameRating(id, data) {
   return fetchWithBody(`/games/${id}/rating`, 'PUT', data);
 }
@@ -157,7 +161,10 @@ export function screenshotUrl(id) { return `${BASE}/games/${id}/media?type=ingam
 export function playUrl(gameId) { return `${BASE}/games/${gameId}/play`; }
 export function recordPlay(gameId) { return fetchWithBody(`/games/${gameId}/play`, 'POST', {}); }
 export function getRecentlyPlayed() { return fetchJson('/games/recently-played'); }
-export function getGameAvailability(id) { return fetchJson(`/games/${id}/availability`); }
+export function getGameAvailability(id, versionId) {
+  const params = versionId ? `?version_id=${versionId}` : '';
+  return fetchJson(`/games/${id}/availability${params}`);
+}
 
 // ==============================
 // Versions

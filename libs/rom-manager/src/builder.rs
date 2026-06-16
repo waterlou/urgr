@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::io::Write;
 
 use serde::{Deserialize, Serialize};
+use crate::models::MergeMode;
 use tracing::info;
 
 use crate::db::Database;
@@ -60,6 +61,7 @@ pub struct BuildResult {
     pub reused: usize,
     pub missing: usize,
     pub cleaned: usize,
+    pub matched_by_hash: usize,
     pub missing_games: Vec<String>,
     pub missing_reasons: Vec<MissingGame>,
     pub mode: String,
@@ -73,6 +75,8 @@ struct ImportIndex {
     zip_crcs: HashMap<String, std::collections::HashSet<String>>,
     /// Individual non-zip files indexed by CRC32: CRC → file path
     loose_files: HashMap<String, PathBuf>,
+    /// Reverse index: CRC32 → set of import zip stems that contain a file with that CRC
+    crc_to_zips: HashMap<String, Vec<String>>,
 }
 
 impl ImportIndex {
@@ -80,8 +84,9 @@ impl ImportIndex {
         let mut name_to_path = HashMap::new();
         let mut zip_crcs = HashMap::new();
         let mut loose_files = HashMap::new();
+        let mut crc_to_zips: HashMap<String, Vec<String>> = HashMap::new();
         if !dir.is_dir() {
-            return Ok(Self { name_to_path, zip_crcs, loose_files });
+            return Ok(Self { name_to_path, zip_crcs, loose_files, crc_to_zips });
         }
         for entry in walk_files(dir)? {
             let ext = entry.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -90,6 +95,9 @@ impl ImportIndex {
                 name_to_path.entry(stem.clone()).or_insert_with(|| entry.clone());
                 let crcs = compute_zip_crcs(&entry);
                 if !crcs.is_empty() {
+                    for crc in &crcs {
+                        crc_to_zips.entry(crc.clone()).or_default().push(stem.clone());
+                    }
                     zip_crcs.entry(stem).or_insert(crcs);
                 }
             } else if !ext.is_empty() && ext != "chd" {
@@ -103,7 +111,7 @@ impl ImportIndex {
             }
         }
         info!("Import index: {} zips, {} loose files", name_to_path.len(), loose_files.len());
-        Ok(Self { name_to_path, zip_crcs, loose_files })
+        Ok(Self { name_to_path, zip_crcs, loose_files, crc_to_zips })
     }
 
     fn find_match(&self, game_name: &str, expected_roms: &[RomFile]) -> Option<PathBuf> {
@@ -159,6 +167,45 @@ impl ImportIndex {
             .filter(|ec| zip_crc_set.contains(*ec))
             .count();
         MissingReason::CrcMismatch { matched, expected: expected_count }
+    }
+
+    /// Try to find a matching import zip by content (CRC32 hashes).
+    /// Falls back when name-based match fails — looks up expected CRCs in the
+    /// reverse CRC index, finds the zip stem that contains all expected CRCs,
+    /// then renames the import zip to `<game_name>.zip` so future runs find it.
+    fn find_by_content(&self, game_name: &str, expected_roms: &[RomFile]) -> Option<PathBuf> {
+        let expected_crcs: Vec<&str> = expected_roms.iter()
+            .filter(|r| r.merge_target.is_none())
+            .filter_map(|r| r.crc32.as_deref())
+            .filter(|c| !c.is_empty())
+            .collect();
+        if expected_crcs.is_empty() {
+            return None;
+        }
+
+        // Start with candidates that contain the first expected CRC
+        let first_crc = expected_crcs[0];
+        let candidates = self.crc_to_zips.get(first_crc)?;
+
+        // Filter: find a zip stem that contains ALL expected CRCs
+        let matched_stem = candidates.iter().find(|stem| {
+            self.zip_crcs.get(*stem).map_or(false, |zip_set| {
+                expected_crcs.iter().all(|c| zip_set.contains(*c))
+            })
+        })?;
+
+        let src_path = self.name_to_path.get(matched_stem)?;
+
+        // Rename the import zip to the expected game name so future runs
+        // find it by name. If rename fails (e.g. cross-device), fall through
+        // with the original path — the build still succeeds.
+        let new_path = src_path.with_file_name(format!("{game_name}.zip"));
+        if new_path != *src_path {
+            let _ = std::fs::rename(src_path, &new_path);
+            Some(new_path)
+        } else {
+            Some(src_path.clone())
+        }
     }
 }
 
@@ -278,14 +325,6 @@ pub fn build_version(
     cancelled: &AtomicBool,
     verbose: bool,
 ) -> Result<BuildResult> {
-    fn check_cancelled(cancelled: &AtomicBool) -> Result<()> {
-        if cancelled.load(Ordering::Relaxed) {
-            Err(Error::Source("Build cancelled".into()))
-        } else {
-            Ok(())
-        }
-    }
-
     #[allow(clippy::too_many_arguments)]
     fn progress(
         on: &dyn Fn(&BuildProgress),
@@ -526,6 +565,7 @@ pub fn build_version(
     let mut added = 0usize;
     let mut exists = 0usize;
     let mut reused = 0usize;
+    let mut matched_by_hash = 0usize;
     let mut missing: Vec<MissingGame> = Vec::new();
 
     for game_name in &need_copy {
@@ -590,6 +630,22 @@ pub fn build_version(
                 }
             }
             added += 1;
+        } else if let Some(src_path) = index.find_by_content(game_name, &expected_roms) {
+            // Found by content hash (not by name) — rename already done by find_by_content
+            if verbose { eprintln!("  {game_name}: matched by content hash (renamed from {})", src_path.display()); }
+            if !dry_run {
+                std::fs::copy(&src_path, &dest)?;
+                let chds = find_chd_files(&src_path);
+                if !chds.is_empty() {
+                    let chd_dest_base = version_dir.join(CHD_DIR_NAME).join(game_name);
+                    for chd_src in &chds {
+                        let chd_dest = chd_dest_base.join(chd_src.file_name().unwrap_or_default());
+                        std::fs::create_dir_all(chd_dest.parent().unwrap())?;
+                        std::fs::copy(chd_src, &chd_dest)?;
+                    }
+                }
+            }
+            matched_by_hash += 1;
         } else {
             let reason = index.explain_missing(game_name, &expected_roms);
             if verbose {
@@ -741,6 +797,7 @@ pub fn build_version(
         reused,
         missing: missing.len(),
         cleaned: status.cleaned,
+        matched_by_hash,
         missing_games: missing.iter().map(|m| m.name.clone()).collect(),
         missing_reasons: missing,
         mode: status.mode.clone(),
@@ -979,6 +1036,258 @@ fn verify_game_zip(db: &Database, version_id: i64, game_name: &str, zip_path: &P
     Ok(verify_zip_contains(zip_path, &expected))
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportResult {
+    pub version: String,
+    pub format: String,
+    pub total_games: usize,
+    pub exported: usize,
+    pub skipped: usize,
+    pub merged: usize,
+}
+
+fn check_cancelled(cancelled: &AtomicBool) -> Result<()> {
+    if cancelled.load(Ordering::Relaxed) {
+        Err(Error::Source("Build cancelled".into()))
+    } else {
+        Ok(())
+    }
+}
+
+/// Export a built version (split format) to the requested format.
+///
+/// `input_dir` is the split build output (e.g. `<collection>/<version>/roms/`).
+/// `output_dir` receives the exported zips in the requested layout.
+pub fn export_version(
+    db: &Database,
+    version_id: i64,
+    input_dir: &Path,
+    output_dir: &Path,
+    format: MergeMode,
+    on_progress: &dyn Fn(&BuildProgress),
+    cancelled: &AtomicBool,
+) -> Result<ExportResult> {
+    let version = db.get_version(version_id)?
+        .ok_or_else(|| Error::Source(format!("Version {version_id} not found")))?;
+
+    let games = db.list_games(version_id)?;
+    // Index available zips in the input directory
+    let mut input_zips: HashMap<String, PathBuf> = HashMap::new();
+    if input_dir.is_dir() {
+        for entry in walk_files(input_dir)? {
+            if entry.extension().and_then(|e| e.to_str()) == Some("zip") {
+                let stem = entry.file_stem().unwrap_or_default().to_string_lossy().to_string();
+                input_zips.entry(stem).or_insert(entry);
+            }
+        }
+    }
+
+    let total = games.len();
+    let mut exported = 0usize;
+    let mut skipped = 0usize;
+    let mut merged = 0usize;
+
+    match format {
+        MergeMode::Split => {
+            // Passthrough: copy all zips preserving directory structure
+            if input_dir.is_dir() {
+                for entry in walk_files(input_dir)? {
+                    if cancelled.load(Ordering::Relaxed) {
+                        return Err(Error::Source("Export cancelled".into()));
+                    }
+                    let rel = entry.strip_prefix(input_dir).unwrap_or(&entry);
+                    let dest = output_dir.join(rel);
+                    std::fs::create_dir_all(dest.parent().unwrap())?;
+                    std::fs::copy(&entry, &dest)?;
+                    exported += 1;
+                }
+            }
+        }
+
+        MergeMode::NonMerged => {
+            for game in &games {
+                if cancelled.load(Ordering::Relaxed) {
+                    return Err(Error::Source("Export cancelled".into()));
+                }
+                // Walk parent chain: game → parent → grandparent → ... → root
+                let mut ancestors = Vec::new();
+                let mut current = Some(game);
+                while let Some(g) = current {
+                    ancestors.push(g);
+                    current = g.parent_game_id
+                        .and_then(|pid| games.iter().find(|c| c.id == pid));
+                }
+
+                let zips: Vec<PathBuf> = ancestors.iter()
+                    .filter_map(|g| input_zips.get(&g.name))
+                    .cloned()
+                    .collect();
+
+                if zips.is_empty() {
+                    skipped += 1;
+                    continue;
+                }
+
+                let platform = if game.platform.is_empty() { None } else { Some(game.platform.as_str()) };
+                let dest_dir = platform.map_or_else(|| output_dir.to_path_buf(), |p| output_dir.join(p));
+                let dest = dest_dir.join(format!("{}.zip", game.name));
+                std::fs::create_dir_all(&dest_dir)?;
+
+                if zips.len() == 1 {
+                    std::fs::copy(&zips[0], &dest)?;
+                } else {
+                    merge_zips(&zips, &dest)?;
+                    merged += 1;
+                }
+                exported += 1;
+
+                let pct = (exported * 100 / total.max(1)) as u32;
+                on_progress(&BuildProgress {
+                    phase: "exporting".into(),
+                    pct,
+                    msg: format!("Exporting {exported}/{total}"),
+                    matched: exported,
+                    missing: skipped,
+                    total,
+                });
+            }
+        }
+
+        MergeMode::Merged => {
+            // Build children map
+            let mut children: HashMap<i64, Vec<i64>> = HashMap::new();
+            for game in &games {
+                if let Some(pid) = game.parent_game_id {
+                    if games.iter().any(|g| g.id == pid) {
+                        children.entry(pid).or_default().push(game.id);
+                    }
+                }
+            }
+
+            // Root parents: games whose parent is None or not in this version
+            let roots: Vec<&Game> = games.iter()
+                .filter(|g| g.parent_game_id.map_or(true, |pid| !games.iter().any(|c| c.id == pid)))
+                .collect();
+
+            let mut processed: HashSet<i64> = HashSet::new();
+            for root in &roots {
+                check_cancelled(cancelled)?;
+
+                // DFS to collect all family members
+                let mut family = Vec::new();
+                let mut stack = vec![root.id];
+                while let Some(gid) = stack.pop() {
+                    if !processed.insert(gid) { continue; }
+                    family.push(gid);
+                    if let Some(kids) = children.get(&gid) {
+                        stack.extend(kids);
+                    }
+                }
+
+                let zips: Vec<PathBuf> = family.iter()
+                    .filter_map(|&gid| {
+                        let name = games.iter().find(|g| g.id == gid)?.name.as_str();
+                        input_zips.get(name)
+                    })
+                    .cloned()
+                    .collect();
+
+                if zips.is_empty() {
+                    skipped += family.len();
+                    continue;
+                }
+
+                let platform = if root.platform.is_empty() { None } else { Some(root.platform.as_str()) };
+                let dest_dir = platform.map_or_else(|| output_dir.to_path_buf(), |p| output_dir.join(p));
+                let dest = dest_dir.join(format!("{}.zip", root.name));
+                std::fs::create_dir_all(&dest_dir)?;
+
+                merge_zips(&zips, &dest)?;
+                merged += 1;
+                exported += family.len();
+
+                let pct = (exported * 100 / total.max(1)) as u32;
+                on_progress(&BuildProgress {
+                    phase: "exporting".into(),
+                    pct,
+                    msg: format!("Exporting {exported}/{total}"),
+                    matched: exported,
+                    missing: skipped,
+                    total,
+                });
+            }
+
+            // Handle orphans not reached by DFS (no parent, no children)
+            for game in &games {
+                if processed.contains(&game.id) { continue; }
+                processed.insert(game.id);
+
+                let zip = match input_zips.get(&game.name) {
+                    Some(z) => z,
+                    None => { skipped += 1; continue; }
+                };
+
+                let platform = if game.platform.is_empty() { None } else { Some(game.platform.as_str()) };
+                let dest_dir = platform.map_or_else(|| output_dir.to_path_buf(), |p| output_dir.join(p));
+                let dest = dest_dir.join(format!("{}.zip", game.name));
+                std::fs::create_dir_all(&dest_dir)?;
+                std::fs::copy(zip, &dest)?;
+                exported += 1;
+            }
+        }
+    }
+
+    Ok(ExportResult {
+        version: version.version,
+        format: format.to_string(),
+        total_games: total,
+        exported,
+        skipped,
+        merged,
+    })
+}
+
+/// Merge multiple zip files into one destination zip.
+/// Entries from later sources override earlier ones when filenames collide.
+fn merge_zips(sources: &[PathBuf], dest: &Path) -> Result<()> {
+    let mut all_entries: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    for src in sources {
+        let file = std::fs::File::open(src)
+            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, format!("{src:?}: {e}"))))?;
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i)
+                .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+            let name = entry.name().to_string();
+            if name.ends_with('/') || seen.contains(&name) { continue; }
+            seen.insert(name.clone());
+            let mut data = Vec::new();
+            entry.read_to_end(&mut data)
+                .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+            all_entries.push((name, data));
+        }
+    }
+
+    let out_file = std::fs::File::create(dest)?;
+    let mut zipw = zip::ZipWriter::new(out_file);
+    let opts = zip::write::FileOptions::<()>::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    for (name, data) in &all_entries {
+        zipw.start_file(name, opts.clone())
+            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        zipw.write_all(data)?;
+    }
+
+    zipw.finish()
+        .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1000,6 +1309,11 @@ mod tests {
             cloneof: None,
             romof: None,
             platform: String::new(),
+            isbios: false,
+            isdevice: false,
+            runnable: Some(true),
+            driver_status: None,
+            driver_emulation: None,
             roms: Vec::new(),
         };
         let gid = db.insert_game(&parsed).unwrap();

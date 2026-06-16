@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use rom_manager::builder::build_version;
-use rom_manager::models::MissingGame;
+use rom_manager::builder::{build_version, export_version};
+use rom_manager::dat::write::{write_logiqx_dat, ExportGame, ExportRom};
+use rom_manager::models::{MergeMode, MissingGame};
 use rom_manager::scanner::{scan_directory, ScanMatch};
 use rom_manager::verifier::{verify_version, GameStatus};
 use rom_manager::Database;
@@ -86,6 +87,7 @@ struct BuildOutput {
     reused: usize,
     missing: usize,
     cleaned: usize,
+    matched_by_hash: usize,
     missing_games: Vec<String>,
     missing_reasons: Vec<MissingGame>,
 }
@@ -132,6 +134,8 @@ fn print_usage() {
     eprintln!("  scan <version-id> <dir>");
     eprintln!("  verify <version-id> <dir> [--fallback <id>]");
     eprintln!("  diff <version-id-a> <version-id-b>");
+    eprintln!("  fixdat <version-id-a> <version-id-b> --output <file>");
+    eprintln!("  export <version-id> <output-dir> --format split|merged|non-merged [--input-dir <dir>] [--progress]");
     eprintln!("  build <source> <import-dir> [--update] [--dry-run] [--version-id <id>] [--base-dir <dir>] [--collection-dir <dir>] [--progress] [--verbose]");
     eprintln!();
     eprintln!("  Build automatically detects the latest version for <source> from the");
@@ -177,6 +181,8 @@ fn main() -> ExitCode {
         "scan" => cmd_scan(&clean[1..], json),
         "verify" => cmd_verify(&clean[1..], json),
         "diff" => cmd_diff(&clean[1..], json),
+        "fixdat" => cmd_fixdat(&clean[1..], json),
+        "export" => cmd_export(&clean[1..], json),
         "build" => cmd_build(&clean[1..], json),
         _ => {
             eprintln!("Unknown command: {}", clean[1]);
@@ -425,6 +431,210 @@ fn cmd_diff(args: &[String], json: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn cmd_fixdat(args: &[String], json: bool) -> ExitCode {
+    if args.len() < 3 {
+        eprintln!("Usage: build-cli fixdat <version-id-a> <version-id-b> --output <file>");
+        return ExitCode::FAILURE;
+    }
+
+    let va: i64 = match args[1].parse() {
+        Ok(id) => id,
+        Err(_) => { eprintln!("Invalid version ID: {}", args[1]); return ExitCode::FAILURE; }
+    };
+    let vb: i64 = match args[2].parse() {
+        Ok(id) => id,
+        Err(_) => { eprintln!("Invalid version ID: {}", args[2]); return ExitCode::FAILURE; }
+    };
+
+    let output_path = args.iter().position(|a| a == "--output")
+        .and_then(|p| args.get(p + 1))
+        .map(std::path::PathBuf::from);
+
+    let output_path = match output_path {
+        Some(p) => p,
+        None => { eprintln!("--output <file> is required"); return ExitCode::FAILURE; }
+    };
+
+    let db = match open_db() {
+        Ok(d) => d,
+        Err(e) => { eprintln!("{}", e); return ExitCode::FAILURE; }
+    };
+
+    let diff = match db.diff_versions(va, vb) {
+        Ok(d) => d,
+        Err(e) => { eprintln!("Diff error: {}", e); return ExitCode::FAILURE; }
+    };
+
+    // Load all games for version B to build a name→Game map
+    let games_b = match db.list_games(vb) {
+        Ok(g) => g,
+        Err(e) => { eprintln!("Database error: {}", e); return ExitCode::FAILURE; }
+    };
+    let game_map: std::collections::HashMap<String, rom_manager::models::Game> = games_b
+        .into_iter()
+        .map(|g| (g.name.clone(), g))
+        .collect();
+
+    let names: Vec<&String> = diff.added.iter().chain(diff.changed.iter()).collect();
+    let total = names.len();
+    let mut errors: Vec<String> = Vec::new();
+    let mut export_games = Vec::with_capacity(total);
+
+    for name in &names {
+        let game = match game_map.get(*name) {
+            Some(g) => g.clone(),
+            None => {
+                errors.push(format!("'{}' not found in version {}", name, vb));
+                continue;
+            }
+        };
+
+        // Resolve cloneof (parent_game_id → parent game name)
+        let cloneof = game.parent_game_id
+            .and_then(|pid| game_map.values().find(|g| g.id == pid))
+            .map(|g| g.name.clone());
+
+        // Fetch romof from the rom_set
+        let romof = match db.get_romof(game.id, vb) {
+            Ok(r) => r,
+            Err(e) => {
+                errors.push(format!("'{}': romof query error: {}", name, e));
+                None
+            }
+        };
+
+        // Fetch ROM list for version B
+        let roms = match db.list_roms_for_game(game.id, vb) {
+            Ok(r) => r,
+            Err(e) => {
+                errors.push(format!("'{}': rom list error: {}", name, e));
+                continue;
+            }
+        };
+
+        export_games.push(ExportGame {
+            name: game.name,
+            description: game.description,
+            year: game.year,
+            manufacturer: game.manufacturer,
+            cloneof,
+            romof,
+            isbios: game.isbios,
+            roms: roms.into_iter().map(|r| ExportRom {
+                name: r.filename,
+                size: r.size,
+                crc32: r.crc32,
+                sha1: r.sha1,
+                status: r.status,
+            }).collect(),
+        });
+    }
+
+    // Write the fixdat
+    let file = match std::fs::File::create(&output_path) {
+        Ok(f) => f,
+        Err(e) => { eprintln!("Cannot create {}: {}", output_path.display(), e); return ExitCode::FAILURE; }
+    };
+
+    if let Err(e) = write_logiqx_dat(&export_games, file) {
+        eprintln!("Write error: {}", e);
+        return ExitCode::FAILURE;
+    }
+
+    let written = export_games.len();
+
+    if json {
+        let result = serde_json::json!({
+            "fixdat": output_path.to_string_lossy().to_string(),
+            "total": total,
+            "written": written,
+            "added": diff.added.len(),
+            "changed": diff.changed.len(),
+            "errors": errors,
+        });
+        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+    } else {
+        println!("Fixdat written to {}", output_path.display());
+        println!("  added:   {} games", diff.added.len());
+        println!("  changed: {} games", diff.changed.len());
+        if !errors.is_empty() {
+            println!("  errors:  {}", errors.len());
+            for e in &errors {
+                println!("    - {}", e);
+            }
+        }
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn cmd_export(args: &[String], json: bool) -> ExitCode {
+    if args.len() < 3 {
+        eprintln!("Usage: build-cli export <version-id> <output-dir> --format split|merged|non-merged [--input-dir <dir>] [--progress]");
+        return ExitCode::FAILURE;
+    }
+
+    let version_id: i64 = match args[1].parse() {
+        Ok(id) => id,
+        Err(_) => { eprintln!("Invalid version ID: {}", args[1]); return ExitCode::FAILURE; }
+    };
+    let output_dir = std::path::PathBuf::from(&args[2]);
+    let show_progress = args.iter().any(|a| a == "--progress");
+
+    let format = args.iter().position(|a| a == "--format")
+        .and_then(|p| args.get(p + 1))
+        .and_then(|s| s.parse::<MergeMode>().ok())
+        .unwrap_or(MergeMode::Split);
+
+    let input_dir = args.iter().position(|a| a == "--input-dir")
+        .and_then(|p| args.get(p + 1))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let db = match open_db() { Ok(d) => d, Err(e) => { eprintln!("{}", e); return ExitCode::FAILURE; } };
+
+    let progress_cb = |p: &rom_manager::builder::BuildProgress| {
+        if show_progress {
+            eprintln!("{}", serde_json::to_string(p).unwrap_or_default());
+        }
+    };
+
+    let cancel = &CANCEL_FLAG;
+    install_signal_handlers();
+
+    match export_version(&db, version_id, &input_dir, &output_dir, format, &progress_cb, cancel) {
+        Ok(result) => {
+            if json {
+                print_json(&serde_json::json!({
+                    "version": result.version,
+                    "format": result.format,
+                    "total_games": result.total_games,
+                    "exported": result.exported,
+                    "skipped": result.skipped,
+                    "merged": result.merged,
+                }));
+            } else {
+                println!("Export complete");
+                println!("  version:    {}", result.version);
+                println!("  format:     {}", result.format);
+                println!("  total:      {} games", result.total_games);
+                println!("  exported:   {} zips", result.exported);
+                if result.skipped > 0 {
+                    println!("  skipped:    {} (no source zip)", result.skipped);
+                }
+                if result.merged > 0 {
+                    println!("  merged:     {} groups merged", result.merged);
+                }
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Export error: {}", e);
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn cmd_build(args: &[String], json: bool) -> ExitCode {
     if args.len() < 3 {
         eprintln!("Usage: build-cli build <source> <import-dir> [--update] [--dry-run] [--version-id <id>] [--base-dir <dir>] [--collection-dir <dir>] [--progress]");
@@ -481,6 +691,7 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
                     reused: result.reused,
                     missing: result.missing,
                     cleaned: result.cleaned,
+                    matched_by_hash: result.matched_by_hash,
                     missing_games: result.missing_games,
                     missing_reasons: result.missing_reasons,
                 });
@@ -496,6 +707,9 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
                 }
                 println!("  total:     {}", result.total_games);
                 println!("  added:     {} (newly copied)", result.added);
+                if result.matched_by_hash > 0 {
+                    println!("  matched-by-hash: {} (name mismatch, renamed)", result.matched_by_hash);
+                }
                 if result.exists > 0 {
                     println!("  exists:    {} (already in place)", result.exists);
                 }

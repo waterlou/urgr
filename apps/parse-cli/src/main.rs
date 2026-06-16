@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::process::ExitCode;
 
 use rom_manager::dat::{detect_format, parse_dat};
+use rom_manager::models::ParsedGame;
 use rom_manager::Database;
 use serde::Serialize;
 
@@ -67,6 +68,13 @@ OPTIONS:
     --json              Print the import summary as JSON instead of plain text.
                         Useful for scripting or piping into jq.
 
+MAME FILTER OPTIONS:
+    --status <s>        Only import games with matching driver status.
+                        Values: good, imperfect, preliminary.
+    --exclude-bios      Exclude BIOS games (isbios='yes').
+    --only-runnable     Only import runnable games (runnable='yes').
+                        Excludes devices and unplayable machines.
+
 ENVIRONMENT VARIABLES:
     ROM_DB              Default database path. Used when --db is not given.
 
@@ -127,6 +135,11 @@ fn main() -> ExitCode {
         .and_then(|p| args.get(p + 1));
     let existing_only = args.iter().any(|a| a == "--existing-only");
 
+    // MAME filter flags
+    let status_filter = args.iter().position(|a| a == "--status")
+        .and_then(|p| args.get(p + 1));
+    let exclude_bios = args.iter().any(|a| a == "--exclude-bios");
+    let only_runnable = args.iter().any(|a| a == "--only-runnable");
     let path = std::path::Path::new(file);
     if !path.exists() {
         eprintln!("File not found: {}", file);
@@ -156,47 +169,61 @@ fn main() -> ExitCode {
         Err(e) => { eprintln!("Failed to import version: {}", e); return ExitCode::FAILURE; }
     };
 
-    let mut rom_count = 0usize;
-    for game in &games {
-        // Skip games that don't exist yet when --existing-only is set
+    // Apply MAME filters before insertion
+    let filtered: Vec<ParsedGame> = games.into_iter().filter(|game| {
         if existing_only {
             let exists = db.game_exists(&game.name, version_id).unwrap_or(false);
-            if !exists { continue; }
+            if !exists { return false; }
         }
+        if let Some(ref status) = status_filter {
+            if game.driver_status.as_deref() != Some(status.as_str()) {
+                return false;
+            }
+        }
+        if exclude_bios && game.isbios {
+            return false;
+        }
+        if only_runnable && game.runnable != Some(true) {
+            return false;
+        }
+        true
+    }).collect();
+
+    let games_inserted = filtered.len();
+    let mut rom_count = 0usize;
+    for game in &filtered {
+        let mut game_clone = game.clone();
         // If --platform was passed, override the platform field (used for FBNeo per-manufacturer dats)
-        let mut game = game.clone();
         if let Some(p) = platform {
-            game.platform = p.to_string();
+            game_clone.platform = p.to_string();
         }
-        let gid = match db.insert_game(&game) {
+        let gid = match db.insert_game(&game_clone) {
             Ok(id) => id,
-            Err(e) => { eprintln!("Failed to insert game {}: {}", game.name, e); return ExitCode::FAILURE; }
+            Err(e) => { eprintln!("Failed to insert game {}: {}", game_clone.name, e); return ExitCode::FAILURE; }
         };
-        let rsid = match db.insert_rom_set(gid, version_id, game.romof.as_deref()) {
+        let rsid = match db.insert_rom_set(gid, version_id, game_clone.romof.as_deref()) {
             Ok(id) => id,
-            Err(e) => { eprintln!("Failed to create ROM set for {}: {}", game.name, e); return ExitCode::FAILURE; }
+            Err(e) => { eprintln!("Failed to create ROM set for {}: {}", game_clone.name, e); return ExitCode::FAILURE; }
         };
-        if !game.roms.is_empty() {
-            if let Err(e) = db.insert_rom_files_batch(rsid, &game.roms) {
-                eprintln!("Failed to insert ROMs for {}: {}", game.name, e);
+        if !game_clone.roms.is_empty() {
+            if let Err(e) = db.insert_rom_files_batch(rsid, &game_clone.roms) {
+                eprintln!("Failed to insert ROMs for {}: {}", game_clone.name, e);
                 return ExitCode::FAILURE;
             }
-            rom_count += game.roms.len();
+            rom_count += game_clone.roms.len();
         }
         // Set subtype on all ROM files for this rom set
         if let Some(st) = subtype {
             if let Err(e) = db.set_rom_subtype(rsid, st) {
-                eprintln!("Failed to set subtype for {}: {}", game.name, e);
+                eprintln!("Failed to set subtype for {}: {}", game_clone.name, e);
                 return ExitCode::FAILURE;
             }
         }
     }
     // Second pass: resolve cloneof → parent_game_id
-    if let Err(e) = db.resolve_parents(&games) {
+    if let Err(e) = db.resolve_parents(&filtered) {
         eprintln!("Warning: failed to resolve parent references: {}", e);
     }
-
-    let games_inserted = games.len();
 
     if json {
         print_json(&DatImportOutput {

@@ -180,7 +180,8 @@ router.get('/api/collections/:id/games', async (req, res) => {
     // Always LEFT JOIN game_state for available/favourite/rating data
     const joinClause = 'LEFT JOIN game_state gs ON gs.game_id = g.id';
 
-    const total = get(`SELECT COUNT(DISTINCT g.id) as c FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id ${joinClause} WHERE grs.version_id IN (${ph}) ${whereExtra}`, [...vids, ...extraParams]).c;
+    const runnableFilter = 'AND (g.runnable != 0 OR g.runnable IS NULL)';
+    const total = get(`SELECT COUNT(DISTINCT g.id) as c FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id ${joinClause} WHERE grs.version_id IN (${ph}) ${runnableFilter} ${whereExtra}`, [...vids, ...extraParams]).c;
 
     let games = all(`
       SELECT g.name, g.description, g.year, g.manufacturer, parent_g.name as cloneof, g.platform,
@@ -194,7 +195,7 @@ router.get('/api/collections/:id/games', async (req, res) => {
       JOIN set_versions sv ON sv.id = grs.version_id
       LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
       ${joinClause}
-      WHERE grs.version_id IN (${ph}) ${whereExtra}
+      WHERE grs.version_id IN (${ph}) ${runnableFilter} ${whereExtra}
       GROUP BY g.id
       ORDER BY ${sortCol} ${sortDir} NULLS LAST LIMIT ? OFFSET ?
     `, [...vids, ...extraParams, Number(limit), Number(offset)]);
@@ -628,7 +629,7 @@ router.post('/api/collections/:id/builds/:buildId/run', async (req, res) => {
 router.post('/api/collections/:id/exports', async (req, res) => {
   await dbReady;
   try {
-    const { format = 'split', version_id } = req.body;
+    const { format = 'split', action = 'preview', version_id } = req.body;
     const colId = req.params.id;
     const collection = get('SELECT * FROM collections WHERE id = ?', [colId]);
     if (!collection) return res.status(404).json({ error: 'Collection not found' });
@@ -641,37 +642,61 @@ router.post('/api/collections/:id/exports', async (req, res) => {
     const version = get('SELECT * FROM set_versions WHERE id = ?', [targetVersionId]);
     if (!version) return res.status(404).json({ error: 'Version not found' });
 
-    const games = all(`
-      SELECT g.id, g.name, g.description, g.year, g.manufacturer, parent_g.name as cloneof, g.platform,
-        grf.filename as rom_filename, grf.size, grf.crc32, grf.md5, grf.sha1, grf.status as rom_status, grf.merge_target
-      FROM games g
-      LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
-      JOIN game_rom_sets grs ON grs.game_id = g.id
-      LEFT JOIN game_rom_files grf ON grf.rom_set_id = grs.id
-      WHERE grs.version_id = ?
-      ORDER BY g.name
-    `, [targetVersionId]);
+    if (action === 'export') {
+      // Real export: invoke CLI to produce zips on disk
+      const colDir = path.join(romsDir, collection.folder || collection.slug);
+      const outputDir = path.join(colDir, 'exports', `${version.version}_${format}`);
+      fs.mkdirSync(outputDir, { recursive: true });
 
-    const gameMap = {};
-    for (const row of games) {
-      if (!gameMap[row.id]) {
-        gameMap[row.id] = {
-          name: row.name, description: row.description, year: row.year,
-          manufacturer: row.manufacturer, cloneof: row.cloneof, roms: [],
-        };
+      const inputDir = path.join(colDir, version.version, 'roms');
+
+      const args = ['export', String(targetVersionId), outputDir, '--input-dir', inputDir, '--format', format, '--progress'];
+      const result = await execCliStream(args, {
+        binary: 'build',
+        signal: req.abortController?.signal,
+      });
+
+      res.json({
+        collection: collection.name,
+        version: version.version,
+        format,
+        output_dir: outputDir,
+        ...JSON.parse(result),
+      });
+    } else {
+      // Preview: return game + ROM listing (existing behavior)
+      const games = all(`
+        SELECT g.id, g.name, g.description, g.year, g.manufacturer, parent_g.name as cloneof, g.platform,
+          grf.filename as rom_filename, grf.size, grf.crc32, grf.md5, grf.sha1, grf.status as rom_status, grf.merge_target
+        FROM games g
+        LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
+        JOIN game_rom_sets grs ON grs.game_id = g.id
+        LEFT JOIN game_rom_files grf ON grf.rom_set_id = grs.id
+        WHERE grs.version_id = ?
+        ORDER BY g.name
+      `, [targetVersionId]);
+
+      const gameMap = {};
+      for (const row of games) {
+        if (!gameMap[row.id]) {
+          gameMap[row.id] = {
+            name: row.name, description: row.description, year: row.year,
+            manufacturer: row.manufacturer, cloneof: row.cloneof, roms: [],
+          };
+        }
+        if (row.rom_filename) {
+          gameMap[row.id].roms.push({
+            filename: row.rom_filename, size: row.size, crc32: row.crc32,
+            md5: row.md5, sha1: row.sha1, status: row.rom_status, merge_target: row.merge_target,
+          });
+        }
       }
-      if (row.rom_filename) {
-        gameMap[row.id].roms.push({
-          filename: row.rom_filename, size: row.size, crc32: row.crc32,
-          md5: row.md5, sha1: row.sha1, status: row.rom_status, merge_target: row.merge_target,
-        });
-      }
+      res.json({
+        collection: collection.name, version: version.version, format,
+        total_games: Object.keys(gameMap).length, total_roms: games.filter(g => g.rom_filename).length,
+        games: Object.values(gameMap),
+      });
     }
-    res.json({
-      collection: collection.name, version: version.version, format,
-      total_games: Object.keys(gameMap).length, total_roms: games.filter(g => g.rom_filename).length,
-      games: Object.values(gameMap),
-    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

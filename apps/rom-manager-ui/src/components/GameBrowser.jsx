@@ -46,6 +46,7 @@ export default function GameBrowser() {
   const urlParents = searchParams.get('parents_only') === 'true';
   const urlFavs = searchParams.get('favourites_only') === 'true';
   const urlRoms = searchParams.get('roms_only') === 'true';
+  const urlVersion = searchParams.get('version');
 
   const [viewMode, setViewMode] = useState('grid');
   const [sortField, setSortField] = useState(urlSort);
@@ -102,10 +103,18 @@ export default function GameBrowser() {
     if (romsOnly) p.set('roms_only', 'true'); else p.delete('roms_only');
     if (yearFilter) p.set('year', yearFilter); else p.delete('year');
     if (manufacturerFilter) p.set('manufacturer', manufacturerFilter); else p.delete('manufacturer');
+    if (selectedVersionId) p.set('version', selectedVersionId); else p.delete('version');
     const qs = p.toString();
     const current = location.search.replace(/^\?/, '');
     if (qs !== current) navigate(location.pathname + (qs ? '?' + qs : ''), { replace: true });
-  }, [searchQuery, sortField, sortOrder, parentsOnly, favouritesOnly, romsOnly, yearFilter, manufacturerFilter, activeView]);
+  }, [searchQuery, sortField, sortOrder, parentsOnly, favouritesOnly, romsOnly, yearFilter, manufacturerFilter, selectedVersionId, activeView]);
+
+  // Sync selectedVersionId from URL version param on mount
+  useEffect(() => {
+    if (urlVersion && activeView === 'collection') {
+      setSelectedVersionId(Number(urlVersion));
+    }
+  }, []);
 
   // Save/restore scroll position
   const scrollKey = `scroll-${activeView}-${activeId || ''}`;
@@ -290,7 +299,7 @@ export default function GameBrowser() {
               </TableHead>
               <TableBody>
                 {games.map(g => (
-                  <GameListItem key={g.id} game={g} onSelect={(game) => navigate(`${location.pathname}/game/${game.id}`)}
+                  <GameListItem key={g.id} game={g} onSelect={(game) => navigate(`${location.pathname}/game/${game.id}${selectedVersionId ? `?version=${selectedVersionId}` : ''}`)}
                     onRating={(id, patch) => updateGame(id, patch)}
                     onFavourite={(id, patch) => updateGame(id, patch)}
                     onAddToGameSet={addToGameSet} onRemoveFromGameSet={removeFromGameSet}
@@ -308,7 +317,7 @@ export default function GameBrowser() {
             containIntrinsicSize: 220,
           }}>
             {games.map(g => (
-              <GameGridCard key={g.id} game={g} onSelect={(game) => navigate(`${location.pathname}/game/${game.id}`)}
+              <GameGridCard key={g.id} game={g} onSelect={(game) => navigate(`${location.pathname}/game/${game.id}${selectedVersionId ? `?version=${selectedVersionId}` : ''}`)}
                 onRating={(id, patch) => updateGame(id, patch)}
                 onFavourite={(id, patch) => updateGame(id, patch)}
                 onAddToGameSet={addToGameSet} onRemoveFromGameSet={removeFromGameSet}

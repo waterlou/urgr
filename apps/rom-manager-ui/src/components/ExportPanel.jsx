@@ -12,7 +12,7 @@ export default function ExportPanel({ collectionId }) {
   async function handleExport() {
     setExporting(true);
     try {
-      const data = await exportCollection(collectionId, { format: exportFormat });
+      const data = await exportCollection(collectionId, { format: exportFormat, action: 'export' });
       setExportData(data);
     } catch (e) {
       console.error(e);

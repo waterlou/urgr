@@ -14,6 +14,9 @@ pub enum Error {
     #[error("XML error: {0}")]
     Xml(String),
 
+    #[error("XML writer error: {0}")]
+    XmlWrite(#[from] quick_xml::Error),
+
     #[error("{0}")]
     Source(String),
 

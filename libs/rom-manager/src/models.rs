@@ -1,4 +1,35 @@
+use std::fmt;
+use std::str::FromStr;
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum MergeMode {
+    Split,
+    Merged,
+    NonMerged,
+}
+
+impl fmt::Display for MergeMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MergeMode::Split => write!(f, "split"),
+            MergeMode::Merged => write!(f, "merged"),
+            MergeMode::NonMerged => write!(f, "non-merged"),
+        }
+    }
+}
+
+impl FromStr for MergeMode {
+    type Err = String;
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "split" => Ok(MergeMode::Split),
+            "merged" | "full" | "full-merged" => Ok(MergeMode::Merged),
+            "non-merged" | "nonmerged" | "non_merged" => Ok(MergeMode::NonMerged),
+            _ => Err(format!("Unknown merge mode: {}. Use split, merged, or non-merged", s)),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct SetVersion {
@@ -20,6 +51,11 @@ pub struct Game {
     pub platform: String,
     pub parent_game_id: Option<i64>,
     pub synopsis: String,
+    pub isbios: bool,
+    pub isdevice: bool,
+    pub runnable: Option<bool>,
+    pub driver_status: Option<String>,
+    pub driver_emulation: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +92,17 @@ pub struct ParsedGame {
     /// Platform name from the DAT (e.g. "Nintendo - Game Boy" from OfflineList
     /// `<configuration><system>` or set by the importer for FBNeo per-manufacturer dats).
     pub platform: String,
+    /// Whether this game is a BIOS set (MAME isbios="yes", Logiqx isbios="yes").
+    pub isbios: bool,
+    /// Whether this machine is a device rather than a playable game (MAME isdevice="yes").
+    pub isdevice: bool,
+    /// Whether this machine is runnable (MAME runnable="yes"/"no").
+    /// Defaults to Some(true) for non-MAME formats.
+    pub runnable: Option<bool>,
+    /// Driver emulation status (MAME driver status="good/imperfect/preliminary").
+    pub driver_status: Option<String>,
+    /// Driver emulation quality (MAME driver emulation="good/preliminary").
+    pub driver_emulation: Option<String>,
     pub roms: Vec<ParsedRom>,
 }
 

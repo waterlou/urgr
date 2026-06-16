@@ -17,6 +17,11 @@ CREATE TABLE IF NOT EXISTS games (
     platform        TEXT DEFAULT '',
     parent_game_id  INTEGER,
     synopsis        TEXT DEFAULT '',
+    isbios          INTEGER NOT NULL DEFAULT 0,
+    isdevice        INTEGER NOT NULL DEFAULT 0,
+    runnable        INTEGER,
+    driver_status   TEXT,
+    driver_emulation TEXT,
     created_at      TEXT DEFAULT (datetime('now')),
     UNIQUE(name)
 );
@@ -60,10 +65,21 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 ";
 
+/// Individual ALTER TABLE statements for existing databases.
+/// Applied one at a time, skipping errors (column may already exist).
+pub const MIGRATIONS: &[&str] = &[
+    "ALTER TABLE games ADD COLUMN isbios INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE games ADD COLUMN isdevice INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE games ADD COLUMN runnable INTEGER",
+    "ALTER TABLE games ADD COLUMN driver_status TEXT",
+    "ALTER TABLE games ADD COLUMN driver_emulation TEXT",
+];
+
 pub const INDEXES: &str = "
 CREATE INDEX IF NOT EXISTS idx_game_rom_sets_version ON game_rom_sets(version_id);
 CREATE INDEX IF NOT EXISTS idx_game_rom_sets_game ON game_rom_sets(game_id);
 CREATE INDEX IF NOT EXISTS idx_rom_files_set ON game_rom_files(rom_set_id);
 CREATE INDEX IF NOT EXISTS idx_rom_files_sha1 ON game_rom_files(sha1);
 CREATE INDEX IF NOT EXISTS idx_games_name ON games(name);
+CREATE INDEX IF NOT EXISTS idx_games_runnable ON games(runnable);
 ";

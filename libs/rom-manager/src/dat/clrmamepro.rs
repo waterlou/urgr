@@ -53,6 +53,11 @@ pub fn parse_clrmamepro_str(text: &str) -> (Vec<ParsedGame>, ParseStats) {
             cloneof: kv.get("cloneof").cloned(),
             romof: kv.get("romof").cloned(),
             platform: String::new(),
+            isbios: false,
+            isdevice: false,
+            runnable: Some(true),
+            driver_status: None,
+            driver_emulation: None,
             roms,
         });
     }

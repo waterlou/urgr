@@ -84,7 +84,13 @@ function canonicalName(game, scrapeMode) {
 // Fetch a game with its rom_set and version joined — INNER JOIN variant.
 // Returns null if the game has no rom_set (e.g. game exists but is not in any version).
 // Used by routes that require a rom_set: availability, play, download-ia.
-function fetchGameWithRomSet(gameId) {
+function fetchGameWithRomSet(gameId, versionId) {
+  const params = [gameId];
+  let versionClause = '';
+  if (versionId) {
+    versionClause = 'AND grs.version_id = ?';
+    params.push(versionId);
+  }
   return get(`
     SELECT g.*, parent_g.name as cloneof,
       grs.version_id, grs.romof, sv.source, sv.version
@@ -92,15 +98,21 @@ function fetchGameWithRomSet(gameId) {
     LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
     JOIN game_rom_sets grs ON grs.game_id = g.id
     JOIN set_versions sv ON sv.id = grs.version_id
-    WHERE g.id = ?
+    WHERE g.id = ? ${versionClause}
     ORDER BY grs.version_id ASC LIMIT 1
-  `, [gameId]);
+  `, params);
 }
 
 // Fetch a game with optional rom_set and version joined — LEFT JOIN variant.
 // Returns the game even if it has no rom_set. version_id/source/version will be null.
 // Used by routes that should still work for orphan games: detail, scrape, media.
-function fetchGameOptionalRomSet(gameId) {
+function fetchGameOptionalRomSet(gameId, versionId) {
+  const params = [gameId];
+  let versionClause = '';
+  if (versionId) {
+    versionClause = 'AND grs.version_id = ?';
+    params.push(versionId);
+  }
   return get(`
     SELECT g.*, parent_g.name as cloneof,
       grs.version_id, grs.romof, sv.source, sv.version
@@ -108,9 +120,9 @@ function fetchGameOptionalRomSet(gameId) {
     LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
     LEFT JOIN game_rom_sets grs ON grs.game_id = g.id
     LEFT JOIN set_versions sv ON sv.id = grs.version_id
-    WHERE g.id = ?
+    WHERE g.id = ? ${versionClause}
     ORDER BY grs.version_id ASC LIMIT 1
-  `, [gameId]);
+  `, params);
 }
 
 router.get('/', async (req, res) => {
@@ -119,7 +131,7 @@ router.get('/', async (req, res) => {
     const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, collection_id, version_id, parents_only, favourites_only, roms_only, year, manufacturer } = req.query;
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
 
-    let where = [];
+    let where = ["(g.runnable != 0 OR g.runnable IS NULL)"];
     let params = [];
 
     if (q) {
@@ -230,7 +242,8 @@ router.get('/recently-played', async (req, res) => {
 router.get('/:id', async (req, res) => {
   await dbReady;
   try {
-    const game = fetchGameOptionalRomSet(req.params.id);
+    const versionId = req.query.version_id || null;
+    const game = fetchGameOptionalRomSet(req.params.id, versionId);
     if (!game) return res.status(404).json({ error: 'not found' });
     if (typeof game.synopsis === 'string') try { game.synopsis = JSON.parse(game.synopsis); } catch {}
 
@@ -288,7 +301,8 @@ router.get('/:id', async (req, res) => {
 router.get('/:id/availability', async (req, res) => {
   await dbReady;
   try {
-    const game = fetchGameWithRomSet(req.params.id);
+    const versionId = req.query.version_id || null;
+    const game = fetchGameWithRomSet(req.params.id, versionId);
     if (!game) return res.status(404).json({ error: 'not found' });
 
     const roms = all(`
@@ -387,7 +401,8 @@ router.get('/:id/availability', async (req, res) => {
 router.get('/:id/play', async (req, res) => {
   await dbReady;
   try {
-    const game = fetchGameWithRomSet(req.params.id);
+    const versionId = req.query.version_id || null;
+    const game = fetchGameWithRomSet(req.params.id, versionId);
     if (!game) return res.status(404).json({ error: 'Game not found' });
 
     let filePath = null;
@@ -1074,14 +1089,21 @@ router.get('/:id/cover', async (req, res) => {
 router.post('/:id/download-ia', async (req, res) => {
   await dbReady;
   try {
+    const versionId = req.body.version_id || null;
+    const downloadParams = [req.params.id];
+    let downloadVersionClause = '';
+    if (versionId) {
+      downloadVersionClause = 'AND grs.version_id = ?';
+      downloadParams.push(versionId);
+    }
     const game = get(`
       SELECT g.*, grs.version_id, sv.source, sv.version
       FROM games g
       JOIN game_rom_sets grs ON grs.game_id = g.id
       JOIN set_versions sv ON sv.id = grs.version_id
-      WHERE g.id = ?
+      WHERE g.id = ? ${downloadVersionClause}
       ORDER BY grs.version_id ASC LIMIT 1
-    `, [req.params.id]);
+    `, downloadParams);
     if (!game) return res.status(404).json({ error: 'Game not found' });
 
     const col = get(`SELECT c.id, c.folder, c.slug, c.name FROM collections c

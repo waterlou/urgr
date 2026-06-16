@@ -141,11 +141,23 @@ let mameDatsCacheTime = 0;
 const CACHE_TTL = 600_000;
 
 // Match version patterns in filenames for MAME DAT archives
-function mameDatMatches(base, version) {
-  const verDotted = version.toLowerCase();                  // "0.274"
-  const verCompact = version.replace(/\./g, '');            // "0274"
-  const verNumeric = version.replace(/^0\./, '');           // "274"
-  return base.includes(verDotted) || base.includes(verCompact) || base.includes(verNumeric);
+function mameDatMatches(base, version, nickname) {
+  const patterns = [];
+  const v = version.toLowerCase();                             // "0.274"
+  patterns.push(v, v.replace(/\./g, ''), v.replace(/^0\./, '')); // "0.274", "0274", "274"
+  if (nickname) {
+    const n = nickname.toLowerCase();                          // "0.37b5"
+    patterns.push(n, n.replace(/\./g, ''));                    // "0.37b5", "037b5"
+    // Also try zero-padded beta: "0.37b5" → "0.37b05"
+    const betaMatch = n.match(/^(\d+\.\d+b)(\d+)$/i);
+    if (betaMatch) patterns.push(betaMatch[1] + betaMatch[2].padStart(2, '0'));
+    // And without leading zero on major: "0.37b5" → "37b5", "37b05"
+    const noLeading = n.replace(/^0\./, '');
+    patterns.push(noLeading);
+    const noLeadingBeta = betaMatch ? betaMatch[1].replace(/^0\./, '') + betaMatch[2].padStart(2, '0') : null;
+    if (noLeadingBeta) patterns.push(noLeadingBeta);
+  }
+  return patterns.some(p => base.includes(p));
 }
 
 const FBNEO_REPO = 'libretro/FBNeo';
@@ -499,7 +511,7 @@ router.get('/api/versions/:id/games', async (req, res) => {
       FROM games g
       JOIN game_rom_sets grs ON grs.game_id = g.id
       LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
-      WHERE grs.version_id = ? ${where}
+      WHERE grs.version_id = ? AND (g.runnable != 0 OR g.runnable IS NULL) ${where}
       ORDER BY g.name LIMIT ? OFFSET ?`, params);
     res.json({ games, limit: Number(limit), offset: Number(offset) });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -756,6 +768,7 @@ router.post('/api/versions/import-online', async (req, res) => {
 
     else {
       let url = null;
+      let mameNickname = null;
       if (mameDatsCache && mameDatsCache._urls) {
         url = mameDatsCache._urls[version];
       }
@@ -777,7 +790,7 @@ router.post('/api/versions/import-online', async (req, res) => {
           if (cells.length >= 3) {
             const cellText = cells[0];
             const parenMatch = cellText.match(/\(([^)]+)\)/);
-            const nickname = parenMatch ? parenMatch[1].trim() : null;
+            mameNickname = parenMatch ? parenMatch[1].trim() : null;
             const ver = cellText.replace(/\([^)]+\)/g, '').replace(/[()]/g, '').trim().split(/\s+/)[0];
             const parsed = parseMameVersion(ver);
             if (fmtVersion(parsed) === version) {
@@ -833,22 +846,23 @@ router.post('/api/versions/import-online', async (req, res) => {
           .filter(({ base }) => {
             if (!base.endsWith('.xml') && !(base.endsWith('.dat') && !/without.?crc|nocrc/i.test(base))) return false;
             if (/\(?mess\)?|\bchd\b/i.test(base)) return false; // skip mess/chd subsets
-            return mameDatMatches(base, version) || /^mame(\s|\b|_)/.test(base) || /^arcade(\s|\b|_)/.test(base);
+            return mameDatMatches(base, version, mameNickname) || /^mame(\s|\b|_)/.test(base) || /^arcade(\s|\b|_)/.test(base);
           })
           .sort((a, b) => {
-            // ARCADE subset preferred over full MAME set (smaller, arcade-only)
-            const aIsArcade = a.base.startsWith('arcade') ? 0 : 1;
-            const bIsArcade = b.base.startsWith('arcade') ? 0 : 1;
-            if (aIsArcade !== bIsArcade) return aIsArcade - bIsArcade;
-            // .dat preferred over .xml
-            const aIsDat = a.base.endsWith('.dat') ? 0 : 1;
-            const bIsDat = b.base.endsWith('.dat') ? 0 : 1;
-            if (aIsDat !== bIsDat) return aIsDat - bIsDat;
+            // Full MAME set preferred over arcade-only subset
+            const aFull = a.base.startsWith('arcade') ? 1 : 0;
+            const bFull = b.base.startsWith('arcade') ? 1 : 0;
+            if (aFull !== bFull) return aFull - bFull;
+            // .xml preferred over .dat (listxml has richer attributes)
+            const aIsXml = a.base.endsWith('.xml') ? 0 : 1;
+            const bIsXml = b.base.endsWith('.xml') ? 0 : 1;
+            if (aIsXml !== bIsXml) return aIsXml - bIsXml;
             // Version match before generic name
-            const aVer = mameDatMatches(a.base, version) ? 0 : 1;
-            const bVer = mameDatMatches(b.base, version) ? 0 : 1;
+            const aVer = mameDatMatches(a.base, version, mameNickname) ? 0 : 1;
+            const bVer = mameDatMatches(b.base, version, mameNickname) ? 0 : 1;
             if (aVer !== bVer) return aVer - bVer;
-            return a.base.localeCompare(b.base);
+            // Descending alphabetical so latest date-wed release sorts first
+            return b.base.localeCompare(a.base);
           });
 
         if (dats.length > 0) foundDat = dats[0].fp;
@@ -866,20 +880,32 @@ router.post('/api/versions/import-online', async (req, res) => {
             const nestedFiles = [];
             const walkNested = (d) => { for (const f of fs.readdirSync(d)) { const p = path.join(d, f); if (fs.statSync(p).isDirectory()) walkNested(p); else nestedFiles.push(p); } };
             walkNested(nestedDir);
-            for (const fp2 of nestedFiles) {
-              const b2 = path.basename(fp2).toLowerCase();
-              if (b2.endsWith('.dat') && !/without.?crc|nocrc/i.test(b2)) { foundDat = fp2; break; }
-              if (b2.endsWith('.xml') && !foundDat && mameDatMatches(b2, version)) foundDat = fp2;
-            }
-            if (foundDat) break;
+            const nestedDats = nestedFiles.map(fp2 => ({ fp: fp2, base: path.basename(fp2).toLowerCase() }))
+              .filter(({ base: b }) => {
+                if (!b.endsWith('.xml') && !b.endsWith('.dat')) return false;
+                return mameDatMatches(b, version, mameNickname) || /^mame(\s|\b|_)/.test(b);
+              })
+              .sort((a, b) => {
+                // XML preferred over DAT
+                const aIsXml = a.base.endsWith('.xml') ? 0 : 1;
+                const bIsXml = b.base.endsWith('.xml') ? 0 : 1;
+                if (aIsXml !== bIsXml) return aIsXml - bIsXml;
+                // Version/nickname match before loose match
+                const aMatch = mameDatMatches(a.base, version, mameNickname) ? 0 : 1;
+                const bMatch = mameDatMatches(b.base, version, mameNickname) ? 0 : 1;
+                if (aMatch !== bMatch) return aMatch - bMatch;
+                // Descending alphabetical so latest date sorts first
+                return b.base.localeCompare(a.base);
+              });
+            if (nestedDats.length > 0) { foundDat = nestedDats[0].fp; break; }
           }
         }
 
         if (!foundDat) {
           for (const fp of allFiles) {
             const b = path.basename(fp).toLowerCase();
-            if (b.endsWith('.dat') && !/without.?crc|nocrc/i.test(b)) { foundDat = fp; break; }
-            if (b.endsWith('.xml') && !foundDat) foundDat = fp;
+            if (b.endsWith('.xml')) { foundDat = fp; break; }
+            if (b.endsWith('.dat') && !/without.?crc|nocrc/i.test(b) && !foundDat) foundDat = fp;
           }
         }
 

@@ -62,7 +62,7 @@ router.get('/api/game-sets/:id/games', async (req, res) => {
       LEFT JOIN game_state gs ON gs.game_id = g.id
       LEFT JOIN game_rom_sets grs ON grs.id = (SELECT grs2.id FROM game_rom_sets grs2 WHERE grs2.game_id = g.id ORDER BY grs2.version_id LIMIT 1)
       LEFT JOIN set_versions sv_min ON sv_min.id = grs.version_id
-      WHERE gsg.game_set_id = ?
+      WHERE gsg.game_set_id = ? AND (g.runnable != 0 OR g.runnable IS NULL)
       ORDER BY ${sortCol} ${sortDir}, g.name LIMIT ? OFFSET ?
     `, [id, Number(limit), Number(offset)]);
     const size = get(`SELECT SUM(grf.size) as total_bytes

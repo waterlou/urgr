@@ -5,7 +5,7 @@ import {
   Paper, CircularProgress, ImageList, ImageListItem, Slide,
 } from '@mui/material';
 import { ArrowBack, PlayArrow, Download, CloudDownload, Check, Close } from '@mui/icons-material';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { getGame, coverUrl, screenshotUrl, playUrl, scrapeGameMetadata,
   downloadGameFromIA, getIaAuthStatus, enqueueDownload, getGameAvailability,
   subscribeJobSSE, subscribeDownloadSSE } from '../api.js';
@@ -18,6 +18,8 @@ function Transition(props) {
 
 export default function GameDetail() {
   const { id: collectionId, gameId } = useParams();
+  const [searchParams] = useSearchParams();
+  const versionId = searchParams.get('version');
   const navigate = useNavigate();
   const [game, setGame] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -39,7 +41,7 @@ export default function GameDetail() {
   useEffect(() => {
     if (!gameId) return;
     setLoading(true);
-    getGame(gameId).then(data => {
+    getGame(gameId, versionId).then(data => {
       setGame(data);
       dataLoadedRef.current = data;
       // Auto-scrape if the game has never been scraped (no synopsis, no covers)
@@ -49,25 +51,25 @@ export default function GameDetail() {
       }
     }).catch(() => {}).finally(() => setLoading(false));
     getIaAuthStatus().then(setIaAuth).catch(() => {});
-    getGameAvailability(gameId).then(setRomAvailability).catch(() => {});
-  }, [gameId]);
+    getGameAvailability(gameId, versionId).then(setRomAvailability).catch(() => {});
+  }, [gameId, versionId]);
 
   useEffect(() => {
     function handleVisChange() {
       if (!document.hidden && gameId && gameId !== dataLoadedRef.current?.id) {
-        getGame(gameId).then(setGame).catch(() => {});
+        getGame(gameId, versionId).then(setGame).catch(() => {});
       }
     }
     document.addEventListener('visibilitychange', handleVisChange);
     return () => document.removeEventListener('visibilitychange', handleVisChange);
-  }, [gameId]);
+  }, [gameId, versionId]);
 
   async function handleScrape() {
     setScraping(true); setScrapeError(null); setScrapedTitle(null);
     try {
       const result = await scrapeGameMetadata(gameId);
       if (result?.scraped) setScrapedTitle(result.title || 'Scraped');
-      getGame(gameId).then(setGame).catch(() => {});
+      getGame(gameId, versionId).then(setGame).catch(() => {});
     } catch (e) {
       setScrapeError(e.message);
     } finally { setScraping(false); }
@@ -94,8 +96,8 @@ export default function GameDetail() {
         onResult: (data) => {
           const finalMsg = data?.ok ? '✓ Download complete!' : '⚠ Download finished with issues';
           setDownloadProgress(p => ({ ...p, pct: 100, messages: [...p.messages, finalMsg], done: true }));
-          getGame(gameId).then(setGame).catch(() => {});
-          getGameAvailability(gameId).then(setRomAvailability).catch(() => {});
+          getGame(gameId, versionId).then(setGame).catch(() => {});
+          getGameAvailability(gameId, versionId).then(setRomAvailability).catch(() => {});
         },
         onError: (err) => {
           setDownloadProgress(p => ({ ...p, error: err, messages: [...p.messages, `✗ ${err}`], done: true }));
@@ -134,8 +136,8 @@ export default function GameDetail() {
               done: true,
             }));
             es.close();
-            getGame(gameId).then(setGame).catch(() => {});
-            getGameAvailability(gameId).then(setRomAvailability).catch(() => {});
+            getGame(gameId, versionId).then(setGame).catch(() => {});
+            getGameAvailability(gameId, versionId).then(setRomAvailability).catch(() => {});
           } else if (item.status === 'failed') {
             setDownloadProgress(p => ({
               ...p, error: item.error || 'Download failed',
@@ -225,7 +227,7 @@ export default function GameDetail() {
                     {game.platform && <Chip label={game.platform} size="small" color="primary" variant="outlined" />}
                     {game.manufacturer && <Chip label={game.manufacturer} size="small" onClick={() => navigate(`/collections/${collectionId || ''}/browse?manufacturer=${encodeURIComponent(game.manufacturer)}`)} sx={{ cursor: 'pointer' }} />}
                     {game.cloneof && <Chip label={`Clone of: ${game.cloneof}`} size="small" variant="outlined"
-                      onClick={() => game.parent?.id && navigate(`/collections/${collectionId || ''}/game/${game.parent.id}`, { replace: true })}
+                      onClick={() => game.parent?.id && navigate(`/collections/${collectionId || ''}/game/${game.parent.id}${versionId ? `?version=${versionId}` : ''}`, { replace: true })}
                       sx={{ cursor: game.parent?.id ? 'pointer' : 'default' }}
                     />}
                     {game.synopsis && <Chip label="Scraped" size="small" color="success" />}
@@ -278,7 +280,7 @@ export default function GameDetail() {
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
                     {game.clones.map(v => (
                       <Chip key={v.id} label={v.name} size="small" variant="outlined" color="primary"
-                        onClick={() => navigate(`/collections/${collectionId || ''}/game/${v.id}`, { replace: true })}
+                        onClick={() => navigate(`/collections/${collectionId || ''}/game/${v.id}${versionId ? `?version=${versionId}` : ''}`, { replace: true })}
                         title={v.description}
                       />
                     ))}
