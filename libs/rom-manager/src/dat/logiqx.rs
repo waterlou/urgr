@@ -95,19 +95,40 @@ fn parse_game<R: BufRead>(
                 depth += 1;
                 match e.name().as_ref() {
                     b"description" => {
-                        if let Ok(Event::Text(t)) = xml.read_event_into(&mut Vec::new()) {
-                            description = t.unescape().unwrap_or_default().to_string();
+                        let mut text = String::new();
+                        loop {
+                            match xml.read_event_into(&mut Vec::new()) {
+                                Ok(Event::Text(t)) => text.push_str(&t.unescape().unwrap_or_default()),
+                                Ok(Event::End(_)) => { depth -= 1; break; }
+                                Ok(Event::Eof) => break,
+                                _ => {}
+                            }
                         }
+                        description = text;
                     }
                     b"year" => {
-                        if let Ok(Event::Text(t)) = xml.read_event_into(&mut Vec::new()) {
-                            year = Some(t.unescape().unwrap_or_default().to_string());
+                        let mut text = String::new();
+                        loop {
+                            match xml.read_event_into(&mut Vec::new()) {
+                                Ok(Event::Text(t)) => text.push_str(&t.unescape().unwrap_or_default()),
+                                Ok(Event::End(_)) => { depth -= 1; break; }
+                                Ok(Event::Eof) => break,
+                                _ => {}
+                            }
                         }
+                        if !text.is_empty() { year = Some(text); }
                     }
                     b"manufacturer" | b"publisher" => {
-                        if let Ok(Event::Text(t)) = xml.read_event_into(&mut Vec::new()) {
-                            manufacturer = Some(t.unescape().unwrap_or_default().to_string());
+                        let mut text = String::new();
+                        loop {
+                            match xml.read_event_into(&mut Vec::new()) {
+                                Ok(Event::Text(t)) => text.push_str(&t.unescape().unwrap_or_default()),
+                                Ok(Event::End(_)) => { depth -= 1; break; }
+                                Ok(Event::Eof) => break,
+                                _ => {}
+                            }
                         }
+                        if !text.is_empty() { manufacturer = Some(text); }
                     }
                     b"rom" => {
                         parse_rom_attrs(e, &mut roms);

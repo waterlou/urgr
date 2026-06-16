@@ -36,9 +36,9 @@ function gameRow(row) {
 // Attach covers/screenshots from game_media by game name + platform
 function attachMedia(games) {
   if (!games || games.length === 0) return games;
-  const gameNames = [...new Set(games.map(g => g.name))];
-  const ph = gameNames.map(() => '?').join(',');
-  const mediaRows = all(`SELECT gm.name, gm.covers, gm.screenshots, gm.fanarts, gm.videos FROM game_media gm WHERE gm.name IN (${ph})`, gameNames);
+  const names = [...new Set(games.flatMap(g => [g.name, g.cloneof].filter(Boolean)))];
+  const ph = names.map(() => '?').join(',');
+  const mediaRows = all(`SELECT gm.name, gm.covers, gm.screenshots, gm.fanarts, gm.videos FROM game_media gm WHERE gm.name IN (${ph})`, names);
   const mediaMap = {};
   for (const m of mediaRows) {
     let covers = []; let screenshots = []; let fanarts = []; let videos = [];
@@ -50,10 +50,10 @@ function attachMedia(games) {
   }
   return games.map(g => ({
     ...g,
-    covers: mediaMap[g.name]?.covers || [],
-    screenshots: mediaMap[g.name]?.screenshots || [],
-    fanarts: mediaMap[g.name]?.fanarts || [],
-    videos: mediaMap[g.name]?.videos || [],
+    covers: mediaMap[g.name]?.covers || mediaMap[g.cloneof]?.covers || [],
+    screenshots: mediaMap[g.name]?.screenshots || mediaMap[g.cloneof]?.screenshots || [],
+    fanarts: mediaMap[g.name]?.fanarts || mediaMap[g.cloneof]?.fanarts || [],
+    videos: mediaMap[g.name]?.videos || mediaMap[g.cloneof]?.videos || [],
   }));
 }
 

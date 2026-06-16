@@ -79,7 +79,7 @@ export default function GameDetail() {
     setShowDownloadDialog(true);
     setDownloadProgress({ messages: ['Starting...'], pct: 0, done: false, error: null });
     try {
-      const result = await downloadGameFromIA(gameId);
+      const result = await downloadGameFromIA(gameId, versionId);
       const jobId = result.jobId || result.job_id || result.id;
       if (!jobId) { setDownloadProgress(p => ({ ...p, error: 'Failed to start download', done: true })); return; }
       setDownloadJobId(jobId);

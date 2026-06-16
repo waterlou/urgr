@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
@@ -29,6 +30,7 @@ pub fn parse_mame_reader<R: BufRead>(reader: R) -> Result<(Vec<ParsedGame>, Pars
     let mut buf = Vec::new();
     let mut games = Vec::new();
     let mut errors = Vec::new();
+    let mut sampleof_refs = HashSet::new();
 
     loop {
         match xml.read_event_into(&mut buf) {
@@ -53,6 +55,16 @@ pub fn parse_mame_reader<R: BufRead>(reader: R) -> Result<(Vec<ParsedGame>, Pars
                     .find(|a| a.as_ref().is_ok_and(|a| a.key.as_ref() == b"romof"))
                     .and_then(|a| a.ok())
                     .and_then(|a| a.unescape_value().ok());
+
+                let sampleof = e
+                    .attributes()
+                    .find(|a| a.as_ref().is_ok_and(|a| a.key.as_ref() == b"sampleof"))
+                    .and_then(|a| a.ok())
+                    .and_then(|a| a.unescape_value().ok());
+
+                if let Some(ref s) = sampleof {
+                    sampleof_refs.insert(s.to_string());
+                }
 
                 let isbios = e
                     .attributes()
@@ -96,6 +108,28 @@ pub fn parse_mame_reader<R: BufRead>(reader: R) -> Result<(Vec<ParsedGame>, Pars
         buf.clear();
     }
 
+    // Generate stub entries for sampleof references that don't have a machine
+    let game_names: HashSet<String> = games.iter().map(|g| g.name.clone()).collect();
+    for ref_name in &sampleof_refs {
+        if !game_names.contains(ref_name) {
+            games.push(ParsedGame {
+                name: ref_name.clone(),
+                description: format!("Samples for {}", ref_name),
+                year: None,
+                manufacturer: None,
+                cloneof: None,
+                romof: None,
+                platform: String::new(),
+                isbios: false,
+                isdevice: true,
+                runnable: None,
+                driver_status: None,
+                driver_emulation: None,
+                roms: Vec::new(),
+            });
+        }
+    }
+
     let stats = ParseStats {
         total_games: games.len(),
         total_roms: games.iter().map(|g| g.roms.len()).sum(),
@@ -129,19 +163,40 @@ fn parse_machine<R: BufRead>(
                 depth += 1;
                 match e.name().as_ref() {
                     b"description" => {
-                        if let Ok(Event::Text(t)) = xml.read_event_into(&mut Vec::new()) {
-                            description = t.unescape().unwrap_or_default().to_string();
+                        let mut text = String::new();
+                        loop {
+                            match xml.read_event_into(&mut Vec::new()) {
+                                Ok(Event::Text(t)) => text.push_str(&t.unescape().unwrap_or_default()),
+                                Ok(Event::End(_)) => { depth -= 1; break; }
+                                Ok(Event::Eof) => break,
+                                _ => {}
+                            }
                         }
+                        description = text;
                     }
                     b"year" => {
-                        if let Ok(Event::Text(t)) = xml.read_event_into(&mut Vec::new()) {
-                            year = Some(t.unescape().unwrap_or_default().to_string());
+                        let mut text = String::new();
+                        loop {
+                            match xml.read_event_into(&mut Vec::new()) {
+                                Ok(Event::Text(t)) => text.push_str(&t.unescape().unwrap_or_default()),
+                                Ok(Event::End(_)) => { depth -= 1; break; }
+                                Ok(Event::Eof) => break,
+                                _ => {}
+                            }
                         }
+                        if !text.is_empty() { year = Some(text); }
                     }
                     b"manufacturer" => {
-                        if let Ok(Event::Text(t)) = xml.read_event_into(&mut Vec::new()) {
-                            manufacturer = Some(t.unescape().unwrap_or_default().to_string());
+                        let mut text = String::new();
+                        loop {
+                            match xml.read_event_into(&mut Vec::new()) {
+                                Ok(Event::Text(t)) => text.push_str(&t.unescape().unwrap_or_default()),
+                                Ok(Event::End(_)) => { depth -= 1; break; }
+                                Ok(Event::Eof) => break,
+                                _ => {}
+                            }
                         }
+                        if !text.is_empty() { manufacturer = Some(text); }
                     }
                     b"rom" => {
                         parse_rom_attrs(e, &mut roms);
@@ -512,6 +567,59 @@ mod tests {
         assert!(!games[0].isbios);
         assert_eq!(games[0].runnable, Some(true));
         assert_eq!(games[0].driver_status.as_deref(), Some("good"));
+    }
+
+    #[test]
+    fn test_mame_sampleof_creates_stubs() {
+        let xml = r#"<?xml version="1.0"?>
+<mame>
+  <machine name="game1" sourcefile="src/game1.cpp" sampleof="missing_samples">
+    <description>Game with missing samples</description>
+    <year>1991</year>
+    <manufacturer>Test</manufacturer>
+  </machine>
+  <machine name="game2" sourcefile="src/game2.cpp" sampleof="also_missing">
+    <description>Another game with missing samples</description>
+  </machine>
+  <machine name="has_own_samples" sampleof="has_own_samples">
+    <description>Self-referencing samples (should not create extra stub)</description>
+  </machine>
+</mame>"#;
+
+        let (games, stats) = parse(xml);
+        // 3 machines + 2 stubs (missing_samples, also_missing) = 5 total
+        assert_eq!(stats.total_games, 5);
+        assert_eq!(games.len(), 5);
+
+        // Find the stubs
+        let stub1 = games.iter().find(|g| g.name == "missing_samples").expect("missing_samples stub");
+        assert_eq!(stub1.description, "Samples for missing_samples");
+        assert!(stub1.isdevice);
+        assert!(stub1.roms.is_empty());
+
+        let stub2 = games.iter().find(|g| g.name == "also_missing").expect("also_missing stub");
+        assert_eq!(stub2.description, "Samples for also_missing");
+        assert!(stub2.isdevice);
+
+        // Self-referencing sampleof should NOT create extra stub
+        assert_eq!(games.iter().filter(|g| g.name == "has_own_samples").count(), 1);
+
+        // Real machines are intact
+        let g1 = games.iter().find(|g| g.name == "game1").unwrap();
+        assert_eq!(g1.description, "Game with missing samples");
+        assert!(!g1.isdevice);
+    }
+
+    #[test]
+    fn test_mame_no_sampleof_no_stubs() {
+        let xml = r#"<?xml version="1.0"?>
+<mame>
+  <machine name="a"><description>A</description></machine>
+  <machine name="b"><description>B</description></machine>
+</mame>"#;
+
+        let (games, _) = parse(xml);
+        assert_eq!(games.len(), 2);
     }
 
 }

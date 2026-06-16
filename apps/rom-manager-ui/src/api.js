@@ -286,8 +286,8 @@ export function browseFilesystem(path) {
 export function enqueueDownload(gameId) {
   return fetchWithBody('/downloads/enqueue', 'POST', { game_id: gameId });
 }
-export function downloadGameFromIA(gameId) {
-  return fetchWithBody(`/games/${gameId}/download-ia`, 'POST');
+export function downloadGameFromIA(gameId, versionId) {
+  return fetchWithBody(`/games/${gameId}/download-ia`, 'POST', { version_id: versionId || undefined });
 }
 export function getDownloadQueue() {
   return fetchJson('/downloads');

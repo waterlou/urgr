@@ -207,8 +207,8 @@ router.get('/api/collections/:id/games', async (req, res) => {
       delete g.versions_tags;
       return { ...g, versions, regions: [] };
     });
-    // Attach covers/screenshots from game_media
-    const gameNames = [...new Set(games.map(g => g.name))];
+    // Attach covers/screenshots from game_media (try own name, fall back to cloneof)
+    const gameNames = [...new Set(games.flatMap(g => [g.name, g.cloneof].filter(Boolean)))];
     if (gameNames.length > 0) {
       const ph = gameNames.map(() => '?').join(',');
       const mediaRows = all(`SELECT gm.name, gm.covers, gm.screenshots FROM game_media gm WHERE gm.name IN (${ph})`, gameNames);
@@ -218,8 +218,8 @@ router.get('/api/collections/:id/games', async (req, res) => {
       }
       games = games.map(g => ({
         ...g,
-        covers: mediaMap[g.name]?.covers || [],
-        screenshots: mediaMap[g.name]?.screenshots || [],
+        covers: mediaMap[g.name]?.covers || mediaMap[g.cloneof]?.covers || [],
+        screenshots: mediaMap[g.name]?.screenshots || mediaMap[g.cloneof]?.screenshots || [],
       }));
     }
 
@@ -231,8 +231,8 @@ router.get('/api/collections/:id/games', async (req, res) => {
       FROM set_versions sv
       JOIN collection_versions cv ON cv.version_id = sv.id
       WHERE cv.collection_id = ?
-      ORDER BY sv.created_at DESC
     `, [id]);
+    collectionVersions.sort((a, b) => sortVersions([a.version, b.version])[0] === a.version ? -1 : 1);
 
     res.json({ collection, games, platforms, total, versions: collectionVersions, limit: Number(limit), offset: Number(offset) });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -242,7 +242,9 @@ router.get('/api/collections/:id/versions', async (req, res) => {
   await dbReady;
   try {
     const versions = all(`
-      SELECT sv.*, (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games
+      SELECT sv.*,
+        (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games,
+        (SELECT COUNT(*) FROM game_rom_sets grs JOIN game_state gs ON gs.game_id = grs.game_id WHERE grs.version_id = sv.id AND gs.available = 1) as available_games
       FROM set_versions sv
       JOIN collection_versions cv ON cv.version_id = sv.id
       WHERE cv.collection_id = ?
