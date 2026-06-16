@@ -2,6 +2,7 @@ import { Operation } from './index.js';
 import { execCli, execCliStream } from '../cli.js';
 import { all, get, run } from '../helpers.js';
 import { reloadDb, getDb, saveDb } from '../db.js';
+import { syncGameAvailability } from './syncAvailability.js';
 import { execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
@@ -53,22 +54,26 @@ export class BuildOperation extends Operation {
     const collectionDir = path.resolve(import.meta.dirname, '..', '..', '..', '..', 'data', 'roms', col.folder || col.slug);
     const scanDir = dir || path.join(collectionDir, sv.version);
 
-    run('UPDATE game_state SET available = 0 WHERE game_id IN (SELECT game_id FROM game_rom_sets WHERE version_id = ?)', [version_id]);
+    const matchedNames = (() => {
+      const result = execCli(['scan', String(version_id), scanDir]);
+      return (result?.matches || []).map(m => m.name);
+    })();
 
-    const scanResult = execCli(['scan', String(version_id), scanDir]);
+    run('UPDATE game_rom_sets SET available = 0 WHERE version_id = ?', [version_id]);
 
-    const matchedNames = (scanResult?.matches || []).map(m => m.name);
     if (matchedNames.length > 0) {
       const ph = matchedNames.map(() => '?').join(',');
-      run(`INSERT INTO game_state (game_id, available, updated_at)
-        SELECT g.id, 1, datetime('now') FROM games g
-        JOIN game_rom_sets grs ON grs.game_id = g.id
-        WHERE grs.version_id = ? AND g.name IN (${ph})
-        ON CONFLICT(game_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id, ...matchedNames]);
+      run(`UPDATE game_rom_sets SET available = 1
+        WHERE version_id = ? AND game_id IN (
+          SELECT g.id FROM games g WHERE g.name IN (${ph})
+        )`, [version_id, ...matchedNames]);
     }
 
+    const gameIds = all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [version_id]).map(r => r.game_id);
+    syncGameAvailability(gameIds);
+
     const total = get('SELECT COUNT(*) as c FROM game_rom_sets WHERE version_id = ?', [version_id]).c;
-    const matched = get('SELECT COUNT(*) as c FROM game_rom_sets grs JOIN game_state gs ON gs.game_id = grs.game_id WHERE grs.version_id = ? AND gs.available = 1', [version_id]).c;
+    const matched = get('SELECT COUNT(*) as c FROM game_rom_sets WHERE version_id = ? AND available = 1', [version_id]).c;
 
     let reused = 0;
     const priorVersions = all('SELECT DISTINCT sv.version, sv.id FROM set_versions sv JOIN collection_versions cv ON cv.version_id = sv.id WHERE cv.collection_id = ? AND sv.id < ? ORDER BY sv.id', [this.collectionId, version_id]);
@@ -120,15 +125,22 @@ export class BuildOperation extends Operation {
       },
     });
 
-    run('UPDATE game_state SET available = 0 WHERE game_id IN (SELECT game_id FROM game_rom_sets WHERE version_id = ?)', [version_id]);
+    run('UPDATE game_rom_sets SET available = 0 WHERE version_id = ?', [version_id]);
 
     if (dir && fs.existsSync(dir)) {
       const files = fs.readdirSync(dir).filter(f => f.endsWith('.zip'));
-      for (const f of files) {
-        const name = path.basename(f, '.zip');
-        run(`UPDATE game_state SET available = 1 WHERE game_id IN (SELECT g.id FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE g.name = ? AND grs.version_id = ?)`, [name, version_id]);
+      const names = files.map(f => path.basename(f, '.zip'));
+      if (names.length > 0) {
+        const ph = names.map(() => '?').join(',');
+        run(`UPDATE game_rom_sets SET available = 1
+          WHERE version_id = ? AND game_id IN (
+            SELECT g.id FROM games g WHERE g.name IN (${ph})
+          )`, [version_id, ...names]);
       }
     }
+
+    const gameIds = all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [version_id]).map(r => r.game_id);
+    syncGameAvailability(gameIds);
 
     reloadDb();
     this.updateProgress(100, 'Build complete');

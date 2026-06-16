@@ -5,6 +5,7 @@ import { getDb } from './db.js'
 import { all, get, run } from './helpers.js'
 import { execCli } from './cli.js'
 import { dataDir } from './paths.js'
+import { syncGameAvailability } from './operations/syncAvailability.js'
 
 let currentJob = null
 
@@ -183,9 +184,9 @@ async function checkGameComplete(gameId) {
       }
     }
   } catch (_) {}
-  run(`INSERT INTO game_state (game_id, available, updated_at)
-    VALUES (?, 1, datetime('now'))
-    ON CONFLICT(game_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [gameId])
+
+  run('UPDATE game_rom_sets SET available = 1 WHERE game_id = ?', [gameId])
+  syncGameAvailability([gameId])
   broadcastQueue()
 }
 

@@ -12,6 +12,7 @@ import { getAuth } from '../ia-auth.js';
 import { getCachedId, setCachedId } from '../ia-cache.js';
 import { dataDir } from '../paths.js';
 import { getMedia } from '../mediaCache.js';
+import { syncGameAvailability } from '../operations/syncAvailability.js';
 
 const router = Router();
 
@@ -1168,9 +1169,8 @@ router.post('/:id/download-ia', async (req, res) => {
         setCachedId(romset, game.version || '', result.cached_id);
       }
 
-      run(`INSERT INTO game_state (game_id, available, updated_at)
-        SELECT g.id, 1, datetime('now') FROM games g WHERE g.id = ?
-        ON CONFLICT(game_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [game.id]);
+      run('UPDATE game_rom_sets SET available = 1 WHERE game_id = ? AND version_id = ?', [game.id, game.version_id]);
+      syncGameAvailability([game.id]);
 
       doneJob(jobId, { ok: true, crc_match: result.crc_match, details: result });
     }).catch(e => {

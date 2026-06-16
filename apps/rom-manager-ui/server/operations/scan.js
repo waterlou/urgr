@@ -1,7 +1,8 @@
 import { Operation } from './index.js';
 import { execCli } from '../cli.js';
-import { run } from '../helpers.js';
+import { all, run } from '../helpers.js';
 import { reloadDb } from '../db.js';
+import { syncGameAvailability } from './syncAvailability.js';
 
 export class ScanOperation extends Operation {
   constructor(collectionId, params) {
@@ -15,19 +16,21 @@ export class ScanOperation extends Operation {
     this.updateProgress(0, 'Scanning ROMs...');
 
     try {
-      run('UPDATE game_state SET available = 0 WHERE game_id IN (SELECT game_id FROM game_rom_sets WHERE version_id = ?)', [version_id]);
-
       const result = execCli(['scan', version_id, dir]);
+
+      run('UPDATE game_rom_sets SET available = 0 WHERE version_id = ?', [version_id]);
 
       const matchedNames = (result?.matches || []).map(m => m.name);
       if (matchedNames.length > 0) {
         const ph = matchedNames.map(() => '?').join(',');
-        run(`INSERT INTO game_state (game_id, available, updated_at)
-          SELECT g.id, 1, datetime('now') FROM games g
-          JOIN game_rom_sets grs ON grs.game_id = g.id
-          WHERE grs.version_id = ? AND g.name IN (${ph})
-          ON CONFLICT(game_id) DO UPDATE SET available = 1, updated_at = datetime('now')`, [version_id, ...matchedNames]);
+        run(`UPDATE game_rom_sets SET available = 1
+          WHERE version_id = ? AND game_id IN (
+            SELECT g.id FROM games g WHERE g.name IN (${ph})
+          )`, [version_id, ...matchedNames]);
       }
+
+      const gameIds = all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [version_id]).map(r => r.game_id);
+      syncGameAvailability(gameIds);
 
       reloadDb();
       this.updateProgress(100, 'Scan complete');

@@ -42,8 +42,8 @@ When looking for a ROM across versions:
 
 ### Play Endpoint Priority
 
-1. `scanned_games` for the game's exact version_id
-2. `.version` fallback: read file → find current version index → scan older lines (reversed) → check each older version's `scanned_games` for a matching ROM on disk
+1. `game_rom_sets.available` for the game's exact version_id
+2. `.version` fallback: read file → find current version index → scan older lines (reversed) → check each older version's `roms/` dir for a matching ROM on disk
 3. NPS: filesystem search for PKG file
 4. No-Intro/DAT/others: filesystem search by `rom_entries.filename` (zip checked first, then individual file)
 
@@ -58,9 +58,18 @@ When looking for a ROM across versions:
 
 ## Scanner Directory Rule
 
-DAT builds **must** scan `collectionDir/{version}` (version-specific), never the collection root. Scanning the root causes cross-version ROM misassignment (e.g., nightly ROMs assigned to v1.0.0.02).
+After a build completes, the server scans output dirs to set `game_rom_sets.available` for the version. The scan must follow the version chain from `.version`:
 
-References: `apps/rom-manager-ui/server/routes/collections.js` line ~347.
+1. Read `.version` file at `{collectionDir}/.version`
+2. Walk versions **in order** (oldest first)
+3. Stop at the version that was just built
+4. Scan each version's `roms/` subdirectory for `.zip` files and CHD directories
+
+This picks up both newly-added games (in the current version's dir) and reused games (copied to an older version's dir via prior-version fallback during the CLI build).
+
+**Never** scan the collection root recursively — that causes cross-version ROM misassignment (e.g., 0.256 ROMs attributed to 0.41).
+
+References: `apps/rom-manager-ui/server/routes/collections.js` lines ~470 and ~625.
 
 ## Version Sort Logic
 

@@ -566,9 +566,12 @@ pub fn build_version(
     let mut exists = 0usize;
     let mut reused = 0usize;
     let mut matched_by_hash = 0usize;
+    let mut processed_count = 0usize;
     let mut missing: Vec<MissingGame> = Vec::new();
 
     for game_name in &need_copy {
+        processed_count += 1;
+
         // Determine platform subdirectory
         let platform = game_map.get(game_name).map(|g| &g.platform).filter(|p| !p.is_empty());
         let dest = if let Some(p) = platform {
@@ -581,11 +584,11 @@ pub fn build_version(
         }
 
         // Periodic progress + cancellation check
-        if (added + exists) % 50 == 0 {
+        let progress_interval = (need_copy.len() / 100).max(1);
+        if processed_count % progress_interval == 0 {
             check_cancelled(cancelled)?;
-            let done = added + exists;
-            let pct = 30 + ((done as u64 * 60) / need_copy.len().max(1) as u64) as u32;
-            progress(on_progress, "copying", pct, &format!("Scanning ROMs ({}/{})", done, need_copy.len()), done, missing.len(), need_copy.len() + unchanged, &progress_path);
+            let pct = 30 + ((processed_count as u64 * 60) / need_copy.len().max(1) as u64) as u32;
+            progress(on_progress, "copying", pct, &format!("Scanning ROMs ({}/{})", processed_count, need_copy.len()), processed_count, missing.len(), need_copy.len() + unchanged, &progress_path);
         }
 
         // Skip if already correctly in place

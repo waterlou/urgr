@@ -1,5 +1,7 @@
 # ROM Manager
 
+> ## ⚠️ Before any code change, read the checklist below
+
 A ROM collection manager with DAT parsing, metadata scraping, ROM building, game set playlists, and in-browser emulation via EmulatorJS.
 
 ## Tech Stack
@@ -84,4 +86,4 @@ Key commands: `browser-harness-js --start`, `--stop`, `--restart`, `--status`, `
 - **Version fallback**: When looking for a ROM across versions, ALWAYS prefer **older** versions over newer ones. Newer versions (e.g., nightly) may have different ROM sets. Older versions are more stable and predictable.
 - **EmulatorJS core names**: Use `fbneo` (not `arcade`) for FBNeo/MAME arcade games. The CDN core files are named `fbneo-wasm.data`, not `arcade-wasm.data`.
 - **Region field**: Always store `''` (empty string) for region, never `NULL`. SQLite treats `NULL != NULL` in UNIQUE constraints, causing duplicate entries. The Rust code enforces this with `game.region.as_deref().unwrap_or("")`.
-- **Scanner directory**: DAT builds scan `collectionDir/{version}` (version-specific), NOT the collection root. Scanning the root causes cross-version ROM misassignment.
+- **Scanner directory**: Build completion scan reads `.version`, walks versions oldest-first up to the built version, and scans each version's `roms/` dir. NEVER scan the collection root recursively — that causes cross-version misassignment. See `docs/version-fallback.md#scanner-directory-rule`.

@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS game_rom_sets (
     version_id      INTEGER NOT NULL REFERENCES set_versions(id),
     romof           TEXT,
     status          TEXT NOT NULL DEFAULT 'good',
+    available       INTEGER NOT NULL DEFAULT 0,
     UNIQUE(game_id, version_id)
 );
 
@@ -73,6 +74,7 @@ pub const MIGRATIONS: &[&str] = &[
     "ALTER TABLE games ADD COLUMN runnable INTEGER",
     "ALTER TABLE games ADD COLUMN driver_status TEXT",
     "ALTER TABLE games ADD COLUMN driver_emulation TEXT",
+    "ALTER TABLE game_rom_sets ADD COLUMN available INTEGER NOT NULL DEFAULT 0",
 ];
 
 pub const INDEXES: &str = "

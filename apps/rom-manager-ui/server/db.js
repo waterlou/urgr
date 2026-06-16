@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS game_rom_sets (
     version_id      INTEGER NOT NULL,
     romof           TEXT,
     status          TEXT NOT NULL DEFAULT 'good',
+    available       INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
     FOREIGN KEY (version_id) REFERENCES set_versions(id),
     UNIQUE(game_id, version_id)
@@ -235,6 +236,8 @@ export function initDb(dbPath) {
   try { db.run("ALTER TABLE collections ADD COLUMN scrape_mode TEXT DEFAULT 'auto'"); } catch (_) {}
   // Migration: add scrape_source_priority column to collections
   try { db.run("ALTER TABLE collections ADD COLUMN scrape_source_priority TEXT DEFAULT NULL"); } catch (_) {}
+  // Migration: add available column to game_rom_sets (per-version availability flag)
+  try { db.run("ALTER TABLE game_rom_sets ADD COLUMN available INTEGER NOT NULL DEFAULT 0"); } catch (_) {}
 
   // Create recently_played table (simple cross-version list)
   try {

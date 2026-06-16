@@ -20,7 +20,7 @@ Singleton managing download queue. Key behaviors:
 - **One download at a time**: Queue processes sequentially
 - **SHA-256 verification**: Downloaded file hashed and compared against expected
 - **Auto-move**: After download, file moved to `data/roms/{collection_folder}/{platform}/{Games|DLCs|Updates}/{filename}`
-- **Game completion**: After all files for a game entry are done, runs `nps-cli scan --game-id <id>` to update `scanned_games`, then sets `game_state.available = 1`
+- **Game completion**: After all files for a game entry are done, runs `nps-cli scan --game-id <id>` to update `scanned_games`, then sets `game_rom_sets.available = 1` for the version and calls `syncGameAvailability()`
 - **Retry**: Up to 3 retries before marking as failed
 - **120s timeout**: Fetch uses `AbortSignal.timeout(120000)`
 
@@ -41,13 +41,40 @@ Game detail response includes `downloaded` flag per ROM entry, computed by CRC v
 - EmulatorJS CDN: `https://cdn.emulatorjs.org/nightly/data/` (nightly channel has more up-to-date cores)
 - **EmulatorJS re-open**: Closing the emulator modal triggers a page reload (`location.reload()`). EmulatorJS doesn't support re-initialization with a new game URL after the initial load.
 
+## Build Completion Scan (game_rom_sets.available)
+
+After a build completes, the server scans output dirs to set `game_rom_sets.available = 1` for found games. **The scan must follow the version chain from `.version`:**
+
+1. Read `.version` file at `{collectionDir}/.version`
+2. Walk versions **in order** (oldest first, matching the file's line order)
+3. Stop at the version that was just built
+4. Scan each version's `roms/` subdirectory for `.zip` files and CHD directories
+
+**Never** scan the collection root recursively (`scanDir(collectionDir)`) — that causes cross-version misassignment (e.g., 0.256 ROMs attributed to 0.41).
+
+This design exists in two places in `collections.js`:
+- `POST /api/collections/:id/build` (DAT build completion, ~line 470)
+- `PUT /api/collections/:id/builds/:buildId/run` (~line 625)
+
+## Game State Availability
+
+`game_state.available` is **derived** from `game_rom_sets.available` via `syncGameAvailability(gameIds)` in `server/operations/syncAvailability.js`. Never write to `game_state.available` directly — always write to `game_rom_sets.available` and call `syncGameAvailability()` afterward.
+
+## Build Progress Reporting
+
+### Frontend field name
+The server sends progress as `{ type: 'progress', pct: N, msg: '...' }`. The frontend MUST read `msg.pct` (not `msg.percent`). See `BuildManager.jsx` line 46.
+
+### Rust progress interval
+In `builder.rs`, progress during the copy loop uses an adaptive interval: `(need_copy.len() / 100).max(1)`. This ensures ~100 evenly-spaced updates regardless of workload size. A counter `processed_count` increments every iteration (including missing games), so the progress bar always advances.
+
 ## CLI Behavior
 
 ### ROM Verification
 
 - **Zip-based ROMs (FBNeo, MAME, No-Intro)**: Use **CRC32** read from zip entry headers. No decompression needed — `zip::ZipArchive::by_index_raw().crc32()` reads the stored CRC directly from the zip's local file header.
 - **NPS (PKG files)**: Uses **SHA-256** for download verification (`downloader.js` compares downloaded file hash against `expected_sha256`).
-- `scanned_games` table was removed. CLI now outputs match results as JSON; server writes directly to `game_state.available`.
+- `scanned_games` table was removed. CLI now outputs match results as JSON; server writes to `game_rom_sets.available` and calls `syncGameAvailability()` to update `game_state`.
 
 ### Split-Format (Merged) ROM Support
 
@@ -78,7 +105,7 @@ DATs from `progettosnaps.net` are in **Logiqx XML format** (detected via `<!DOCT
 Both CLIs accept `--game-id <id>` to scan a single game instead of the entire collection.
 - `nps-cli scan` — extracts `title_id` from `.pkg` filename (pattern: `{prefix}-{title_id}_{num}-...`)
 - `build-cli scan` — matches by stem (filename without `.zip` extension), then verifies CRC from zip entry headers against expected ROM entries. A zip is only considered matched if at least one expected CRC is found in its entry headers.
-- Both output JSON with `{ matches: [{name, filename}], missing_names: [...] }`. Server parses this and updates `game_state.available`.
+- Both output JSON with `{ matches: [{name, filename}], missing_names: [...] }`. Server parses this and updates `game_rom_sets.available` + `syncGameAvailability()`.
 
 ### Reuse calculation (versioned collections)
 

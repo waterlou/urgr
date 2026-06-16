@@ -41,11 +41,11 @@ export default function BuildManager({ collectionId, collection }) {
     try {
       const result = await collectionBuild(collectionId, buildVersion, buildImportDir, false);
       const jobId = result.jobId || result.job_id || result.id;
-      setBuildProgress(p => ({ ...p, [jobId]: 0 }));
+      setBuildProgress({ [jobId]: 0 });
       const es = subscribeJobSSE(jobId, {
-        onProgress: (msg) => setBuildProgress(p => ({ ...p, [jobId]: msg.percent || 0 })),
-        onResult: (data) => { setBuildResult(data); setBuildRunning(false); getCollectionBuilds(collectionId).then(setBuilds); },
-        onError: (err) => { setBuildResult({ error: err }); setBuildRunning(false); },
+        onProgress: (msg) => setBuildProgress(p => ({ ...p, [jobId]: msg.pct || 0 })),
+        onResult: (data) => { setBuildProgress({}); setBuildResult(data); setBuildRunning(false); getCollectionBuilds(collectionId).then(setBuilds); },
+        onError: (err) => { setBuildProgress({}); setBuildResult({ error: err }); setBuildRunning(false); },
       });
       eventSourcesRef.current[jobId] = es;
     } catch (e) {
