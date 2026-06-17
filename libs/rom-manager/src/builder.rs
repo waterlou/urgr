@@ -4,12 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
-use crate::models::MergeMode;
 use tracing::info;
 
 use crate::db::Database;
 use crate::error::{Error, Result};
-use crate::models::{Game, MissingGame, MissingReason, ParsedGame, ParsedRom, RomDetail, RomFile, SetVersion};
+use crate::models::{Game, MergeMode, MissingGame, MissingReason, RomDetail, RomFile, SampleResult, SetVersion};
 use rom_scraper::compute_hashes_from_bytes;
 
 const STATUS_FILENAME: &str = "_build_status.json";
@@ -40,6 +39,16 @@ pub struct BuildStatus {
     pub cleaned: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_run: Option<String>,
+    #[serde(default)]
+    pub samples_added: usize,
+    #[serde(default)]
+    pub samples_existed: usize,
+    #[serde(default)]
+    pub samples_reused: usize,
+    #[serde(default)]
+    pub samples_missing: usize,
+    #[serde(default)]
+    pub missing_samples: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,7 +66,6 @@ pub struct BuildResult {
     pub total_games: usize,
     pub added: usize,
     pub exists: usize,
-    pub unchanged: usize,
     pub reused: usize,
     pub missing: usize,
     pub cleaned: usize,
@@ -67,6 +75,11 @@ pub struct BuildResult {
     pub mode: String,
     pub version: String,
     pub prev_version: Option<String>,
+    pub samples_added: usize,
+    pub samples_existed: usize,
+    pub samples_reused: usize,
+    pub samples_missing: usize,
+    pub missing_samples: Vec<String>,
 }
 
 struct ImportIndex {
@@ -153,60 +166,26 @@ impl ImportIndex {
             .filter(|r| r.merge_target.is_none())
             .collect();
         let expected_count = non_merge.len();
+        let missing_details = || non_merge.iter().map(|r| RomDetail {
+            filename: r.filename.clone(),
+            expected_crc: r.crc32.clone().unwrap_or_default(),
+            actual_crc: None,
+            status: "missing".to_string(),
+        }).collect();
 
         let path = match self.name_to_path.get(game_name) {
             Some(p) => p,
-            None => {
-                let details = non_merge.iter().map(|r| RomDetail {
-                    filename: r.filename.clone(),
-                    expected_crc: r.crc32.clone().unwrap_or_default(),
-                    actual_crc: None,
-                    status: "missing".to_string(),
-                }).collect();
-                return (MissingReason::FileNotFound, details);
-            }
+            None => return (MissingReason::FileNotFound, missing_details()),
         };
 
         let zip_crc_set = match self.zip_crcs.get(game_name) {
             Some(s) => s,
-            None => {
-                let details = non_merge.iter().map(|r| RomDetail {
-                    filename: r.filename.clone(),
-                    expected_crc: r.crc32.clone().unwrap_or_default(),
-                    actual_crc: None,
-                    status: "missing".to_string(),
-                }).collect();
-                return (MissingReason::CrcMismatch { matched: 0, expected: expected_count }, details);
-            }
+            None => return (MissingReason::CrcMismatch { matched: 0, expected: expected_count }, missing_details()),
         };
 
-        // Read actual zip CRCs by filename for detailed comparison
         let zip_file_crcs = read_zip_crc_by_filename(path);
-
-        let mut matched = 0usize;
-        let mut details = Vec::with_capacity(non_merge.len());
-        for rom in &non_merge {
-            let exp_crc = rom.crc32.clone().unwrap_or_default();
-            let crc_found = !exp_crc.is_empty() && zip_crc_set.contains(&exp_crc);
-            if crc_found { matched += 1; }
-
-            // Find actual CRC: if matched by CRC it's the expected value,
-            // otherwise look for filename match in the zip
-            let actual_crc = if crc_found {
-                Some(exp_crc.clone())
-            } else {
-                zip_file_crcs.get(&rom.filename).cloned()
-            };
-
-            let status = if crc_found { "match" } else { "mismatch" };
-            details.push(RomDetail {
-                filename: rom.filename.clone(),
-                expected_crc: exp_crc,
-                actual_crc,
-                status: status.to_string(),
-            });
-        }
-
+        let non_merge_owned: Vec<RomFile> = non_merge.into_iter().cloned().collect();
+        let (matched, details) = build_rom_details(&non_merge_owned, zip_crc_set, &zip_file_crcs);
         (MissingReason::CrcMismatch { matched, expected: expected_count }, details)
     }
 
@@ -284,7 +263,7 @@ fn compute_zip_crcs(zip_path: &Path) -> std::collections::HashSet<String> {
 }
 
 /// Compute filename→CRC32 mapping for all files inside a zip (no extraction).
-fn read_zip_crc_by_filename(zip_path: &Path) -> std::collections::HashMap<String, String> {
+pub fn read_zip_crc_by_filename(zip_path: &Path) -> std::collections::HashMap<String, String> {
     let mut map = std::collections::HashMap::new();
     let data = match std::fs::read(zip_path) {
         Ok(d) => d,
@@ -474,25 +453,24 @@ pub fn build_version(
         write_mode(&mode_path, requested_mode)?;
     }
 
-    let mut status = match read_status(&status_path) {
-        Some(s) => {
-            info!("Resuming build for {} v{} (mode: {})", source, latest.version, s.mode);
-            s
-        }
-        None => BuildStatus {
-            source: source.to_string(),
-            version: latest.version.clone(),
-            mode: if force_update { "update" } else { "collect" }.to_string(),
-            prev_version: prev.as_ref().map(|p| p.version.clone()),
-            total_games: latest.total_games as usize,
-            matched: 0,
-            unchanged: 0,
-            missing: 0,
-            missing_games: Vec::new(),
-            missing_reasons: Vec::new(),
-            cleaned: 0,
-            last_run: None,
-        },
+    let mut status = BuildStatus {
+        source: source.to_string(),
+        version: latest.version.clone(),
+        mode: if force_update { "update" } else { "collect" }.to_string(),
+        prev_version: prev.as_ref().map(|p| p.version.clone()),
+        total_games: latest.total_games as usize,
+        matched: 0,
+        unchanged: 0,
+        missing: 0,
+        missing_games: Vec::new(),
+        missing_reasons: Vec::new(),
+        cleaned: 0,
+        last_run: None,
+        samples_added: 0,
+        samples_existed: 0,
+        samples_reused: 0,
+        samples_missing: 0,
+        missing_samples: Vec::new(),
     };
 
     // ── Phase 1: Compute diff ──
@@ -736,7 +714,9 @@ pub fn build_version(
                         eprintln!("  {game_name}: CRC mismatch ({matched}/{expected} ROMs verified)"),
                 }
             }
-            missing.push(MissingGame { name: game_name.clone(), reason, rom_details });
+            let sampleof = ge.and_then(|g| g.sampleof.as_deref());
+            let sample_details = compute_sample_details(sampleof, &all_games, db, latest.id, &import_dir.join(SAMPLES_DIR_NAME)).unwrap_or_default();
+            missing.push(MissingGame { name: game_name.clone(), reason, rom_details, sampleof: sampleof.map(|s| s.to_string()), sample_details });
         }
     }
 
@@ -772,24 +752,83 @@ pub fn build_version(
         }
     }
 
-    // ── Phase 5c: Copy samples folder ──
-    if !dry_run {
-        let import_samples = import_dir.join(SAMPLES_DIR_NAME);
-        if import_samples.is_dir() {
-            let dest_samples = version_dir.join(SAMPLES_DIR_NAME);
-            std::fs::create_dir_all(&dest_samples)?;
-            for entry in walk_files(&import_samples)? {
-                if entry.extension().and_then(|e| e.to_str()) == Some("zip") {
-                    let rel = entry.strip_prefix(&import_samples).unwrap_or(&entry);
-                    let dst = dest_samples.join(rel);
-                    if let Some(parent) = dst.parent() {
-                        std::fs::create_dir_all(parent)?;
-                    }
-                    if !dst.exists() {
-                        std::fs::copy(&entry, &dst)?;
-                        info!("  Sample {} → {}", entry.display(), dst.display());
+    // ── Phase 5c: Copy samples with verification (same pipeline as ROMs) ──
+    let sample_names: std::collections::BTreeSet<String> = all_games.iter()
+        .filter_map(|g| g.sampleof.as_ref().filter(|s| !s.is_empty()))
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .chain(
+            all_games.iter().filter_map(|g| {
+                db.list_roms_for_game(g.id, latest.id).ok().and_then(|roms| {
+                    if roms.iter().any(|r| r.subtype == "sample") { Some(g.name.clone()) } else { None }
+                })
+            })
+        )
+        .collect::<std::collections::BTreeSet<_>>();
+
+    let mut samples_added = 0usize;
+    let mut samples_existed = 0usize;
+    let mut samples_reused = 0usize;
+    let mut samples_missing = 0usize;
+    let mut missing_samples: Vec<String> = Vec::new();
+
+    if !dry_run && !sample_names.is_empty() {
+        let dest_samples = version_dir.join(SAMPLES_DIR_NAME);
+        let dest_existed: std::collections::HashSet<String> = if dest_samples.is_dir() {
+            walk_files(&dest_samples)?.iter()
+                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("zip"))
+                .filter_map(|p| p.file_stem().map(|s| s.to_string_lossy().to_string()))
+                .collect()
+        } else {
+            std::collections::HashSet::new()
+        };
+        let mut prior_samples: std::collections::HashMap<String, std::path::PathBuf> = std::collections::HashMap::new();
+        if let Some(cd) = collection_dir {
+            for pv in &prior_versions {
+                let pv_samples = cd.join(pv).join(SAMPLES_DIR_NAME);
+                if pv_samples.is_dir() {
+                    for entry in walk_files(&pv_samples)? {
+                        if entry.extension().and_then(|e| e.to_str()) != Some("zip") { continue; }
+                        let stem = entry.file_stem().unwrap_or_default().to_string_lossy().to_string();
+                        prior_samples.entry(stem).or_insert_with(|| entry.clone());
                     }
                 }
+            }
+        }
+
+        for sample_name in &sample_names {
+            let dst = dest_samples.join(format!("{}.zip", sample_name));
+            if dest_existed.contains(sample_name.as_str()) {
+                samples_existed += 1;
+            } else if let Some(src) = prior_samples.get(sample_name.as_str()) {
+                std::fs::copy(src, &dst)?;
+                samples_reused += 1;
+            } else if let Some(import_path) = index.name_to_path.get(sample_name.as_str()) {
+                let expected_roms = match all_games.iter().find(|g| g.name == *sample_name) {
+                    Some(g) => db.list_roms_for_game(g.id, latest.id).unwrap_or_default(),
+                    None => Vec::new(),
+                };
+                let sample_roms: Vec<&RomFile> = expected_roms.iter()
+                    .filter(|r| r.subtype == "sample" && r.merge_target.is_none())
+                    .collect();
+                if !sample_roms.is_empty() {
+                    let zip_crcs = read_zip_crc_by_filename(import_path);
+                    let zip_crc_set: std::collections::HashSet<String> = zip_crcs.values().cloned().collect();
+                    let all_ok = sample_roms.iter().all(|r| {
+                        r.crc32.as_ref().map_or(true, |c| c.is_empty() || zip_crc_set.contains(c))
+                    });
+                    if !all_ok {
+                        missing_samples.push(sample_name.clone());
+                        samples_missing += 1;
+                        continue;
+                    }
+                }
+                std::fs::copy(import_path, &dst)?;
+                samples_added += 1;
+            } else {
+                missing_samples.push(sample_name.clone());
+                samples_missing += 1;
             }
         }
     }
@@ -797,26 +836,28 @@ pub fn build_version(
     check_cancelled(cancelled)?;
     progress(on_progress, "copying", 95, &format!("Copy complete ({}/{} added)", added, need_copy.len()), added, missing.len(), need_copy.len() + unchanged, &progress_path);
 
-    // Count unchanged games that exist in prior version output
+    // Count unchanged games from any prior version's output
     if unchanged > 0 && !prior_versions.is_empty() {
         if let Some(cd) = collection_dir {
-            let pv = &prior_versions[0];
-            let pv_roms = cd.join(pv).join(ROMS_DIR_NAME);
-            if pv_roms.exists() {
-                let prior_zips: std::collections::HashSet<String> = walk_files(&pv_roms)?
-                    .iter()
-                    .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("zip"))
-                    .map(|p| p.file_stem().unwrap_or_default().to_string_lossy().to_string())
-                    .collect();
-                let current_names: std::collections::HashSet<String> =
-                    all_games.iter().map(|g| g.name.clone()).collect();
-                reused += prior_zips.iter().filter(|z| current_names.contains(*z)).count();
+            let mut prior_zips: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for pv in &prior_versions {
+                let pv_roms = cd.join(pv).join(ROMS_DIR_NAME);
+                if !pv_roms.exists() { continue; }
+                for entry in walk_files(&pv_roms)? {
+                    if entry.extension().and_then(|e| e.to_str()) == Some("zip") {
+                        prior_zips.insert(
+                            entry.file_stem().unwrap_or_default().to_string_lossy().to_string()
+                        );
+                    }
+                }
             }
+            let current_names: std::collections::HashSet<String> =
+                all_games.iter().map(|g| g.name.clone()).collect();
+            reused += prior_zips.iter().filter(|z| current_names.contains(*z)).count();
         }
     }
 
     // ── Phase 6: Version dedup (collection mode only) ──
-    let mut deduped = 0usize;
     if !dry_run {
         if let Some(cd) = collection_dir {
             if !prior_versions.is_empty() && roms_dir.exists() {
@@ -835,7 +876,6 @@ pub fn build_version(
                             let pv_data = std::fs::read(&pv_file)?;
                             if crypto_hash(&pv_data) == sha1 {
                                 std::fs::remove_file(&entry)?;
-                                deduped += 1;
                                 info!("  Dedup: {} (same as v{})", entry.display(), pv);
                                 break;
                             }
@@ -879,18 +919,26 @@ pub fn build_version(
             let (reason, rom_details) = index.explain_missing(&old_mg.name, &check);
             info!("  {}: still missing ({})", old_mg.name,
                 match &reason { MissingReason::FileNotFound => "FileNotFound", _ => "CrcMismatch" });
-            missing.push(MissingGame { name: old_mg.name.clone(), reason, rom_details });
+            let sampleof = ge.and_then(|g| g.sampleof.as_deref());
+            let sample_details = compute_sample_details(sampleof, &all_games, db, latest.id, &import_dir.join(SAMPLES_DIR_NAME)).unwrap_or_default();
+            missing.push(MissingGame { name: old_mg.name.clone(), reason, rom_details, sampleof: sampleof.map(|s| s.to_string()), sample_details });
         }
     }
 
     // ── Phase 8: Save status + report ──
     status.matched = added + status.matched;
 
+    missing.sort_by(|a, b| a.name.cmp(&b.name));
+
     progress(on_progress, "saving", 98, "Saving status...", status.matched, missing.len(), need_copy.len() + unchanged, &progress_path);
     status.missing = missing.len();
     status.missing_games = missing.iter().map(|m| m.name.clone()).collect();
     status.missing_reasons = missing.clone();
-    status.unchanged = unchanged;
+    status.samples_added = samples_added;
+    status.samples_existed = samples_existed;
+    status.samples_reused = samples_reused;
+    status.samples_missing = samples_missing;
+    status.missing_samples = missing_samples.clone();
     status.last_run = Some(chrono_now());
     if !dry_run {
         write_status(&status_path, &status)?;
@@ -900,7 +948,6 @@ pub fn build_version(
         total_games: need_copy.len() + unchanged,
         added,
         exists,
-        unchanged,
         reused,
         missing: missing.len(),
         cleaned: status.cleaned,
@@ -910,6 +957,11 @@ pub fn build_version(
         mode: status.mode.clone(),
         version: latest.version.clone(),
         prev_version: prev.map(|p| p.version.clone()),
+        samples_added,
+        samples_existed,
+        samples_reused,
+        samples_missing,
+        missing_samples,
     };
 
     progress(on_progress, "done", 100, "Build complete", result.added, result.missing, result.total_games, &progress_path);
@@ -919,9 +971,67 @@ pub fn build_version(
 
 // ── Helpers ──
 
+/// Scan a samples directory and verify sample zips against DB entries.
+/// Collects sample set names from sampleof references, games with sample-subtype ROMs,
+/// and any zips present in the samples directory. Returns found/missing counts.
+pub fn scan_samples(
+    all_games: &[Game],
+    db: &Database,
+    version_id: i64,
+    samples_dir: &std::path::Path,
+) -> Result<SampleResult> {
+    let mut sample_set_names: std::collections::BTreeSet<String> = all_games.iter()
+        .filter_map(|g| g.sampleof.as_ref().filter(|s| !s.is_empty()))
+        .cloned()
+        .collect();
+    for game in all_games {
+        if let Ok(roms) = db.list_roms_for_game(game.id, version_id) {
+            if roms.iter().any(|r| r.subtype == "sample") {
+                sample_set_names.insert(game.name.clone());
+            }
+        }
+    }
+
+    let mut samples_found = 0usize;
+    let mut samples_missing = 0usize;
+    let mut missing_samples = Vec::new();
+
+    for sample_name in &sample_set_names {
+        let sample_zip_path = samples_dir.join(format!("{}.zip", sample_name));
+        if !sample_zip_path.exists() {
+            missing_samples.push(sample_name.clone());
+            samples_missing += 1;
+            continue;
+        }
+        let sample_game = all_games.iter().find(|g| g.name == *sample_name);
+        let expected_sample_roms = match sample_game {
+            Some(g) => db.list_roms_for_game(g.id, version_id).unwrap_or_default(),
+            None => Vec::new(),
+        };
+        let sample_roms: Vec<&RomFile> = expected_sample_roms.iter()
+            .filter(|r| r.subtype == "sample" && r.merge_target.is_none())
+            .collect();
+        if !sample_roms.is_empty() {
+            let zip_crcs = read_zip_crc_by_filename(&sample_zip_path);
+            let zip_crc_set: std::collections::HashSet<String> = zip_crcs.values().cloned().collect();
+            let all_ok = sample_roms.iter().all(|r| {
+                r.crc32.as_ref().map_or(true, |c| c.is_empty() || zip_crc_set.contains(c))
+            });
+            if !all_ok {
+                missing_samples.push(sample_name.clone());
+                samples_missing += 1;
+                continue;
+            }
+        }
+        samples_found += 1;
+    }
+
+    Ok(SampleResult { samples_found, samples_missing, missing_samples })
+}
+
 /// Compute the set of ROMs that belong to a game (excluding merge_target and parent-inherited).
 /// Mirrors verify_game_zip logic for split-format support.
-fn compute_game_roms(
+pub fn compute_game_roms(
     expected_roms: &[RomFile],
     game: Option<&Game>,
     all_games: &[Game],
@@ -929,30 +1039,44 @@ fn compute_game_roms(
     version_id: i64,
 ) -> Result<Vec<RomFile>> {
     let mut roms: Vec<&RomFile> = expected_roms.iter()
-        .filter(|r| r.merge_target.is_none()).collect();
+        .filter(|r| r.merge_target.is_none() && r.subtype != "sample").collect();
     if let Some(g) = game {
+        let mut parent_ids: Vec<i64> = Vec::new();
         if let Some(pid) = g.parent_game_id {
-            if let Some(parent) = all_games.iter().find(|pg| pg.id == pid) {
-                if let Ok(parent_roms) = db.list_roms_for_game(parent.id, version_id) {
-                    let parent_crcs: std::collections::HashSet<&str> = parent_roms.iter()
-                        .filter_map(|r| r.crc32.as_deref())
-                        .filter(|c| !c.is_empty())
-                        .collect();
-                    roms.retain(|r| !r.crc32.as_deref().map_or(false, |c| parent_crcs.contains(c)));
+            parent_ids.push(pid);
+        }
+        if let Ok(Some(romof_name)) = db.get_romof(g.id, version_id) {
+            if !romof_name.is_empty() {
+                if let Some(romof_game) = all_games.iter().find(|pg| pg.name == romof_name) {
+                    if !parent_ids.contains(&romof_game.id) {
+                        parent_ids.push(romof_game.id);
+                    }
                 }
             }
         }
+        let mut parent_crcs: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for &pid in &parent_ids {
+            if let Some(parent) = all_games.iter().find(|pg| pg.id == pid) {
+                if let Ok(parent_roms) = db.list_roms_for_game(parent.id, version_id) {
+                    for r in &parent_roms {
+                        if let Some(crc) = &r.crc32 {
+                            if !crc.is_empty() {
+                                parent_crcs.insert(crc.to_uppercase());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if !parent_crcs.is_empty() {
+            roms.retain(|r| !r.crc32.as_deref().map_or(false, |c| parent_crcs.contains(c)));
+        }
     }
     if roms.is_empty() {
-        Ok(expected_roms.iter().filter(|r| r.merge_target.is_none()).cloned().collect())
+        Ok(expected_roms.iter().filter(|r| r.merge_target.is_none() && r.subtype != "sample").cloned().collect())
     } else {
         Ok(roms.into_iter().cloned().collect())
     }
-}
-
-fn read_status(path: &Path) -> Option<BuildStatus> {
-    let data = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&data).ok()
 }
 
 fn write_progress(path: &Path, progress: &BuildProgress) -> Result<()> {
@@ -1137,41 +1261,144 @@ fn verify_zip_contains(zip_path: &Path, expected_roms: &[RomFile]) -> bool {
 
 fn verify_game_zip(db: &Database, version_id: i64, game_name: &str, zip_path: &Path) -> Result<bool> {
     let games = db.list_games(version_id)?;
-    let game = match games.iter().find(|g| g.name == game_name) {
-        Some(g) => g,
+    let game = games.iter().find(|g| g.name == game_name);
+    let expected = match game {
+        Some(g) => db.list_roms_for_game(g.id, version_id)?,
         None => return Ok(false),
     };
-    let mut expected = db.list_roms_for_game(game.id, version_id)?;
     if expected.is_empty() {
         return Ok(false);
     }
-
-    // Split-format support: skip ROMs with merge_target (they live in a parent zip)
-    expected.retain(|r| r.merge_target.is_none());
-
-    // If after skipping merge ROMs there's nothing left, no zip needed
-    if expected.is_empty() {
+    let check = compute_game_roms(&expected, game, &games, db, version_id)?;
+    if check.is_empty() {
         return Ok(true);
     }
+    Ok(verify_zip_contains(zip_path, &check))
+}
 
-    // Split-format support: subtract ROMs inherited from parent (cloneof)
-    if let Some(parent_id) = game.parent_game_id {
-        if let Some(parent) = games.iter().find(|g| g.id == parent_id) {
-            let parent_roms = db.list_roms_for_game(parent.id, version_id)?;
-            let parent_crcs: HashSet<String> = parent_roms.iter()
-                .filter_map(|r| r.crc32.as_ref())
-                .cloned()
-                .collect();
-            expected.retain(|r| !r.crc32.as_ref().map_or(false, |c| parent_crcs.contains(c)));
+/// Shared per-ROM comparison: given expected ROMs and actual zip CRCs,
+/// build per-ROM details and count matches.
+fn build_rom_details(roms: &[RomFile], zip_crc_set: &std::collections::HashSet<String>, zip_file_crcs: &std::collections::HashMap<String, String>) -> (usize, Vec<RomDetail>) {
+    let mut matched = 0usize;
+    let mut details = Vec::with_capacity(roms.len());
+    for r in roms {
+        let exp = r.crc32.clone().unwrap_or_default();
+        let found = !exp.is_empty() && zip_crc_set.contains(&exp);
+        if found { matched += 1; }
+        let actual = if found { Some(exp.clone()) } else { zip_file_crcs.get(&r.filename).cloned() };
+        let status = if found { "match" } else { "mismatch" };
+        details.push(RomDetail { filename: r.filename.clone(), expected_crc: exp, actual_crc: actual, status: status.to_string() });
+    }
+    (matched, details)
+}
+
+fn compute_sample_details(
+    sampleof: Option<&str>,
+    all_games: &[Game],
+    db: &Database,
+    version_id: i64,
+    samples_dir: &std::path::Path,
+) -> Result<Vec<RomDetail>> {
+    let sample_set_name = match sampleof {
+        Some(s) if !s.is_empty() => s,
+        _ => return Ok(Vec::new()),
+    };
+    let sample_game = match all_games.iter().find(|g| g.name == sample_set_name) {
+        Some(g) => g,
+        None => return Ok(Vec::new()),
+    };
+    let roms = db.list_roms_for_game(sample_game.id, version_id)?;
+    let sample_roms: Vec<&RomFile> = roms.iter()
+        .filter(|r| r.subtype == "sample" && r.merge_target.is_none())
+        .collect();
+    if sample_roms.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let zip_path = samples_dir.join(format!("{}.zip", sample_set_name));
+    if !zip_path.exists() {
+        return Ok(sample_roms.iter().map(|r| RomDetail {
+            filename: r.filename.clone(),
+            expected_crc: r.crc32.clone().unwrap_or_default(),
+            actual_crc: None,
+            status: "missing".to_string(),
+        }).collect());
+    }
+
+    let zip_file_crcs = read_zip_crc_by_filename(&zip_path);
+    let zip_crc_set: std::collections::HashSet<String> = zip_file_crcs.values().cloned().collect();
+
+    let mut details = Vec::with_capacity(sample_roms.len());
+    for r in &sample_roms {
+        let exp = r.crc32.clone().unwrap_or_default();
+        let found = !exp.is_empty() && zip_crc_set.contains(&exp);
+        let actual = if found { Some(exp.clone()) } else { zip_file_crcs.get(&r.filename).cloned() };
+        let status = if found { "match" } else { "mismatch" };
+        details.push(RomDetail {
+            filename: r.filename.clone(),
+            expected_crc: exp,
+            actual_crc: actual,
+            status: status.to_string(),
+        });
+    }
+    Ok(details)
+}
+
+/// Determine missing reason and per-ROM + per-sample details for a game by checking a directory.
+/// Searches recursively for `<game_name>.zip` in the given directory.
+/// The game's sample files are checked in `dir/samples/<sampleof>.zip` when applicable.
+pub fn explain_missing_from_dir(
+    game_name: &str,
+    expected_roms: &[RomFile],
+    game: Option<&Game>,
+    all_games: &[Game],
+    db: &Database,
+    version_id: i64,
+    dir: &Path,
+) -> Result<(MissingReason, Vec<RomDetail>, Vec<RomDetail>)> {
+    let non_merge: Vec<&RomFile> = expected_roms.iter().filter(|r| r.merge_target.is_none()).collect();
+    let check = compute_game_roms(expected_roms, game, all_games, db, version_id)?;
+    let check_refs: Vec<&RomFile> = check.iter().collect();
+    let use_roms = if check_refs.is_empty() { non_merge } else { check_refs };
+
+    let zip_path = walk_files(dir)?.iter()
+        .find(|p| p.extension().and_then(|e| e.to_str()) == Some("zip") &&
+              p.file_stem().and_then(|s| s.to_str()) == Some(game_name))
+        .cloned();
+
+    let sample_details = compute_sample_details(
+        game.and_then(|g| g.sampleof.as_deref()),
+        all_games, db, version_id, &dir.join(SAMPLES_DIR_NAME),
+    ).unwrap_or_default();
+
+    let path = match zip_path {
+        Some(p) => p,
+        None => {
+            let details = use_roms.iter().map(|r| RomDetail {
+                filename: r.filename.clone(),
+                expected_crc: r.crc32.clone().unwrap_or_default(),
+                actual_crc: None,
+                status: "missing".to_string(),
+            }).collect();
+            return Ok((MissingReason::FileNotFound, details, sample_details));
         }
+    };
+
+    let zip_file_crcs = read_zip_crc_by_filename(&path);
+    let zip_crc_set: std::collections::HashSet<String> = zip_file_crcs.values().cloned().collect();
+
+    if zip_crc_set.is_empty() {
+        let details = use_roms.iter().map(|r| RomDetail {
+            filename: r.filename.clone(),
+            expected_crc: r.crc32.clone().unwrap_or_default(),
+            actual_crc: None,
+            status: "missing".to_string(),
+        }).collect();
+        return Ok((MissingReason::CrcMismatch { matched: 0, expected: use_roms.len() }, details, sample_details));
     }
-    // If after subtraction we have nothing left, check all (game is its own parent)
-    if expected.is_empty() {
-        let all = db.list_roms_for_game(game.id, version_id)?;
-        let non_merge: Vec<_> = all.iter().filter(|r| r.merge_target.is_none()).cloned().collect();
-        return Ok(verify_zip_contains(zip_path, &non_merge));
-    }
-    Ok(verify_zip_contains(zip_path, &expected))
+
+    let (matched, details) = build_rom_details(&check, &zip_crc_set, &zip_file_crcs);
+    Ok((MissingReason::CrcMismatch { matched, expected: check.len() }, details, sample_details))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1432,7 +1659,7 @@ mod tests {
     use crate::db::Database;
     use std::io::Write;
     use std::sync::atomic::AtomicBool;
-    use crate::models::ParsedGame;
+    use crate::models::{ParsedGame, ParsedRom};
 
     fn make_db() -> Database {
         Database::open_in_memory().expect("in-memory db")
@@ -1446,6 +1673,7 @@ mod tests {
             manufacturer: None,
             cloneof: None,
             romof: None,
+            sampleof: None,
             platform: String::new(),
             isbios: false,
             isdevice: false,

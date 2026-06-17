@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use rom_manager::builder::{build_version, export_version};
+use rom_manager::builder::{build_version, compute_game_roms, explain_missing_from_dir, export_version, scan_samples};
 use rom_manager::dat::write::{write_logiqx_dat, ExportGame, ExportRom};
-use rom_manager::models::{MergeMode, MissingGame};
+use rom_manager::models::{Game, MergeMode, MissingGame, MissingReason, RomDetail, RomFile, SampleResult};
 use rom_manager::scanner::{scan_directory, ScanMatch};
 use rom_manager::verifier::{verify_version, GameStatus};
 use rom_manager::Database;
@@ -45,6 +45,14 @@ struct ScanOutput {
     missing: usize,
     matches: Vec<ScanMatch>,
     missing_names: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    missing_reasons: Vec<MissingGame>,
+    #[serde(default)]
+    samples_found: usize,
+    #[serde(default)]
+    samples_missing: usize,
+    #[serde(default)]
+    missing_samples: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -83,13 +91,22 @@ struct BuildOutput {
     total_games: usize,
     added: usize,
     exists: usize,
-    unchanged: usize,
     reused: usize,
     missing: usize,
     cleaned: usize,
     matched_by_hash: usize,
     missing_games: Vec<String>,
     missing_reasons: Vec<MissingGame>,
+    #[serde(default)]
+    samples_added: usize,
+    #[serde(default)]
+    samples_existed: usize,
+    #[serde(default)]
+    samples_reused: usize,
+    #[serde(default)]
+    samples_missing: usize,
+    #[serde(default)]
+    missing_samples: Vec<String>,
 }
 
 fn db_path() -> String {
@@ -276,6 +293,45 @@ fn cmd_dat_info(args: &[String], json: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn build_missing_reasons(
+    missing_names: &[String],
+    games: &[rom_manager::models::Game],
+    db: &Database,
+    version_id: i64,
+    dir: &std::path::Path,
+) -> Vec<MissingGame> {
+    let game_map: HashMap<&str, &rom_manager::models::Game> = games.iter().map(|g| (g.name.as_str(), g)).collect();
+    let mut reasons = Vec::new();
+    for name in missing_names {
+        let ge = game_map.get(name.as_str()).copied();
+        let expected_roms: Vec<RomFile> = ge
+            .map(|g| db.list_roms_for_game(g.id, version_id))
+            .transpose()
+            .unwrap_or_default()
+            .unwrap_or_default();
+        let sampleof = ge.and_then(|g| g.sampleof.as_deref());
+        match explain_missing_from_dir(name, &expected_roms, ge, games, db, version_id, dir) {
+            Ok((reason, details, sample_details)) => reasons.push(MissingGame {
+                name: name.clone(), reason, rom_details: details,
+                sampleof: sampleof.map(|s| s.to_string()), sample_details,
+            }),
+            Err(_) => {
+                let details = expected_roms.iter().filter(|r| r.merge_target.is_none()).map(|r| RomDetail {
+                    filename: r.filename.clone(),
+                    expected_crc: r.crc32.clone().unwrap_or_default(),
+                    actual_crc: None,
+                    status: "missing".to_string(),
+                }).collect();
+                reasons.push(MissingGame {
+                    name: name.clone(), reason: MissingReason::FileNotFound, rom_details: details,
+                    sampleof: sampleof.map(|s| s.to_string()), sample_details: Vec::new(),
+                });
+            }
+        }
+    }
+    reasons
+}
+
 fn cmd_scan(args: &[String], json: bool) -> ExitCode {
     let mut game_id: Option<i64> = None;
     let mut clean_args: Vec<String> = Vec::new();
@@ -291,25 +347,35 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
     }
 
     if clean_args.len() < 3 {
-        eprintln!("Usage: build-cli scan <version-id> <dir> [--game-id <id>]");
+        eprintln!("Usage: build-cli scan <version-id> <dir> [--game-id <id>] [--progress]");
         return ExitCode::FAILURE;
     }
+    let show_progress = clean_args.iter().any(|a| a == "--progress");
     let version_id: i64 = match clean_args[1].parse() {
         Ok(id) => id, Err(_) => { eprintln!("Invalid version ID: {}", clean_args[1]); return ExitCode::FAILURE; }
     };
     let dir = std::path::Path::new(&clean_args[2]);
     if !dir.exists() { eprintln!("Directory not found: {}", clean_args[2]); return ExitCode::FAILURE; }
 
+    let emit_progress = |pct: u32, msg: &str| {
+        if show_progress {
+            eprintln!(r#"{{"phase":"scanning","pct":{},"msg":"{}","matched":0,"missing":0,"total":0}}"#, pct, msg);
+        }
+    };
+
+    emit_progress(0, "Loading games...");
     let db = match open_db() { Ok(d) => d, Err(e) => { eprintln!("{}", e); return ExitCode::FAILURE; } };
     let games = match db.list_games(version_id) {
         Ok(g) => g, Err(e) => { eprintln!("Database error: {}", e); return ExitCode::FAILURE; }
     };
 
+    emit_progress(10, "Building CRC map...");
     // Build CRC map: game name → list of expected CRC32 strings
     let mut expected_crcs: HashMap<String, Vec<String>> = HashMap::new();
     for game in &games {
         if let Ok(roms) = db.list_roms_for_game(game.id, version_id) {
-            let crcs: Vec<String> = roms.iter()
+            let filtered = compute_game_roms(&roms, Some(game), &games, &db, version_id).unwrap_or(roms);
+            let crcs: Vec<String> = filtered.iter()
                 .filter_map(|r| r.crc32.as_deref())
                 .filter(|c| !c.is_empty())
                 .map(|c| c.to_string())
@@ -322,6 +388,7 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
 
     if let Some(gid) = game_id {
         // Single game scan
+        emit_progress(15, "Scanning files...");
         let game = match games.iter().find(|g| g.id == gid) {
             Some(g) => g.clone(),
             None => { eprintln!("Game not found: {}", gid); return ExitCode::FAILURE; }
@@ -333,25 +400,45 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
         let matches = match scan_directory(&single_crcs, dir) {
             Ok(m) => m, Err(e) => { eprintln!("Scan error: {}", e); return ExitCode::FAILURE; }
         };
+        emit_progress(60, "Analyzing missing games...");
         let matched = matches.len();
-        let missing: Vec<String> = if matched == 0 { vec![game.name.clone()] } else { vec![] };
-        let result = ScanOutput { total: 1, matched, missing: 1 - matched, matches, missing_names: missing };
+        let missing_names: Vec<String> = if matched == 0 { vec![game.name.clone()] } else { vec![] };
+        let missing_reasons = build_missing_reasons(&missing_names, &games, &db, version_id, dir);
+        let samples_dir = dir.join("samples");
+        let sr = if samples_dir.is_dir() {
+            scan_samples(&games, &db, version_id, &samples_dir).unwrap_or(SampleResult { samples_found: 0, samples_missing: 0, missing_samples: Vec::new() })
+        } else { SampleResult { samples_found: 0, samples_missing: 0, missing_samples: Vec::new() } };
+        emit_progress(100, "Scan complete");
+        let result = ScanOutput { total: 1, matched, missing: 1 - matched, matches, missing_names, missing_reasons, samples_found: sr.samples_found, samples_missing: sr.samples_missing, missing_samples: sr.missing_samples };
         if json { print_json(&result); }
         else { println!("Scan complete: {} matched, {} missing", matched, 1 - matched); }
     } else {
         // Full scan
+        emit_progress(15, "Scanning files...");
         let matches = match scan_directory(&expected_crcs, dir) {
             Ok(m) => m, Err(e) => { eprintln!("Scan error: {}", e); return ExitCode::FAILURE; }
         };
+        emit_progress(60, "Analyzing missing games...");
         let matched_names: HashSet<String> = matches.iter().map(|m| m.name.clone()).collect();
         let expected_names: HashSet<String> = games.iter().map(|g| g.name.clone()).collect();
-        let missing: Vec<String> = expected_names.difference(&matched_names).cloned().collect();
+        let mut missing_names: Vec<String> = expected_names.difference(&matched_names).cloned().collect();
+        missing_names.sort();
         let matched = matches.len();
-        let result = ScanOutput { total: expected_names.len(), matched, missing: missing.len(), matches, missing_names: missing.clone() };
+        let missing_reasons = build_missing_reasons(&missing_names, &games, &db, version_id, dir);
+        let samples_dir = dir.join("samples");
+        let sr = if samples_dir.is_dir() {
+            scan_samples(&games, &db, version_id, &samples_dir).unwrap_or(SampleResult { samples_found: 0, samples_missing: 0, missing_samples: Vec::new() })
+        } else { SampleResult { samples_found: 0, samples_missing: 0, missing_samples: Vec::new() } };
+        emit_progress(100, "Scan complete");
+        let result = ScanOutput { total: expected_names.len(), matched, missing: missing_names.len(), matches, missing_names: missing_names.clone(), missing_reasons, samples_found: sr.samples_found, samples_missing: sr.samples_missing, missing_samples: sr.missing_samples };
         if json {
             print_json(&result);
         } else {
-            println!("Scan complete: {} files, {} matched, {} missing", expected_names.len(), matched, missing.len());
+            print!("Scan complete: {} files, {} matched, {} missing", expected_names.len(), matched, missing_names.len());
+            if sr.samples_found > 0 || sr.samples_missing > 0 {
+                print!(" (samples: {} found, {} missing)", sr.samples_found, sr.samples_missing);
+            }
+            println!();
         }
     }
     ExitCode::SUCCESS
@@ -687,13 +774,17 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
                     total_games: result.total_games,
                     added: result.added,
                     exists: result.exists,
-                    unchanged: result.unchanged,
                     reused: result.reused,
                     missing: result.missing,
                     cleaned: result.cleaned,
                     matched_by_hash: result.matched_by_hash,
                     missing_games: result.missing_games,
                     missing_reasons: result.missing_reasons,
+                    samples_added: result.samples_added,
+                    samples_existed: result.samples_existed,
+                    samples_reused: result.samples_reused,
+                    samples_missing: result.samples_missing,
+                    missing_samples: result.missing_samples,
                 });
             } else {
                 if dry_run {
@@ -716,14 +807,19 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
                 if result.reused > 0 {
                     println!("  reused:    {} (from prior version)", result.reused);
                 }
-                if result.unchanged > 0 {
-                    println!("  unchanged: {} (kept from prev)", result.unchanged);
-                }
                 if result.missing > 0 {
                     println!("  missing:   {}", result.missing);
                 }
                 if result.cleaned > 0 {
                     println!("  cleaned:   {} (moved to deleted_roms)", result.cleaned);
+                }
+                if result.samples_added > 0 || result.samples_existed > 0 || result.samples_reused > 0 || result.samples_missing > 0 {
+                    print!("  samples:   ");
+                    if result.samples_added > 0 { print!("{} added ", result.samples_added); }
+                    if result.samples_existed > 0 { print!("{} existed ", result.samples_existed); }
+                    if result.samples_reused > 0 { print!("{} reused ", result.samples_reused); }
+                    if result.samples_missing > 0 { print!("{} missing", result.samples_missing); }
+                    println!();
                 }
             }
             ExitCode::SUCCESS

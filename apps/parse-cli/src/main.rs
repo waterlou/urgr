@@ -191,7 +191,13 @@ fn main() -> ExitCode {
 
     let games_inserted = filtered.len();
     let mut rom_count = 0usize;
+    if let Err(e) = db.clear_game_roms_for_version(version_id) {
+        eprintln!("Failed to clear existing ROM sets: {}", e);
+        return ExitCode::FAILURE;
+    }
+    eprintln!("[import] Importing {} games for version_id={}", games_inserted, version_id);
     for game in &filtered {
+        eprintln!("  {}", game.name);
         let mut game_clone = game.clone();
         // If --platform was passed, override the platform field (used for FBNeo per-manufacturer dats)
         if let Some(p) = platform {

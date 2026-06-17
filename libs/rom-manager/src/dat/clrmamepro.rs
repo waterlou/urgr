@@ -52,6 +52,7 @@ pub fn parse_clrmamepro_str(text: &str) -> (Vec<ParsedGame>, ParseStats) {
             manufacturer: kv.get("manufacturer").cloned(),
             cloneof: kv.get("cloneof").cloned(),
             romof: kv.get("romof").cloned(),
+            sampleof: None,
             platform: String::new(),
             isbios: false,
             isdevice: false,

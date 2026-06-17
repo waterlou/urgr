@@ -861,6 +861,18 @@ router.post('/api/versions/import-online', async (req, res) => {
             const aVer = mameDatMatches(a.base, version, mameNickname) ? 0 : 1;
             const bVer = mameDatMatches(b.base, version, mameNickname) ? 0 : 1;
             if (aVer !== bVer) return aVer - bVer;
+            // Closest version number match (e.g. prefer 0.37b5 over 0.37b9 for target 0.41)
+            const parseFnVer = (s) => { const m = s.match(/(\d+)\.(\d+)(?:b(\d+))?/); return m ? [parseInt(m[1]),parseInt(m[2]),m[3]?parseInt(m[3]):0] : null; };
+            const aP = parseFnVer(a.base), bP = parseFnVer(b.base);
+            const target = parseMameVersion(mameNickname || version);
+            if (aP && bP) {
+              const target = parseMameVersion(mameNickname || version);
+              if (target[0] !== undefined) {
+                const dA = Math.abs(aP[0]-target[0])*10000 + Math.abs(aP[1]-target[1])*100 + Math.abs(aP[2]-target[2]);
+                const dB = Math.abs(bP[0]-target[0])*10000 + Math.abs(bP[1]-target[1])*100 + Math.abs(bP[2]-target[2]);
+                if (dA !== dB) return dA - dB;
+              }
+            }
             // Descending alphabetical so latest date-wed release sorts first
             return b.base.localeCompare(a.base);
           });
@@ -894,6 +906,18 @@ router.post('/api/versions/import-online', async (req, res) => {
                 const aMatch = mameDatMatches(a.base, version, mameNickname) ? 0 : 1;
                 const bMatch = mameDatMatches(b.base, version, mameNickname) ? 0 : 1;
                 if (aMatch !== bMatch) return aMatch - bMatch;
+                // Closest version number match
+                const parseFnVer = (s) => { const m = s.match(/(\d+)\.(\d+)(?:b(\d+))?/); return m ? [parseInt(m[1]),parseInt(m[2]),m[3]?parseInt(m[3]):0] : null; };
+                const aP = parseFnVer(a.base), bP = parseFnVer(b.base);
+                const target = parseMameVersion(mameNickname || version);
+                if (aP && bP) {
+                  const target = parseMameVersion(mameNickname || version);
+                  if (target[0] !== undefined) {
+                    const dA = Math.abs(aP[0]-target[0])*10000 + Math.abs(aP[1]-target[1])*100 + Math.abs(aP[2]-target[2]);
+                    const dB = Math.abs(bP[0]-target[0])*10000 + Math.abs(bP[1]-target[1])*100 + Math.abs(bP[2]-target[2]);
+                    if (dA !== dB) return dA - dB;
+                  }
+                }
                 // Descending alphabetical so latest date sorts first
                 return b.base.localeCompare(a.base);
               });
@@ -916,7 +940,8 @@ router.post('/api/versions/import-online', async (req, res) => {
 
         const result = execCli(['import', foundDat, 'MAME', version], { binary: 'parse' });
         if (!result) throw new Error('CLI returned null');
-        console.log(`[mame-import] Format: ${result.format}, games: ${result.games_inserted}`);
+        console.log(`[mame-import] Format: ${result.format}, games: ${result.games_inserted}, version_id: ${result.version_id}`);
+        // Check the server log for per-game import details on stderr
 
         // Import companion DATs (CHD, Samples) if present — same version, existing games only
         for (const fp of allFiles) {

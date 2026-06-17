@@ -49,7 +49,7 @@ pub fn scan_directory(
                             }
                         }
                     }
-                    if expected.iter().any(|crc| zip_crcs.contains(crc)) {
+                    if expected.iter().all(|crc| zip_crcs.contains(crc)) {
                         matches.push(ScanMatch {
                             name: stem,
                             filename: Some(entry.to_string_lossy().to_string()),

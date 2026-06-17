@@ -21,9 +21,8 @@ export default function BuildManager({ collectionId, collection }) {
     localStorage.setItem(`rom-manager-import-dir-${collectionId}`, buildImportDir);
   }, [buildImportDir, collectionId]);
   const [buildRunning, setBuildRunning] = useState(false);
-  const [buildScanRunning, setBuildScanRunning] = useState(false);
-  const [buildScanResult, setBuildScanResult] = useState(null);
   const [buildResult, setBuildResult] = useState(null);
+  const [buildMode, setBuildMode] = useState(null); // 'build' or 'scan'
 
   const [dirBrowserOpen, setDirBrowserOpen] = useState(false);
   const eventSourcesRef = useRef({});
@@ -38,6 +37,8 @@ export default function BuildManager({ collectionId, collection }) {
     if (!buildVersion || !collectionId) return;
     setBuildRunning(true);
     setBuildResult(null);
+    setBuildMode('build');
+    setBuildProgress({});
     try {
       const result = await collectionBuild(collectionId, buildVersion, buildImportDir, false);
       const jobId = result.jobId || result.job_id || result.id;
@@ -56,20 +57,22 @@ export default function BuildManager({ collectionId, collection }) {
 
   async function handleScan() {
     if (!buildVersion || !collectionId) return;
-    setBuildScanRunning(true);
-    setBuildScanResult(null);
+    setBuildRunning(true);
+    setBuildResult(null);
+    setBuildMode('scan');
+    setBuildProgress({});
     try {
       const result = await collectionBuild(collectionId, buildVersion, buildImportDir, true);
       const jobId = result.jobId || result.job_id || result.id;
       const es = subscribeJobSSE(jobId, {
-        onProgress: (msg) => {},
-        onResult: (data) => { setBuildScanResult(data); setBuildScanRunning(false); },
-        onError: (err) => { setBuildScanResult({ error: err }); setBuildScanRunning(false); },
+        onProgress: (msg) => setBuildProgress(p => ({ ...p, [jobId]: msg.pct || 0 })),
+        onResult: (data) => { setBuildProgress({}); setBuildResult(data); setBuildRunning(false); },
+        onError: (err) => { setBuildProgress({}); setBuildResult({ error: err }); setBuildRunning(false); },
       });
       eventSourcesRef.current[jobId] = es;
     } catch (e) {
-      setBuildScanResult({ error: e.message });
-      setBuildScanRunning(false);
+      setBuildResult({ error: e.message });
+      setBuildRunning(false);
     }
   }
 
@@ -98,10 +101,10 @@ export default function BuildManager({ collectionId, collection }) {
           Browse...
         </Button>
         <Button variant="contained" onClick={handleBuild} disabled={!buildVersion || buildRunning}>
-          {buildRunning ? <CircularProgress size={14} /> : 'Build'}
+          {buildRunning && buildMode === 'build' ? <CircularProgress size={14} /> : 'Build'}
         </Button>
-        <Button variant="outlined" onClick={handleScan} disabled={!buildVersion || buildScanRunning}>
-          {buildScanRunning ? <CircularProgress size={14} /> : 'Scan'}
+        <Button variant="outlined" onClick={handleScan} disabled={!buildVersion || buildRunning}>
+          {buildRunning && buildMode === 'scan' ? <CircularProgress size={14} /> : 'Scan'}
         </Button>
       </Box>
 
@@ -123,35 +126,42 @@ export default function BuildManager({ collectionId, collection }) {
           ) : (
             <Box>
               <Typography variant="body2" sx={{ mb: 1 }}>
-                Added: {buildResult.added} · Existed: {buildResult.exists} · Reused: {buildResult.reused} · Missing: {buildResult.missing}
+                {buildMode === 'scan'
+                  ? `Found: ${buildResult.found} · Missing: ${buildResult.missing} · Total: ${buildResult.total}`
+                  : `Added: ${buildResult.added} · Existed: ${buildResult.exists} · Reused: ${buildResult.reused} · Missing: ${buildResult.missing}`
+                }
+                {buildMode === 'scan'
+                  ? ` · Samples: Found: ${buildResult.samples_found ?? 0} · Missing: ${buildResult.samples_missing ?? 0}`
+                  : (buildResult.samples_added || buildResult.samples_existed || buildResult.samples_reused || buildResult.samples_missing)
+                    ? (() => {
+                        const parts = [];
+                        if (buildResult.samples_added) parts.push(`${buildResult.samples_added} added`);
+                        if (buildResult.samples_existed) parts.push(`${buildResult.samples_existed} existed`);
+                        if (buildResult.samples_reused) parts.push(`${buildResult.samples_reused} reused`);
+                        if (buildResult.samples_missing) parts.push(`${buildResult.samples_missing} missing`);
+                        return ` · Samples: ${parts.join(' · ')}`;
+                      })()
+                    : ''}
               </Typography>
-              {buildResult.missing_games?.length > 0 && (
+              {(buildResult.missing_reasons?.length > 0) && (
                 <MissingGamesTable
-                  missingReasons={buildResult.missing_reasons || []}
+                  missingReasons={buildResult.missing_reasons}
                   collectionId={collectionId}
                   onRowClick={openRomDetail}
                 />
               )}
-            </Box>
-          )}
-        </Box>
-      )}
-
-      {buildScanResult && (
-        <Box sx={{ mb: 2 }}>
-          {buildScanResult.error ? (
-            <Typography color="error">{buildScanResult.error}</Typography>
-          ) : (
-            <Box>
-              <Typography variant="body2" sx={{ mb: 1 }}>
-                Found: {buildScanResult.found} · Missing: {buildScanResult.missing} · Total: {buildScanResult.total}
-              </Typography>
-              {buildScanResult.missing_names?.length > 0 && (
-                <MissingScanTable
-                  missingNames={buildScanResult.missing_names}
-                  collectionId={collectionId}
-                />
-              )}
+              {(() => {
+                const missingSamples = buildResult.missing_samples?.length
+                  ? buildResult.missing_samples
+                  : buildResult.missing_reasons?.reduce((acc, r) => {
+                      if (!r.sampleof) return acc;
+                      const hasMissing = r.sample_details?.some(d => d.status !== 'match');
+                      if (hasMissing && !acc.includes(r.sampleof)) acc.push(r.sampleof);
+                      return acc;
+                    }, []) || [];
+                if (missingSamples.length === 0) return null;
+                return <MissingSamplesTable missingSamples={missingSamples} />;
+              })()}
             </Box>
           )}
         </Box>
@@ -185,21 +195,22 @@ function MissingGamesTable({ missingReasons, collectionId, onRowClick }) {
       <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 300 }}>
         <Table size="small" stickyHeader>
           <TableHead>
-            <TableRow>
-              <TableCell>Game</TableCell>
-              <TableCell sx={{ width: 100 }}>Status</TableCell>
-              <TableCell sx={{ width: 180 }}>Details</TableCell>
-              <TableCell sx={{ width: 60 }}></TableCell>
-            </TableRow>
+              <TableRow>
+                <TableCell sx={{ width: 40 }}>#</TableCell>
+                <TableCell>Game</TableCell>
+                <TableCell sx={{ width: 100 }}>Status</TableCell>
+                <TableCell sx={{ width: 180 }}>Details</TableCell>
+              </TableRow>
           </TableHead>
           <TableBody>
-            {missingReasons.map(r => {
+            {missingReasons.map((r, i) => {
               const fnf = typeof r.reason === 'string' && r.reason === 'FileNotFound';
               const crc = r.reason?.CrcMismatch;
               return (
-                <TableRow key={r.name} hover sx={{ cursor: 'pointer' }}
-                  onClick={() => onRowClick(r)}>
-                  <TableCell>
+                  <TableRow key={r.name} hover sx={{ cursor: 'pointer' }}
+                    onClick={() => onRowClick(r)}>
+                    <TableCell><Typography variant="caption" color="text.secondary">{i + 1}</Typography></TableCell>
+                    <TableCell>
                     <Typography variant="body2" fontFamily="monospace" fontSize={13}>{r.name}</Typography>
                   </TableCell>
                   <TableCell>
@@ -212,12 +223,6 @@ function MissingGamesTable({ missingReasons, collectionId, onRowClick }) {
                        crc ? `${crc.matched}/${crc.expected} ROMs verified` : ''}
                     </Typography>
                   </TableCell>
-                  <TableCell>
-                    <Button size="small" variant="outlined"
-                      onClick={(e) => { e.stopPropagation(); onRowClick(r); }}>
-                      Details
-                    </Button>
-                  </TableCell>
                 </TableRow>
               );
             })}
@@ -228,32 +233,30 @@ function MissingGamesTable({ missingReasons, collectionId, onRowClick }) {
   );
 }
 
-function MissingScanTable({ missingNames, collectionId }) {
+function MissingSamplesTable({ missingSamples }) {
   return (
     <Box sx={{ mt: 1.5 }}>
       <Typography variant="caption" fontWeight={600} sx={{ mb: 0.5, display: 'block' }}>
-        Missing games ({missingNames.length})
+        Missing sample sets ({missingSamples.length})
       </Typography>
-      <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 300 }}>
+      <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 200 }}>
         <Table size="small" stickyHeader>
           <TableHead>
             <TableRow>
-              <TableCell>Game</TableCell>
+              <TableCell sx={{ width: 40 }}>#</TableCell>
+              <TableCell>Sample Set</TableCell>
               <TableCell sx={{ width: 100 }}>Status</TableCell>
-              <TableCell sx={{ width: 180 }}>Details</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {missingNames.map(name => (
+            {missingSamples.map((name, i) => (
               <TableRow key={name}>
+                <TableCell><Typography variant="caption" color="text.secondary">{i + 1}</Typography></TableCell>
                 <TableCell>
                   <Typography variant="body2" fontFamily="monospace" fontSize={13}>{name}</Typography>
                 </TableCell>
                 <TableCell>
                   <Chip label="Missing" size="small" color="error" />
-                </TableCell>
-                <TableCell>
-                  <Typography variant="caption" color="text.secondary">File not found</Typography>
                 </TableCell>
               </TableRow>
             ))}
@@ -268,13 +271,65 @@ function RomDetailDialog({ game, onClose, collectionId }) {
   if (!game) return null;
 
   const details = game.rom_details || [];
+  const sampleDetails = game.sample_details || [];
   const fnf = typeof game.reason === 'string' && game.reason === 'FileNotFound';
   const crc = game.reason?.CrcMismatch;
+
+  function RomFilesSection(title, rows) {
+    if (rows.length === 0) return null;
+    return (
+      <Box sx={{ mt: rows === details ? 0 : 2 }}>
+        <Typography variant="subtitle2" sx={{ mb: 0.5 }}>{title}</Typography>
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>File</TableCell>
+                <TableCell>Expected CRC</TableCell>
+                <TableCell>Actual CRC</TableCell>
+                <TableCell>Status</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {rows.filter(d => d.filename).map(d => (
+                <TableRow key={d.filename}>
+                  <TableCell>
+                    <Typography variant="body2" fontFamily="monospace" fontSize={12}>{d.filename}</Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="caption" fontFamily="monospace">{d.expected_crc || '—'}</Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="caption" fontFamily="monospace" color={
+                      d.status === 'match' ? 'success.main' : d.actual_crc ? 'warning.main' : 'text.disabled'
+                    }>
+                      {d.actual_crc || '—'}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      label={d.status}
+                      size="small"
+                      color={d.status === 'match' ? 'success' : 'default'}
+                      variant={d.status === 'match' ? 'filled' : 'outlined'}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Box>
+    );
+  }
 
   return (
     <Dialog open={!!game} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle sx={{ fontFamily: 'monospace', fontSize: 16 }}>
         {game.name}
+        {game.sampleof && (
+          <Chip label={`samples: ${game.sampleof}`} size="small" color="info" variant="outlined" sx={{ ml: 1 }} />
+        )}
         <Chip
           label={fnf ? 'Missing' : `CRC Error (${crc?.matched || 0}/${crc?.expected || 0})`}
           size="small" color={fnf ? 'error' : 'warning'}
@@ -282,50 +337,15 @@ function RomDetailDialog({ game, onClose, collectionId }) {
         />
       </DialogTitle>
       <DialogContent dividers>
-        {details.length === 0 ? (
+        {details.length === 0 && sampleDetails.length === 0 ? (
           <Typography variant="body2" color="text.secondary">
-            No ROM details available for this game.
+            No details available for this game.
           </Typography>
         ) : (
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>ROM File</TableCell>
-                  <TableCell>Expected CRC</TableCell>
-                  <TableCell>Actual CRC</TableCell>
-                  <TableCell>Status</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {details.filter(d => d.filename).map(d => (
-                  <TableRow key={d.filename}>
-                    <TableCell>
-                      <Typography variant="body2" fontFamily="monospace" fontSize={12}>{d.filename}</Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="caption" fontFamily="monospace">{d.expected_crc || '—'}</Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="caption" fontFamily="monospace" color={
-                        d.status === 'match' ? 'success.main' : d.actual_crc ? 'warning.main' : 'text.disabled'
-                      }>
-                        {d.actual_crc || '—'}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        label={d.status}
-                        size="small"
-                        color={d.status === 'match' ? 'success' : 'default'}
-                        variant={d.status === 'match' ? 'filled' : 'outlined'}
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
+          <>
+            {RomFilesSection('ROM Files', details)}
+            {RomFilesSection('Sample Files', sampleDetails)}
+          </>
         )}
       </DialogContent>
       <DialogActions>

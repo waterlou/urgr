@@ -192,8 +192,8 @@ impl Database {
 
     pub fn insert_game(&self, game: &ParsedGame) -> Result<i64> {
         let id: i64 = self.conn.query_row(
-            "INSERT INTO games (name, description, year, manufacturer, platform, isbios, isdevice, runnable, driver_status, driver_emulation)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            "INSERT INTO games (name, description, year, manufacturer, platform, isbios, isdevice, runnable, driver_status, driver_emulation, sampleof)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
              ON CONFLICT(name) DO UPDATE SET
                description = excluded.description,
                year = excluded.year,
@@ -203,7 +203,8 @@ impl Database {
                isdevice = excluded.isdevice,
                runnable = COALESCE(excluded.runnable, runnable),
                driver_status = COALESCE(excluded.driver_status, driver_status),
-               driver_emulation = COALESCE(excluded.driver_emulation, driver_emulation)
+               driver_emulation = COALESCE(excluded.driver_emulation, driver_emulation),
+               sampleof = excluded.sampleof
              RETURNING id",
             params![
                 game.name,
@@ -216,18 +217,17 @@ impl Database {
                 game.runnable,
                 game.driver_status,
                 game.driver_emulation,
+                game.sampleof,
             ],
             |r| r.get(0),
         )?;
         Ok(id)
     }
 
-    /// Resolve romof and cloneof → parent_game_id for games with a non-empty value.
-    /// romof is the split parent — which zip holds the shared ROMs (can chain).
-    /// cloneof is metadata about the clone relationship, used as fallback when romof
-    /// is unavailable.
+    /// Resolve cloneof → parent_game_id for all games with a non-empty cloneof.
+    /// romof is NOT stored in parent_game_id (it's per-version on game_rom_sets
+    /// and resolved at build time by compute_game_roms).
     pub fn resolve_parents(&self, games: &[ParsedGame]) -> Result<()> {
-        // First pass: query each inserted game from the DB to get its id.
         let mut name_to_id: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
         for chunk in games.chunks(500) {
             let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
@@ -243,41 +243,24 @@ impl Database {
             }
         }
 
-        let lookup_parent = |parent_name: &str| -> Result<Option<i64>> {
-            Ok(match name_to_id.get(parent_name) {
-                Some(&id) => Some(id),
-                None => match self.conn.query_row(
-                    "SELECT id FROM games WHERE name = ?1",
-                    params![parent_name],
-                    |r| r.get::<_, i64>(0),
-                ) {
-                    Ok(id) => Some(id),
-                    Err(rusqlite::Error::QueryReturnedNoRows) => None,
-                    Err(e) => return Err(crate::Error::Source(format!("Parent lookup error: {}", e))),
-                },
-            })
-        };
-
-        // Second pass: resolve romof → parent_game_id (split parent)
-        for game in games {
-            let Some(ref romof) = game.romof else { continue };
-            if romof.is_empty() { continue; }
-            let Some(parent_id) = lookup_parent(romof)? else { continue };
-            let Some(&child_id) = name_to_id.get(&game.name) else { continue };
-            self.conn.execute(
-                "UPDATE games SET parent_game_id = ?1 WHERE id = ?2",
-                params![parent_id, child_id],
-            )?;
-        }
-
-        // Third pass: resolve cloneof → parent_game_id (fallback for games without romof)
         for game in games {
             let Some(ref cloneof) = game.cloneof else { continue };
             if cloneof.is_empty() { continue; }
-            let Some(parent_id) = lookup_parent(cloneof)? else { continue };
+            let parent_id = match name_to_id.get(cloneof) {
+                Some(&id) => id,
+                None => match self.conn.query_row(
+                    "SELECT id FROM games WHERE name = ?1",
+                    params![cloneof],
+                    |r| r.get::<_, i64>(0),
+                ) {
+                    Ok(id) => id,
+                    Err(rusqlite::Error::QueryReturnedNoRows) => continue,
+                    Err(e) => return Err(crate::Error::Source(format!("Parent lookup error: {}", e))),
+                },
+            };
             let Some(&child_id) = name_to_id.get(&game.name) else { continue };
             self.conn.execute(
-                "UPDATE games SET parent_game_id = ?1 WHERE id = ?2 AND parent_game_id IS NULL",
+                "UPDATE games SET parent_game_id = ?1 WHERE id = ?2",
                 params![parent_id, child_id],
             )?;
         }
@@ -286,13 +269,13 @@ impl Database {
 
     pub fn list_games(&self, version_id: i64) -> Result<Vec<Game>> {
         let mut stmt = self.conn.prepare(
-            "SELECT g.id, g.name, g.description, g.year, g.manufacturer, g.platform,
-                    g.parent_game_id, g.synopsis, g.isbios, g.isdevice,
-                    g.runnable, g.driver_status, g.driver_emulation
-             FROM games g
-             JOIN game_rom_sets grs ON grs.game_id = g.id
-             WHERE grs.version_id = ?1
-             ORDER BY g.name",
+        "SELECT g.id, g.name, g.description, g.year, g.manufacturer, g.platform,
+                g.parent_game_id, g.synopsis, g.isbios, g.isdevice,
+                g.runnable, g.driver_status, g.driver_emulation, g.sampleof
+         FROM games g
+         JOIN game_rom_sets grs ON grs.game_id = g.id
+         WHERE grs.version_id = ?1
+         ORDER BY g.name",
         )?;
         let rows = stmt.query_map(params![version_id], |r| {
             Ok(Game {
@@ -309,6 +292,7 @@ impl Database {
                 runnable: r.get(10)?,
                 driver_status: r.get(11)?,
                 driver_emulation: r.get(12)?,
+                sampleof: r.get(13)?,
             })
         })?;
         let mut games = Vec::new();
@@ -334,10 +318,10 @@ impl Database {
 
     pub fn get_game(&self, game_id: i64) -> Result<Option<Game>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, description, year, manufacturer, platform,
-                    parent_game_id, synopsis, isbios, isdevice,
-                    runnable, driver_status, driver_emulation
-             FROM games WHERE id = ?1",
+        "SELECT id, name, description, year, manufacturer, platform,
+                parent_game_id, synopsis, isbios, isdevice,
+                runnable, driver_status, driver_emulation, sampleof
+         FROM games WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![game_id], |r| {
             Ok(Game {
@@ -354,6 +338,38 @@ impl Database {
                 runnable: r.get(10)?,
                 driver_status: r.get(11)?,
                 driver_emulation: r.get(12)?,
+                sampleof: r.get(13)?,
+            })
+        })?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_game_by_name(&self, name: &str) -> Result<Option<Game>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, description, year, manufacturer, platform,
+                    parent_game_id, synopsis, isbios, isdevice,
+                    runnable, driver_status, driver_emulation, sampleof
+             FROM games WHERE name = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![name], |r| {
+            Ok(Game {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                description: r.get(2)?,
+                year: r.get(3)?,
+                manufacturer: r.get(4)?,
+                platform: r.get(5)?,
+                parent_game_id: r.get(6)?,
+                synopsis: r.get(7)?,
+                isbios: r.get(8)?,
+                isdevice: r.get(9)?,
+                runnable: r.get(10)?,
+                driver_status: r.get(11)?,
+                driver_emulation: r.get(12)?,
+                sampleof: r.get(13)?,
             })
         })?;
         match rows.next() {
@@ -363,6 +379,25 @@ impl Database {
     }
 
     // ── ROM Sets ──
+
+    pub fn clear_game_roms_for_version(&self, version_id: i64) -> Result<()> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM game_rom_sets WHERE version_id = ?1",
+            params![version_id],
+            |r| r.get(0),
+        )?;
+        let file_count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM game_rom_files WHERE rom_set_id IN (SELECT id FROM game_rom_sets WHERE version_id = ?1)",
+            params![version_id],
+            |r| r.get(0),
+        )?;
+        self.conn.execute_batch(
+            &format!("DELETE FROM game_rom_files WHERE rom_set_id IN (SELECT id FROM game_rom_sets WHERE version_id = {version_id});
+                       DELETE FROM game_rom_sets WHERE version_id = {version_id};")
+        )?;
+        eprintln!("[import] Cleared {} game_rom_files and {} game_rom_sets for version_id={}", file_count, count, version_id);
+        Ok(())
+    }
 
     pub fn insert_rom_set(
         &self,
@@ -423,7 +458,7 @@ impl Database {
 
     pub fn list_roms_for_game(&self, game_id: i64, version_id: i64) -> Result<Vec<RomFile>> {
         let mut stmt = self.conn.prepare(
-            "SELECT grf.id, grf.rom_set_id, grf.filename, grf.size, grf.crc32, grf.md5, grf.sha1, grf.status, grf.merge_target
+            "SELECT grf.id, grf.rom_set_id, grf.filename, grf.size, grf.crc32, grf.md5, grf.sha1, grf.status, grf.merge_target, grf.subtype
              FROM game_rom_files grf
              JOIN game_rom_sets grs ON grs.id = grf.rom_set_id
              WHERE grs.game_id = ?1 AND grs.version_id = ?2
@@ -440,6 +475,7 @@ impl Database {
                 sha1: r.get(6)?,
                 status: r.get(7)?,
                 merge_target: r.get(8)?,
+                subtype: r.get(9)?,
             })
         })?;
         let mut roms = Vec::new();
@@ -651,6 +687,7 @@ mod tests {
             manufacturer: Some("Capcom".to_string()),
             cloneof: None,
             romof: None,
+            sampleof: None,
             platform: String::new(),
             isbios: false,
             isdevice: false,
@@ -835,6 +872,7 @@ mod tests {
             manufacturer: Some("TestCorp".into()),
             cloneof: None,
             romof: None,
+            sampleof: None,
             platform: String::new(),
             isbios: false,
             isdevice: false,
@@ -951,6 +989,7 @@ mod tests {
             manufacturer: Some("Capcom".into()),
             cloneof: Some("sf2".to_string()),
             romof: None,
+            sampleof: None,
             platform: String::new(),
             isbios: false,
             isdevice: false,
@@ -966,6 +1005,7 @@ mod tests {
             manufacturer: Some("Capcom".into()),
             cloneof: None,
             romof: None,
+            sampleof: None,
             platform: String::new(),
             isbios: false,
             isdevice: false,

@@ -350,6 +350,57 @@ router.post('/api/collections/:id/verify', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+function finalizeScan(scanResult, col, version_id, collectionDir, sv, buildId, jobId) {
+  const matchedNames = new Set((scanResult?.matches || []).map(m => m.name));
+  const missingNames = scanResult?.missing_names || [];
+  const missingReasons = scanResult?.missing_reasons || [];
+
+  const scanDir = path.join(collectionDir, sv.version);
+  const romsDir = path.join(scanDir, 'roms');
+  if (fs.existsSync(romsDir)) {
+    for (const entry of fs.readdirSync(romsDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) matchedNames.add(entry.name);
+    }
+  }
+
+  const matchedNamesArr = [...matchedNames];
+  const allNames = [...new Set([...matchedNamesArr, ...missingNames])];
+
+  runNow('UPDATE game_rom_sets SET available = 0 WHERE version_id = ?', [version_id]);
+  if (matchedNamesArr.length > 0) {
+    const ph = matchedNamesArr.map(() => '?').join(',');
+    runNow(`UPDATE game_rom_sets SET available = 1
+      WHERE version_id = ? AND game_id IN (
+        SELECT g.id FROM games g WHERE g.name IN (${ph})
+      )`, [version_id, ...matchedNamesArr]);
+  }
+  syncGameAvailability(all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [version_id]).map(r => r.game_id));
+
+  const totalDb = get('SELECT COUNT(DISTINCT g.name) as c FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ?', [version_id]).c;
+  const matched = get('SELECT COUNT(DISTINCT g.name) as c FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ? AND grs.available = 1', [version_id]).c;
+  let reused = 0;
+  const priorVersions = all('SELECT DISTINCT sv.version, sv.id FROM set_versions sv JOIN collection_versions cv ON cv.version_id = sv.id WHERE cv.collection_id = ? AND sv.id < ? ORDER BY sv.id', [col.id, version_id]);
+  if (priorVersions.length > 0 && fs.existsSync(collectionDir)) {
+    const currentNames = new Set(all('SELECT DISTINCT g.name FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ?', [version_id]).map(r => r.name));
+    for (const pv of priorVersions) {
+      const pvRoms = path.join(collectionDir, pv.version, 'roms');
+      if (!fs.existsSync(pvRoms)) continue;
+      try {
+        const priorFiles = fs.readdirSync(pvRoms, { recursive: true }).filter(f => f.endsWith('.zip'));
+        for (const f of priorFiles) {
+          const stem = path.basename(f, '.zip');
+          if (currentNames.has(stem)) reused++;
+        }
+      } catch {}
+    }
+  }
+  runNow("UPDATE collection_builds SET status = 'complete', games_built = ?, completed_at = datetime('now') WHERE id = ?", [matched, buildId]);
+  const sf = scanResult?.samples_found ?? 0;
+  const sm = scanResult?.samples_missing ?? 0;
+  const ms = scanResult?.missing_samples ?? [];
+  doneJob(jobId, { found: matched, missing: totalDb - matched, total: totalDb, missing_names: missingNames, matched_names: matchedNamesArr, missing_reasons: missingReasons, samples_found: sf, samples_missing: sm, missing_samples: ms });
+}
+
 router.post('/api/collections/:id/build', async (req, res) => {
   await dbReady;
   try {
@@ -387,70 +438,29 @@ router.post('/api/collections/:id/build', async (req, res) => {
     setTimeout(async () => {
       try {
         if (scan) {
-          // Scan: uses CLI which returns JSON with matches/missing
-          let scanResult;
           if (isNps) {
+            // NPS scan stays synchronous (no --progress support)
+            let scanResult;
             scanResult = execCli(['scan', String(version_id), collectionDir], { binary: 'nps' });
+            reloadDb();
+            finalizeScan(scanResult, col, version_id, collectionDir, sv, buildId, jobId);
           } else {
+            // DAT scan with streaming progress
             const scanDir = path.join(collectionDir, sv.version);
-            scanResult = execCli(['scan', String(version_id), scanDir], { binary: 'build' });
+            const args = ['scan', String(version_id), scanDir, '--progress'];
+            execCliStream(args, {
+              binary: 'build',
+              onProgress: (p) => updateProgress(jobId, p.pct || 0, p.msg || ''),
+              signal: job._abort.signal,
+            }).then(scanResult => {
+              reloadDb();
+              finalizeScan(scanResult, col, version_id, collectionDir, sv, buildId, jobId);
+            }).catch(err => {
+              if (job._abort.signal.aborted) return;
+              runNow("UPDATE collection_builds SET status = 'failed', completed_at = datetime('now') WHERE id = ?", [buildId]);
+              failJob(jobId, err.message);
+            });
           }
-          reloadDb();
-
-          // Parse CLI JSON output
-          const matchedNames = new Set((scanResult?.matches || []).map(m => m.name));
-          const missingNames = scanResult?.missing_names || [];
-
-          // Also scan for CHD directories and sample zips
-          const scanDir = path.join(collectionDir, sv.version);
-          const romsDir = path.join(scanDir, 'roms');
-          const samplesDir = path.join(scanDir, 'samples');
-          if (fs.existsSync(romsDir)) {
-            for (const entry of fs.readdirSync(romsDir, { withFileTypes: true })) {
-              if (entry.isDirectory()) matchedNames.add(entry.name);
-            }
-          }
-          if (fs.existsSync(samplesDir)) {
-            for (const entry of fs.readdirSync(samplesDir)) {
-              if (entry.endsWith('.zip')) matchedNames.add(entry.replace(/\.zip$/, ''));
-            }
-          }
-
-          const matchedNamesArr = [...matchedNames];
-          const allNames = [...new Set([...matchedNamesArr, ...missingNames])];
-
-          // Update game_rom_sets.available from scan results
-          runNow('UPDATE game_rom_sets SET available = 0 WHERE version_id = ?', [version_id]);
-          if (matchedNamesArr.length > 0) {
-            const ph = matchedNamesArr.map(() => '?').join(',');
-            runNow(`UPDATE game_rom_sets SET available = 1
-              WHERE version_id = ? AND game_id IN (
-                SELECT g.id FROM games g WHERE g.name IN (${ph})
-              )`, [version_id, ...matchedNamesArr]);
-          }
-          syncGameAvailability(all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [version_id]).map(r => r.game_id));
-
-          // Calculate exist/reused/missing
-          const totalDb = get('SELECT COUNT(DISTINCT g.name) as c FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ?', [version_id]).c;
-          const matched = get('SELECT COUNT(DISTINCT g.name) as c FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ? AND grs.available = 1', [version_id]).c;
-          let reused = 0;
-          const priorVersions = all('SELECT DISTINCT sv.version, sv.id FROM set_versions sv JOIN collection_versions cv ON cv.version_id = sv.id WHERE cv.collection_id = ? AND sv.id < ? ORDER BY sv.id', [col.id, version_id]);
-          if (priorVersions.length > 0 && fs.existsSync(collectionDir)) {
-            const currentNames = new Set(all('SELECT DISTINCT g.name FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ?', [version_id]).map(r => r.name));
-            for (const pv of priorVersions) {
-              const pvRoms = path.join(collectionDir, pv.version, 'roms');
-              if (!fs.existsSync(pvRoms)) continue;
-              try {
-                const priorFiles = fs.readdirSync(pvRoms, { recursive: true }).filter(f => f.endsWith('.zip'));
-                for (const f of priorFiles) {
-                  const stem = path.basename(f, '.zip');
-                  if (currentNames.has(stem)) reused++;
-                }
-              } catch {}
-            }
-          }
-          runNow("UPDATE collection_builds SET status = 'complete', games_built = ?, completed_at = datetime('now') WHERE id = ?", [matched, buildId]);
-          doneJob(jobId, { found: matched, missing: totalDb - matched, total: totalDb, missing_names: missingNames, matched_names: matchedNamesArr });
         } else if (isNps) {
           // NPS build
           fs.mkdirSync(collectionDir, { recursive: true });

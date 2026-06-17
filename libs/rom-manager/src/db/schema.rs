@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS games (
     runnable        INTEGER,
     driver_status   TEXT,
     driver_emulation TEXT,
+    sampleof        TEXT,
     created_at      TEXT DEFAULT (datetime('now')),
     UNIQUE(name)
 );
@@ -75,6 +76,7 @@ pub const MIGRATIONS: &[&str] = &[
     "ALTER TABLE games ADD COLUMN driver_status TEXT",
     "ALTER TABLE games ADD COLUMN driver_emulation TEXT",
     "ALTER TABLE game_rom_sets ADD COLUMN available INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE games ADD COLUMN sampleof TEXT",
 ];
 
 pub const INDEXES: &str = "

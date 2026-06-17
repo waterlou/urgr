@@ -56,6 +56,7 @@ pub struct Game {
     pub runnable: Option<bool>,
     pub driver_status: Option<String>,
     pub driver_emulation: Option<String>,
+    pub sampleof: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -78,6 +79,7 @@ pub struct RomFile {
     pub sha1: Option<String>,
     pub status: String,
     pub merge_target: Option<String>,
+    pub subtype: String,
 }
 
 /// Temporary struct used during DAT parsing (before DB insertion)
@@ -89,6 +91,7 @@ pub struct ParsedGame {
     pub manufacturer: Option<String>,
     pub cloneof: Option<String>,
     pub romof: Option<String>,
+    pub sampleof: Option<String>,
     /// Platform name from the DAT (e.g. "Nintendo - Game Boy" from OfflineList
     /// `<configuration><system>` or set by the importer for FBNeo per-manufacturer dats).
     pub platform: String,
@@ -157,12 +160,26 @@ pub struct MissingGame {
     pub reason: MissingReason,
     #[serde(default)]
     pub rom_details: Vec<RomDetail>,
+    #[serde(default)]
+    pub sampleof: Option<String>,
+    #[serde(default)]
+    pub sample_details: Vec<RomDetail>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MissingReason {
     FileNotFound,
     CrcMismatch { matched: usize, expected: usize },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SampleResult {
+    #[serde(default)]
+    pub samples_found: usize,
+    #[serde(default)]
+    pub samples_missing: usize,
+    #[serde(default)]
+    pub missing_samples: Vec<String>,
 }
 
 /// Temporary struct for NPS import (games without a DAT)

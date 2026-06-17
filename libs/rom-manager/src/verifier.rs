@@ -110,6 +110,7 @@ mod tests {
             manufacturer: None,
             cloneof: None,
             romof: None,
+            sampleof: None,
             platform: String::new(),
             isbios: false,
             isdevice: false,

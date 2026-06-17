@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'child_process';
+import { execFileSync, spawnSync, spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { getDb, saveDb, initDb, getDbPath } from './db.js';
@@ -80,7 +80,15 @@ export function execCli(args, { binary = 'build' } = {}) {
   try {
     const opts = { encoding: 'utf-8', timeout: 120000, maxBuffer: 100 * 1024 * 1024 };
     if (binary === 'scraper') opts.env = loadScraperEnv();
-    stdout = execFileSync(cmdArgs[0], cmdArgs.slice(1), opts);
+    const result = spawnSync(cmdArgs[0], cmdArgs.slice(1), opts);
+    stdout = result.stdout;
+    if (result.stderr?.trim()) console.error(`[${binary}]`, result.stderr.trim().split('\n').join('\n[' + binary + '] '));
+    if (result.status !== 0 || result.error) {
+      const e = result.error || new Error(`Exit code ${result.status}`);
+      e.stdout = { toString: () => stdout || '' };
+      e.stderr = { toString: () => result.stderr || '' };
+      throw e;
+    }
   } catch (e) {
     // CLI exited with error — try to extract error + download_url from JSON in stdout
     const out = e.stdout?.toString().trim();
