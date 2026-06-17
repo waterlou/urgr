@@ -222,7 +222,8 @@ impl Database {
         Ok(id)
     }
 
-    /// Resolve cloneof → parent_game_id for all games with a non-empty cloneof.
+    /// Resolve cloneof and romof → parent_game_id for games with a non-empty value.
+    /// cloneof takes priority; romof is only applied if the game still lacks a parent.
     /// Looks up parents from BOTH the in-memory slice (handles same-import ordering issues
     /// where a child was inserted before its parent) AND the DB (handles parents imported
     /// in earlier batches or via a different DAT).
@@ -244,27 +245,46 @@ impl Database {
             }
         }
 
-        // Second pass: UPDATE each game's parent_game_id, falling back to a fresh DB
-        // lookup if the parent isn't in the in-memory map (e.g. parent was inserted in
-        // a previous import).
+        // Helper: look up a parent by name in memory or DB
+        let lookup_parent = |parent_name: &str| -> Result<Option<i64>> {
+            Ok(match name_to_id.get(parent_name) {
+                Some(&id) => Some(id),
+                None => match self.conn.query_row(
+                    "SELECT id FROM games WHERE name = ?1",
+                    params![parent_name],
+                    |r| r.get::<_, i64>(0),
+                ) {
+                    Ok(id) => Some(id),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                    Err(e) => return Err(crate::Error::Source(format!("Parent lookup error: {}", e))),
+                },
+            })
+        };
+
+        // Second pass: resolve cloneof → parent_game_id
         for game in games {
             let Some(ref cloneof) = game.cloneof else { continue };
             if cloneof.is_empty() { continue; }
-            let parent_id = match name_to_id.get(cloneof) {
-                Some(&id) => id,
-                None => match self.conn.query_row(
-                    "SELECT id FROM games WHERE name = ?1",
-                    params![cloneof],
-                    |r| r.get::<_, i64>(0),
-                ) {
-                    Ok(id) => id,
-                    Err(rusqlite::Error::QueryReturnedNoRows) => continue, // parent not in DB
-                    Err(e) => return Err(crate::Error::Source(format!("Parent lookup error: {}", e))),
-                },
-            };
+            let Some(parent_id) = lookup_parent(cloneof)? else { continue };
             let Some(&child_id) = name_to_id.get(&game.name) else { continue };
             self.conn.execute(
                 "UPDATE games SET parent_game_id = ?1 WHERE id = ?2",
+                params![parent_id, child_id],
+            )?;
+        }
+
+        // Third pass: resolve romof → parent_game_id for games that still lack one.
+        // romof denotes the system BIOS parent (e.g. neogeo). Only set if a game with
+        // that name actually exists as a game in the DB.
+        for game in games {
+            let Some(ref romof) = game.romof else { continue };
+            if romof.is_empty() { continue; }
+            // Skip if cloneof was already resolved above — cloneof takes priority
+            if game.cloneof.as_ref().map_or(false, |c| !c.is_empty()) { continue; }
+            let Some(parent_id) = lookup_parent(romof)? else { continue };
+            let Some(&child_id) = name_to_id.get(&game.name) else { continue };
+            self.conn.execute(
+                "UPDATE games SET parent_game_id = ?1 WHERE id = ?2 AND parent_game_id IS NULL",
                 params![parent_id, child_id],
             )?;
         }

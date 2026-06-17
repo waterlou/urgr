@@ -222,7 +222,7 @@ fn parse_rom_entry(text: &str) -> Option<ParsedRom> {
         md5: map.get("md5").map(|s| s.to_uppercase()),
         sha1: map.get("sha1").map(|s| s.to_uppercase()),
         status: map.get("status").cloned().unwrap_or_else(|| "good".into()),
-        merge_target: None,
+        merge_target: map.get("merge").cloned(),
     })
 }
 
@@ -319,6 +319,7 @@ game (
         assert_eq!(games[0].roms[1].crc32.as_deref(), Some("BBBB2222"));
         assert_eq!(games[0].roms[1].status, "good");
         assert!(games[0].roms[1].md5.is_none());
+        assert_eq!(games[0].roms[1].merge_target.as_deref(), Some("t"));
     }
 
     #[test]
