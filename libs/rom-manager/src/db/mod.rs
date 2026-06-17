@@ -222,14 +222,12 @@ impl Database {
         Ok(id)
     }
 
-    /// Resolve cloneof and romof → parent_game_id for games with a non-empty value.
-    /// cloneof takes priority; romof is only applied if the game still lacks a parent.
-    /// Looks up parents from BOTH the in-memory slice (handles same-import ordering issues
-    /// where a child was inserted before its parent) AND the DB (handles parents imported
-    /// in earlier batches or via a different DAT).
+    /// Resolve romof and cloneof → parent_game_id for games with a non-empty value.
+    /// romof is the split parent — which zip holds the shared ROMs (can chain).
+    /// cloneof is metadata about the clone relationship, used as fallback when romof
+    /// is unavailable.
     pub fn resolve_parents(&self, games: &[ParsedGame]) -> Result<()> {
         // First pass: query each inserted game from the DB to get its id.
-        // This is needed because the in-memory `games` slice doesn't carry rowids.
         let mut name_to_id: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
         for chunk in games.chunks(500) {
             let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
@@ -245,7 +243,6 @@ impl Database {
             }
         }
 
-        // Helper: look up a parent by name in memory or DB
         let lookup_parent = |parent_name: &str| -> Result<Option<i64>> {
             Ok(match name_to_id.get(parent_name) {
                 Some(&id) => Some(id),
@@ -261,11 +258,11 @@ impl Database {
             })
         };
 
-        // Second pass: resolve cloneof → parent_game_id
+        // Second pass: resolve romof → parent_game_id (split parent)
         for game in games {
-            let Some(ref cloneof) = game.cloneof else { continue };
-            if cloneof.is_empty() { continue; }
-            let Some(parent_id) = lookup_parent(cloneof)? else { continue };
+            let Some(ref romof) = game.romof else { continue };
+            if romof.is_empty() { continue; }
+            let Some(parent_id) = lookup_parent(romof)? else { continue };
             let Some(&child_id) = name_to_id.get(&game.name) else { continue };
             self.conn.execute(
                 "UPDATE games SET parent_game_id = ?1 WHERE id = ?2",
@@ -273,15 +270,11 @@ impl Database {
             )?;
         }
 
-        // Third pass: resolve romof → parent_game_id for games that still lack one.
-        // romof denotes the system BIOS parent (e.g. neogeo). Only set if a game with
-        // that name actually exists as a game in the DB.
+        // Third pass: resolve cloneof → parent_game_id (fallback for games without romof)
         for game in games {
-            let Some(ref romof) = game.romof else { continue };
-            if romof.is_empty() { continue; }
-            // Skip if cloneof was already resolved above — cloneof takes priority
-            if game.cloneof.as_ref().map_or(false, |c| !c.is_empty()) { continue; }
-            let Some(parent_id) = lookup_parent(romof)? else { continue };
+            let Some(ref cloneof) = game.cloneof else { continue };
+            if cloneof.is_empty() { continue; }
+            let Some(parent_id) = lookup_parent(cloneof)? else { continue };
             let Some(&child_id) = name_to_id.get(&game.name) else { continue };
             self.conn.execute(
                 "UPDATE games SET parent_game_id = ?1 WHERE id = ?2 AND parent_game_id IS NULL",
