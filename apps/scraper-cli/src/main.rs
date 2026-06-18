@@ -47,6 +47,7 @@ struct ScrapeMatch {
     screenshots: Vec<String>,
     fanarts: Vec<String>,
     videos: Vec<String>,
+    logos: Vec<String>,
     roms: Vec<RomEntry>,
 }
 
@@ -66,6 +67,7 @@ struct DetailOutput {
     screenshots: Vec<String>,
     fanarts: Vec<String>,
     videos: Vec<String>,
+    logos: Vec<String>,
     roms: Vec<RomEntry>,
 }
 
@@ -103,6 +105,7 @@ fn game_to_match(game: &rom_scraper::Game) -> ScrapeMatch {
         screenshots: game.media.screenshots.iter().map(|m| m.url.clone()).collect(),
         fanarts: game.media.fanarts.iter().map(|m| m.url.clone()).collect(),
         videos: game.media.videos.iter().map(|m| m.url.clone()).collect(),
+        logos: game.media.logos.iter().map(|m| m.url.clone()).collect(),
         roms: game.roms.iter().map(|r| RomEntry {
             filename: r.filename.clone(),
             crc: r.crc32.clone(),
@@ -422,11 +425,13 @@ async fn cmd_hash(args: &[String]) -> ExitCode {
 
 async fn cmd_search(args: &[String]) -> ExitCode {
     if args.len() < 2 {
-        eprintln!("Usage: scraper-cli search <query> [--source <s>] [--platform <p>]");
+        eprintln!("Usage: scraper-cli search <query> [--source <s>] [--platform <p>] [--dataset-preset <d>]");
         return ExitCode::FAILURE;
     }
     let query = &args[1];
     let platform = args.iter().position(|a| a == "--platform")
+        .and_then(|p| args.get(p + 1));
+    let dataset_preset = args.iter().position(|a| a == "--dataset-preset")
         .and_then(|p| args.get(p + 1));
     let source = parse_source(args);
 
@@ -434,9 +439,10 @@ async fn cmd_search(args: &[String]) -> ExitCode {
     let registry = ScraperRegistry::new(&config);
 
     let platform_str = platform.map(|s| s.as_str());
+    let dp_str = dataset_preset.map(|s| s.as_str());
 
     let result = match source {
-        Some(src) => registry.search_by_name_from_source(query, &src, platform_str).await,
+        Some(ref src) => registry.search_by_name_from_source_with(query, src, platform_str, dp_str).await,
         None => registry.search_by_name(query, platform_str).await,
     };
 
@@ -536,16 +542,23 @@ async fn cmd_scrape(args: &[String]) -> ExitCode {
 
 async fn cmd_detail(args: &[String]) -> ExitCode {
     if args.len() < 2 {
-        eprintln!("Usage: scraper-cli detail <game-id> [--source <s>]");
+        eprintln!("Usage: scraper-cli detail <game-id> [--source <s>] [--dataset-preset <d>]");
         return ExitCode::FAILURE;
     }
     let game_id = &args[1];
     let source = parse_source(args).unwrap_or(rom_scraper::ScrapeSource::TheGamesDb);
+    let dataset_preset = args.iter().position(|a| a == "--dataset-preset")
+        .and_then(|p| args.get(p + 1));
 
     let config = build_config();
     let registry = ScraperRegistry::new(&config);
 
-    match registry.get_game_detail(game_id, &source).await {
+    let result = if let Some(dp) = dataset_preset {
+        registry.get_game_detail_from_source_with(game_id, &source, Some(dp.as_str())).await
+    } else {
+        registry.get_game_detail(game_id, &source).await
+    };
+    match result {
         Ok(Some(game)) => {
             print_json(&DetailOutput {
                 id: game.id.clone(),
@@ -562,6 +575,7 @@ async fn cmd_detail(args: &[String]) -> ExitCode {
                 screenshots: game.media.screenshots.iter().map(|s| s.url.clone()).collect(),
                 fanarts: game.media.fanarts.iter().map(|f| f.url.clone()).collect(),
                 videos: game.media.videos.iter().map(|v| v.url.clone()).collect(),
+                logos: game.media.logos.iter().map(|l| l.url.clone()).collect(),
                 roms: game.roms.iter().map(|r| RomEntry {
                     filename: r.filename.clone(),
                     crc: r.crc32.clone(),

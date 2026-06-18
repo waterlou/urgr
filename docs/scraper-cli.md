@@ -170,6 +170,131 @@ JSON with full game metadata including `synopsis` (truncated to 500 chars).
 - The `--source` flag now also restricts the scrape enrichment call to that provider only
 - Protocol-relative IGDB URLs (`//images.igdb.com/...`) are auto-prefixed with `https:`
 
+### `--dataset-preset` (scraper CLI)
+Added to `search` and `detail` commands. Passes the collection's `dataset_preset` (`mame`, `fbneo`) to platform-dependent scrapers. Libretro-thumbnails uses it to pick the correct libretro folder: when platform is `arcade`/`mame` and dataset_preset is `fbneo`, it looks in `FBNeo - Arcade Games` instead of `MAME`.
+
+### `--no-clear` (parse CLI)
+Skips `clear_game_roms_for_version` before importing. Used when importing multiple per-system DATs into the same version (FBNeo multi-DAT imports) so that the second DAT doesn't wipe the first DAT's game ROM sets. Without this flag, each DAT import clears all existing `game_rom_sets` for that version.
+
+## Build System (build-cli)
+
+### Platform-Aware Import Directory
+
+The import directory can contain platform subdirectories for disambiguating games with the same name across different platforms. When a zip file sits under a known platform folder, the builder indexes it by both name and platform:
+
+```
+import/
+├── arcade/
+│   └── zoom909.zip
+├── msx/
+│   └── zoom909.zip
+└── sg1000/
+    └── zoom909.zip
+```
+
+Known platform folders: `arcade`, `coleco`, `fds`, `gamegear`, `megadriv`, `msx`, `neogeo`, `nes`, `ngp`, `pce`, `sg1000`, `sgx`, `sms`, `tg16`, `zxspectrum`.
+
+Games in the output directory are stored in platform subdirectories (e.g., `roms/arcade/zoom909.zip`, `roms/msx/zoom909.zip`) — same convention as the import.
+
+### Samples Directory
+
+Sample files are copied to `{version_dir}/samples/`. The build creates this directory automatically if any sample files are found in the import directory.
+
+## Server-side Scrape Orchestration
+
+## Server-side Scrape Orchestration
+
+The server (`server/routes/games.js`) wraps the Rust CLI and adds per-collection control:
+
+### Per-Collection Scrape Source Priority
+
+Each collection has a `scrape_source_priority` field (JSON array of source names). This is set via the collection's **Scrape Source Order** settings UI tab.
+
+Controls two things:
+1. **Which sources are used during scraping** — `scrapeSingleGame()` currently tries ArcadeDB first for arcade games, then searches across all configured sources. (Respecting the priority order during scraping is a future enhancement.)
+2. **Which media is displayed** — The `getEnabledSourceSet(versionId)` helper reads the priority and filters media at display time in all serving paths:
+   - Collection game listing (`GET /api/collections/:id/games`)
+   - Game detail (`GET /api/games/:id`)
+   - Individual media (`GET /api/games/:id/media`, `GET /api/games/:id/cover`)
+   - Global game list (`GET /api/games`)
+
+### Source-aware `game_media` Entries
+
+The `game_media` table has a `source TEXT` column (default `''`) that tracks which scraper created each entry:
+
+| Source | Set By |
+|--------|--------|
+| `arcadedb` | `scrapeSingleGame()` from `first.source` |
+| `thegamesdb` | `scrapeSingleGame()` from `first.source` |
+| `screenscraper` | `scrapeSingleGame()` from `first.source` |
+| `igdb` | `scrapeSingleGame()` from `first.source` |
+| `libretro-thumbnails` | `scrapeSingleGame()` from `first.source` |
+| `no-intro-pictures` | No-Intro fallback in `scrapeSingleGame()` |
+| `sony-store` | NPS fanart fetch in `scrapeSingleGame()` |
+| `progettosnaps` | `serveGameMedia()` when serving pre-downloaded files |
+| `''` (empty) | Legacy entries created before this column existed |
+
+Behavior:
+- `scrape_source_priority = null` (not configured) → all sources allowed (backward compatible)
+- `scrape_source_priority = []` (empty) → no media shown
+- `scrape_source_priority = ["arcadedb"]` → only ArcadeDB entries from `game_media` shown
+- Legacy entries with `source = ''` are **excluded** when `scrape_source_priority` is explicitly set, to avoid showing media from unknown sources
+
+### Media Serving Flow
+
+```
+GET /api/games/:id/media?type=title
+  │
+  ├─ Check progettosnaps pre-downloaded files (if source is enabled)
+  │   data/media/progettosnaps/title/<game.name>.png
+  │
+  ├─ Check game_media for stored URLs (filtered by enabled sources)
+  │   → getMedia() fetches/returns cached file
+  │   → On first fetch, saves to data/media/<source>/<game>/ and stores localUrl
+  │
+  └─ Fallback: SVG placeholder (for cover only) or 404
+```
+
+### ProgettoSnaps (Pre-downloaded Media)
+
+Not a real scraper — no Rust CLI, no API. Images are downloaded via the Settings UI's **ProgettoSnaps (MAME Images)** operation:
+
+1. Downloads `pS_snap_fullset_287.zip` and `pS_titles_fullset_287.zip` from `progettosnaps.net`
+2. Extracts nested `.7z` archives inside the zips
+3. PNGs extracted to `data/media/progettosnaps/snap/<game>.png` and `data/media/progettosnaps/title/<game>.png`
+4. Only works for MAME collections (source = `mame`)
+
+When a progettosnaps file exists for a game, it takes priority over scraped URLs in all serving paths (controlled by the `progettosnaps` source toggle in the scrape priority UI).
+
+### Media Caching
+
+After the first successful fetch of a remote URL, the `getMedia()` function in `server/mediaCache.js`:
+
+1. Saves the file to `data/media/<source>/<gameName>/<mediaType>.<ext>`
+2. Updates the `game_media` URL to point to the local path (`/media/<source>/...`)
+3. Future requests are served directly by `express.static` (no network fetch)
+
+Cache directories:
+- `data/media/arcadedb/`
+- `data/media/libretro-thumbnails/`
+- `data/media/sony-store/`
+- `data/media/igdb/`
+- `data/media/progettosnaps/`
+
+## Source Platform Dependencies
+
+| Source | Works On | Reason |
+|--------|----------|--------|
+| **ArcadeDB** | MAME arcade only | Uses MAME short names for lookup |
+| **ProgettoSnaps** | MAME arcade only | Pre-downloaded sets named by MAME short name |
+| **SonyStore** | NPS (PSN) only | Looks up by PSN content_id / title_id |
+| **LibretroThumbnails** | All libretro-supported platforms | Folder structure mirrors libretro platform slugs |
+| **NoIntroPictures** | No-Intro / DAT-O-MATIC collections | Uses No-Intro naming conventions |
+| **VGMuseum** | 50+ retro platforms (NES, SNES, Genesis, etc.) | Mapped explicitly in Rust source |
+| **TheGamesDB** | All platforms | API-based, platform-agnostic |
+| **IGDB** | All platforms | API-based, platform-agnostic |
+| **ScreenScraper** | All platforms | API-based, platform-agnostic |
+
 ## Test Coverage
 
 20 unit tests in `apps/scraper-cli/src/main.rs`:

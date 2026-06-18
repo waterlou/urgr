@@ -5,8 +5,10 @@ import {
 import { ArrowUpward, ArrowDownward } from '@mui/icons-material';
 import { ALL_SOURCES, SOURCE_LABELS, getInitialPriority } from '../../lib/scrapePresets.js';
 import { updateScrapePriority } from '../../api.js';
+import { useCollections } from '../../contexts/CollectionContext.jsx';
 
 export default function ScrapeTab({ collection }) {
+  const { loadSidebar } = useCollections();
   const stored = collection?.scrape_source_priority;
   const initial = stored ? JSON.parse(stored) : getInitialPriority(collection?.dataset_preset);
   const allInitial = ALL_SOURCES;
@@ -55,6 +57,7 @@ export default function ScrapeTab({ collection }) {
     setSaved(false);
     try {
       await updateScrapePriority(collection.id, enabled);
+      await loadSidebar();
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {

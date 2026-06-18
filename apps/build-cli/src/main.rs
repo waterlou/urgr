@@ -31,7 +31,7 @@ fn install_signal_handlers() {
 #[derive(Serialize)]
 struct VersionEntry {
     id: i64,
-    source: String,
+    collection_id: i64,
     version: String,
     directory: Option<String>,
     total_games: i64,
@@ -240,16 +240,16 @@ fn cmd_dat_list(json: bool) -> ExitCode {
 
     if json {
         let entries: Vec<VersionEntry> = versions.iter().map(|v| VersionEntry {
-            id: v.id, source: v.source.clone(), version: v.version.clone(),
+            id: v.id, collection_id: v.collection_id, version: v.version.clone(),
             directory: v.dir.clone(), total_games: v.total_games, total_roms: v.total_roms,
         }).collect();
         print_json(&serde_json::json!({"versions": entries}));
     } else {
         if versions.is_empty() { println!("No versions imported."); return ExitCode::SUCCESS; }
-        println!("{:<5} {:<12} {:<12} {:<30} {}/{}", "ID", "Source", "Version", "Directory", "Games", "ROMs");
+        println!("{:<5} {:<12} {:<12} {:<30} {}/{}", "ID", "Collection", "Version", "Directory", "Games", "ROMs");
         println!("{}", "-".repeat(80));
         for v in &versions {
-            println!("{:<5} {:<12} {:<12} {:<30} {}/{}", v.id, v.source, v.version,
+            println!("{:<5} {:<12} {:<12} {:<30} {}/{}", v.id, v.collection_id, v.version,
                 v.dir.as_deref().unwrap_or("-"), v.total_games, v.total_roms);
         }
     }
@@ -279,13 +279,13 @@ fn cmd_dat_info(args: &[String], json: bool) -> ExitCode {
 
     if json {
         let info = serde_json::json!({
-            "version": { "id": version.id, "source": version.source, "version": version.version, "directory": version.dir, "total_games": version.total_games, "total_roms": version.total_roms },
+            "version": { "id": version.id, "collection_id": version.collection_id, "version": version.version, "directory": version.dir, "total_games": version.total_games, "total_roms": version.total_roms },
             "games": games.iter().map(|g| g.name.clone()).collect::<Vec<_>>()
         });
         print_json(&info);
     } else {
         println!("ID:        {}", version.id);
-        println!("Source:    {}", version.source);
+        println!("Collection ID: {}", version.collection_id);
         println!("Version:   {}", version.version);
         if let Some(dir) = &version.dir { println!("Directory: {}", dir); }
         println!("Games:     {} ({} ROMs)", version.total_games, version.total_roms);
@@ -724,15 +724,18 @@ fn cmd_export(args: &[String], json: bool) -> ExitCode {
 
 fn cmd_build(args: &[String], json: bool) -> ExitCode {
     if args.len() < 3 {
-        eprintln!("Usage: build-cli build <source> <import-dir> [--update] [--dry-run] [--version-id <id>] [--base-dir <dir>] [--collection-dir <dir>] [--progress]");
+        eprintln!("Usage: build-cli build <import-dir> --collection-id <id> [--update] [--dry-run] [--version-id <id>] [--base-dir <dir>] [--collection-dir <dir>] [--progress]");
         return ExitCode::FAILURE;
     }
-    let source = &args[1];
-    let import_dir = std::path::Path::new(&args[2]);
+    let import_dir = std::path::Path::new(&args[1]);
     if !import_dir.is_dir() {
-        eprintln!("Import directory not found: {}", args[2]);
+        eprintln!("Import directory not found: {}", args[1]);
         return ExitCode::FAILURE;
     }
+    let collection_id = args.iter().position(|a| a == "--collection-id")
+        .and_then(|p| args.get(p + 1))
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or_else(|| { eprintln!("--collection-id <id> is required"); std::process::exit(1); });
 
     let update = args.iter().any(|a| a == "--update");
     let show_progress = args.iter().any(|a| a == "--progress");
@@ -763,11 +766,11 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
         }
     };
 
-    match build_version(&db, source, import_dir, &base_dir, collection_dir.as_deref(), update, dry_run, version_id, &progress_cb, &CANCEL_FLAG, verbose) {
+    match build_version(&db, collection_id, import_dir, &base_dir, collection_dir.as_deref(), update, dry_run, version_id, &progress_cb, &CANCEL_FLAG, verbose) {
         Ok(result) => {
             if json {
                 print_json(&BuildOutput {
-                    source: source.to_string(),
+                    source: format!("collection_{}", collection_id),
                     version: result.version,
                     mode: result.mode,
                     prev_version: result.prev_version,
@@ -788,10 +791,10 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
                 });
             } else {
                 if dry_run {
-                    println!("Scan result for {} {}", source, result.version);
+                    println!("Scan result for collection {} {}", collection_id, result.version);
                 } else {
                     let mode_label = if update { "update" } else { "delta" };
-                    println!("Built {} {} ({} mode)", source, result.version, mode_label);
+                    println!("Built collection {} {} ({} mode)", collection_id, result.version, mode_label);
                 }
                 if let Some(ref pv) = result.prev_version {
                     println!("  from v{} → v{}", pv, result.version);

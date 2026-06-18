@@ -2,10 +2,12 @@ import { useState, useEffect } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField,
   Tabs, Tab, Box, Typography, CircularProgress, Alert, Select, MenuItem,
-  FormControl, InputLabel, Divider, Link,
+  FormControl, InputLabel, Divider, Link, LinearProgress, List, ListItem, ListItemText,
 } from '@mui/material';
 import {
   getSettings, saveSettings, testIgdbConnection, testTgdbConnection,
+  downloadProgettoSnaps, createOperation, cancelOperation, subscribeOperationsSSE,
+  repairDatabase,
 } from '../api.js';
 import { useUI } from '../contexts/UIContext.jsx';
 
@@ -17,9 +19,26 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
   const [testResults, setTestResults] = useState({});
+  const [psOp, setPsOp] = useState(null);
+  const [psStatus, setPsStatus] = useState(null);
+  const [repairRunning, setRepairRunning] = useState(false);
+  const [repairResult, setRepairResult] = useState(null);
 
   useEffect(() => {
     getSettings().then(setValues).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const sub = subscribeOperationsSSE({
+      onSnapshot: (ops) => {
+        const found = ops.find(o => o.type === 'progettosnaps');
+        if (found) { setPsOp(found); setPsStatus(found.status); }
+      },
+      onUpdate: (op) => {
+        if (op.type === 'progettosnaps') { setPsOp(op); setPsStatus(op.status); }
+      },
+    });
+    return () => sub.close();
   }, []);
 
   function set(field, v) {
@@ -126,8 +145,93 @@ export default function Settings() {
 
             {mainTab === 1 && (
               <Box>
+                <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>Internet Archive</Typography>
                 <TextField label="Email" fullWidth value={values.IA_EMAIL || ''} onChange={e => set('IA_EMAIL', e.target.value)} sx={{ mb: 2 }} />
                 <TextField label="Password" fullWidth type="password" value={values.IA_PASSWORD || ''} onChange={e => set('IA_PASSWORD', e.target.value)} sx={{ mb: 2 }} />
+
+                <Divider sx={{ my: 3 }} />
+
+                <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>ProgettoSnaps (MAME Images)</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Download Snap and Title image sets from progettosnaps.net for MAME collections.
+                  Images are pre-packaged in zip files (~500MB each). Once downloaded, they will be
+                  served automatically for any MAME collection.
+                </Typography>
+
+                {psStatus === 'running' && (
+                  <Box sx={{ mb: 2 }}>
+                    <LinearProgress variant="determinate" value={psOp?.progress_pct || 0} sx={{ mb: 1 }} />
+                    <Typography variant="body2" color="text.secondary">
+                      {psOp?.progress_msg || 'Downloading...'} ({psOp?.progress_pct || 0}%)
+                    </Typography>
+                    <Button variant="outlined" color="error" size="small" sx={{ mt: 1 }}
+                      onClick={() => cancelOperation(psOp.id)}>
+                      Cancel
+                    </Button>
+                  </Box>
+                )}
+
+                {psStatus === 'done' && (
+                  <Alert severity="success" sx={{ mb: 2 }}>
+                    ProgettoSnaps images downloaded successfully. MAME collections will now use
+                    these images.
+                  </Alert>
+                )}
+
+                {psStatus === 'failed' && (
+                  <Alert severity="error" sx={{ mb: 2 }}>
+                    Download failed: {psOp?.error || 'Unknown error'}
+                  </Alert>
+                )}
+
+                <Button variant="contained" disabled={psStatus === 'running'}
+                  onClick={async () => {
+                    try {
+                      setPsStatus('running');
+                      setPsOp({ progress_pct: 0, progress_msg: 'Starting...' });
+                      const op = await downloadProgettoSnaps();
+                      setPsOp(op);
+                    } catch (e) {
+                      setPsStatus('failed');
+                      setPsOp({ error: e.message });
+                    }
+                  }}>
+                  {psStatus === 'running' ? 'Downloading...' : 'Download ProgettoSnaps Images'}
+                </Button>
+
+                <Divider sx={{ my: 3 }} />
+
+                <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>Database Repair</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Fix orphaned versions not linked to collections, infer missing source info for
+                  media entries, and report games with no ROM data.
+                </Typography>
+
+                {repairResult && (
+                  <List dense sx={{ mb: 2 }}>
+                    {repairResult.map((r, i) => (
+                      <ListItem key={i}>
+                        <ListItemText
+                          primary={r.details}
+                          secondary={r.names ? r.names.join(', ') : null}
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                )}
+
+                <Button variant="contained" disabled={repairRunning}
+                  onClick={async () => {
+                    setRepairRunning(true); setRepairResult(null);
+                    try {
+                      const res = await repairDatabase();
+                      setRepairResult(res.results || []);
+                    } catch (e) {
+                      setRepairResult([{ details: 'Error: ' + e.message }]);
+                    } finally { setRepairRunning(false); }
+                  }}>
+                  {repairRunning ? <CircularProgress size={16} /> : 'Run Database Repair'}
+                </Button>
               </Box>
             )}
 

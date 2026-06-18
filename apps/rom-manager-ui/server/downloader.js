@@ -18,7 +18,8 @@ export function getQueueItem(id) {
 }
 
 export function enqueueGame(gameId) {
-  const sourceInfo = get(`SELECT DISTINCT sv.source FROM games g
+  const sourceInfo = get(`SELECT DISTINCT c.dataset_preset as source FROM games g
+    JOIN collections c ON c.id = g.collection_id
     JOIN game_rom_sets grs ON grs.game_id = g.id
     JOIN set_versions sv ON sv.id = grs.version_id
     WHERE g.id = ?`, [gameId])
@@ -85,7 +86,7 @@ export async function processNext() {
     broadcastQueue()
 
     const col = get(`SELECT c.folder, c.slug FROM collections c
-      JOIN collection_versions cv ON cv.collection_id = c.id
+      JOIN set_versions sv2 ON sv2.id = cv.version_id
       WHERE cv.version_id = ? LIMIT 1`, [item.version_id])
     const colFolder = col?.folder || col?.slug || String(item.version_id)
     const game = get('SELECT platform FROM games WHERE id = ?', [item.game_id])
@@ -171,14 +172,13 @@ async function checkGameComplete(gameId) {
   if (pending.cnt > 0) return
 
   try {
-    const versionRows = all(`SELECT grs.version_id, sv.source, c.folder FROM games g
+    const versionRows = all(`SELECT grs.version_id, c.dataset_preset as source, c.folder FROM games g
+      JOIN collections c ON c.id = g.collection_id
       JOIN game_rom_sets grs ON grs.game_id = g.id
       JOIN set_versions sv ON sv.id = grs.version_id
-      LEFT JOIN collection_versions cv ON cv.version_id = grs.version_id
-      LEFT JOIN collections c ON c.id = cv.collection_id
       WHERE g.id = ?`, [gameId])
     for (const row of versionRows) {
-      if (row.folder && row.source === 'NPS') {
+      if (row.folder && row.source === 'nps') {
         const collectionDir = path.resolve(dataDir, 'roms', row.folder)
         execCli(['scan', String(row.version_id), collectionDir, '--game-id', String(gameId)], { binary: 'nps' })
       }

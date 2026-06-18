@@ -19,25 +19,25 @@ const router = Router();
 router.post('/api/versions/:id/fill-descriptions', async (req, res) => {
   await dbReady;
   try {
-    const sv = get('SELECT * FROM set_versions WHERE id = ?', [req.params.id]);
+    const sv = get('SELECT sv.*, c.dataset_preset as ds_preset FROM set_versions sv JOIN collections c ON c.id = sv.collection_id WHERE sv.id = ?', [req.params.id]);
     if (!sv) return res.status(404).json({ error: 'Version not found' });
 
-    const SOURCE_REPOS = {
-      FBNeo: 'libretro/FBNeo',
-      FBAlpha43: 'barbudreadmon/fbalpha-backup-dontuse-ty',
-      FBAlpha44: 'libretro/fbalpha',
+    const DS_REPOS = {
+      fbneo: sv.version.includes('43') ? 'barbudreadmon/fbalpha-backup-dontuse-ty'
+           : sv.version.includes('44') ? 'libretro/fbalpha'
+           : 'libretro/FBNeo',
     };
-    const repo = SOURCE_REPOS[sv.source];
-    if (!repo) return res.json({ updated: 0, error: `Source ${sv.source} not supported for re-import` });
+    const repo = DS_REPOS[sv.ds_preset];
+    if (!repo) return res.json({ updated: 0, error: `Dataset ${sv.ds_preset} not supported for re-import` });
 
-    const ref = (sv.source === 'FBNeo' && sv.version === 'nightly') ? 'master' : sv.version;
+    const ref = (sv.ds_preset === 'fbneo' && sv.version === 'nightly') ? 'master' : sv.version;
     const contentsResp = await fetch(`https://api.github.com/repos/${repo}/contents/dats?ref=${ref}`);
     if (!contentsResp.ok) throw new Error(`GitHub API HTTP ${contentsResp.status}`);
     const contents = await contentsResp.json();
     if (!Array.isArray(contents)) throw new Error('Invalid response');
 
     let datFiles = contents.filter(f => f.name.endsWith('.dat') && f.download_url);
-    if (sv.source === 'FBAlpha43') {
+    if (sv.ds_preset === 'fbneo' && sv.version.includes('43')) {
       const combined = datFiles.find(f => f.name.includes('0.2.97.43') && !f.name.includes('only'));
       if (combined) datFiles = [combined];
     }
@@ -188,29 +188,33 @@ async function getFBNeoVersions() {
 
     const versions = tags.map(t => t.name);
     const fbalphaVersions = [
-      { version: '0.2.97.43', source: 'FBAlpha43', repo: FBALPHA43_REPO },
-      { version: '0.2.97.44', source: 'FBAlpha44', repo: FBALPHA44_REPO },
+      { version: '0.2.97.43', repo: FBALPHA43_REPO },
+      { version: '0.2.97.44', repo: FBALPHA44_REPO },
     ];
 
-    const imported = all("SELECT id, source, version, created_at FROM set_versions WHERE source IN ('FBNeo','FBAlpha43','FBAlpha44') ORDER BY version");
-    const importedSet = new Set(imported.map(v => `${v.source}:${v.version}`));
+    const imported = all(`SELECT sv.id, sv.version, sv.created_at
+      FROM set_versions sv
+      JOIN collections c ON c.id = sv.collection_id
+      WHERE c.dataset_preset = 'fbneo'
+      ORDER BY sv.version`);
+    const importedSet = new Set(imported.map(v => v.version));
 
     const allVersions = sortVersions([
       ...fbalphaVersions.map(v => v.version),
       ...versions.slice().reverse(),
       'nightly',
     ]).flatMap(v => {
-      if (v === 'nightly') return [{ version: 'nightly', source: 'FBNeo', repo: FBNEO_REPO, ref: 'master', nightly: true }]
+      if (v === 'nightly') return [{ version: 'nightly', dataset_preset: 'fbneo', repo: FBNEO_REPO, ref: 'master', nightly: true, source: 'fbneo' }]
       const fbalpha = fbalphaVersions.find(fv => fv.version === v)
-      if (fbalpha) return [fbalpha]
-      return [{ version: v, source: 'FBNeo', repo: FBNEO_REPO, ref: v }]
+      if (fbalpha) return [{ version: v, dataset_preset: 'fbneo', repo: fbalpha.repo, ref: 'master', source: 'fbneo' }]
+      return [{ version: v, dataset_preset: 'fbneo', repo: FBNEO_REPO, ref: v, source: 'fbneo' }]
     });
 
-    const missing = allVersions.filter(v => !importedSet.has(`${v.source}:${v.version}`));
+    const missing = allVersions.filter(v => !importedSet.has(v.version));
     const result = {
-      source: 'FBNeo',
+      source: 'fbneo',
       latest: 'nightly',
-      hasNewer: missing.some(v => v.nightly || !importedSet.has(`FBNeo:${v.version}`)),
+      hasNewer: missing.some(v => v.nightly || !importedSet.has(v.version)),
       available: allVersions,
       imported,
       missing,
@@ -253,18 +257,18 @@ async function getOfflineListVersions() {
       const platform = zipName.replace('Official No-Intro ', '').replace('.zip', '');
       allVersions.push({
         version: platform,
-        source: 'OFFLINELIST',
+        source: 'offlinelist',
         zipName,
         url: `${OFFLINELIST_BASE_URL}/datas/${encodeURIComponent(zipName)}`,
       });
     }
 
-    const imported = all("SELECT id, source, version, created_at FROM set_versions WHERE source = 'OFFLINELIST' ORDER BY version");
+    const imported = all("SELECT sv.id, sv.version, sv.created_at FROM set_versions sv JOIN collections c ON c.id = sv.collection_id WHERE c.dataset_preset = 'offlinelist' ORDER BY sv.version");
     const importedSet = new Set(imported.map(v => v.version));
     const missing = allVersions.filter(v => !importedSet.has(v.version));
 
     const result = {
-      source: 'OFFLINELIST',
+      source: 'offlinelist',
       latest: allVersions.length > 0 ? allVersions[0].version : null,
       hasNewer: missing.length > 0,
       available: allVersions,
@@ -329,12 +333,12 @@ const DATOMATIC_SYSTEMS = [
 ];
 
 function getDatomicVersions() {
-  const imported = all("SELECT id, source, version, created_at FROM set_versions WHERE source = 'DATOMATIC' ORDER BY version");
+  const imported = all("SELECT sv.id, sv.version, sv.created_at FROM set_versions sv JOIN collections c ON c.id = sv.collection_id WHERE c.dataset_preset = 'datomatic' ORDER BY sv.version");
   const importedSet = new Set(imported.map(v => v.version));
 
   const allVersions = DATOMATIC_SYSTEMS.map(s => ({
     version: s.name,
-    source: 'DATOMATIC',
+    source: 'datomatic',
     systemId: s.id,
     url: `https://datomatic.no-intro.org/index.php?page=download&op=dat&s=${s.id}`,
   }));
@@ -342,7 +346,7 @@ function getDatomicVersions() {
   const missing = allVersions.filter(v => !importedSet.has(v.version));
 
   return {
-    source: 'DATOMATIC',
+    source: 'datomatic',
     latest: null,
     hasNewer: missing.length > 0,
     available: allVersions,
@@ -517,15 +521,21 @@ router.get('/api/versions/:id/games', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+const DATASET_REPOS = {
+  fbneo: 'libretro/FBNeo',
+  mame: null,
+  nps: null,
+};
+
 router.post('/api/versions/import-online', async (req, res) => {
   await dbReady;
   try {
     const { collection_id, version, source: reqSource, refresh } = req.body;
     if (!collection_id || !version) return res.status(400).json({ error: 'collection_id and version required' });
 
-    const source = reqSource || 'MAME';
+    const source = (reqSource || 'mame').toLowerCase();
 
-    if (source === 'DATOMATIC') {
+    if (source === 'datomatic') {
       // DAT-O-MATIC: download via form submission, extract ZIP, import
       const system = DATOMATIC_SYSTEMS.find(s => s.name === version);
       if (!system) throw new Error(`Unknown DAT-O-MATIC system: ${version}`);
@@ -546,14 +556,12 @@ router.post('/api/versions/import-online', async (req, res) => {
         if (datFiles.length === 0) throw new Error('No DAT file found in ZIP');
 
         const datPath = path.join(extractDir, datFiles[0]);
-        const result = execCli(['import', datPath, 'DATOMATIC', version], { binary: 'parse' });
+        const result = execCli(['import', datPath, version, '--collection-id', collection_id], { binary: 'parse' });
         if (!result) throw new Error('CLI returned null');
 
         const versionId = result.version_id;
         const totalGames = result.games_inserted || 0;
         if (!versionId) throw new Error(`Failed to create version for DATOMATIC "${version}"`);
-
-        run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, versionId]);
 
         res.json({ ok: true, version_id: versionId, total_games: totalGames });
         return;
@@ -563,7 +571,7 @@ router.post('/api/versions/import-online', async (req, res) => {
       }
     }
 
-    if (source === 'OFFLINELIST') {
+    if (source === 'offlinelist') {
       // OfflineList: download ZIP from nointro.free.fr, extract XML, import
       const zipUrl = `${OFFLINELIST_BASE_URL}/datas/${encodeURIComponent('Official No-Intro ' + version + '.zip')}`;
       const tempZip = path.join('/tmp', `nointro_${Date.now()}.zip`);
@@ -601,7 +609,7 @@ router.post('/api/versions/import-online', async (req, res) => {
         const xmlPath = path.join(extractDir, xmlFiles[0]);
         let result;
         try {
-          result = execCli(['import', xmlPath, 'OFFLINELIST', version], { binary: 'parse' });
+          result = execCli(['import', xmlPath, version, '--collection-id', collection_id], { binary: 'parse' });
         } catch (e) {
           throw new Error(`[OfflineList] parse-cli import failed for "${version}": ${e.message}`);
         }
@@ -610,8 +618,6 @@ router.post('/api/versions/import-online', async (req, res) => {
         const versionId = result.version_id;
         const totalGames = result.games_inserted || 0;
         if (!versionId) throw new Error(`[OfflineList] Failed to create version for "${version}"`);
-
-        run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, versionId]);
 
         offlinelistDatsCache = null;
         res.json({ ok: true, version_id: versionId, total_games: totalGames });
@@ -654,7 +660,7 @@ router.post('/api/versions/import-online', async (req, res) => {
         const datPath = path.join(extractDir, datFiles[0]);
         let result;
         try {
-          result = execCli(['import', datPath, 'DATOMATIC', version], { binary: 'parse' });
+          result = execCli(['import', datPath, version, '--collection-id', collection_id], { binary: 'parse' });
         } catch (e) {
           throw new Error(`[DAT-O-MATIC] parse-cli import failed for "${version}": ${e.message}`);
         }
@@ -664,8 +670,6 @@ router.post('/api/versions/import-online', async (req, res) => {
         const totalGames = result.games_inserted || 0;
         if (!versionId) throw new Error(`[DAT-O-MATIC] Failed to create version for "${version}"`);
 
-        run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, versionId]);
-
         res.json({ ok: true, version_id: versionId, total_games: totalGames });
         return;
       } finally {
@@ -674,20 +678,19 @@ router.post('/api/versions/import-online', async (req, res) => {
       }
     }
 
-    if (source !== 'MAME') {
-      let repo, ref, srcLabel;
-      if (source === 'FBNeo') {
-        repo = FBNEO_REPO;
-        ref = version === 'nightly' ? 'master' : version;
-        srcLabel = 'FBNeo';
-      } else if (source === 'FBAlpha43') {
-        repo = FBALPHA43_REPO;
-        ref = 'master';
-        srcLabel = 'FBAlpha43';
-      } else if (source === 'FBAlpha44') {
-        repo = FBALPHA44_REPO;
-        ref = 'master';
-        srcLabel = 'FBAlpha44';
+    if (source !== 'mame' && source !== 'nps') {
+      let repo, ref;
+      if (source === 'fbneo') {
+        if (version === '0.2.97.43') {
+          repo = FBALPHA43_REPO;
+          ref = 'master';
+        } else if (version === '0.2.97.44') {
+          repo = FBALPHA44_REPO;
+          ref = 'master';
+        } else {
+          repo = FBNEO_REPO;
+          ref = version === 'nightly' ? 'master' : version;
+        }
       } else {
         throw new Error(`Unknown source: ${source}`);
       }
@@ -702,7 +705,7 @@ router.post('/api/versions/import-online', async (req, res) => {
 
       let datFiles = contents.filter(f => f.name.endsWith('.dat') && f.download_url);
 
-      if (source === 'FBAlpha43') {
+      if (version === '0.2.97.43') {
         const combined = datFiles.find(f => f.name.includes('0.2.97.43') && !f.name.includes('only'));
         if (combined) datFiles = [combined];
       }
@@ -726,7 +729,8 @@ router.post('/api/versions/import-online', async (req, res) => {
       }
 
       let totalGames = 0;
-      for (const df of datFiles) {
+      for (let di = 0; di < datFiles.length; di++) {
+        const df = datFiles[di];
         const dlResp = await fetch(df.download_url);
         if (!dlResp.ok) continue;
         const text = await dlResp.text();
@@ -737,7 +741,9 @@ router.post('/api/versions/import-online', async (req, res) => {
         fs.writeFileSync(tmpFile, text, 'utf-8');
 
         try {
-          const result = execCli(['import', tmpFile, srcLabel, version, '--platform', plat], { binary: 'parse' });
+          const args = ['import', tmpFile, version, '--collection-id', collection_id, '--platform', plat];
+          if (di > 0) args.push('--no-clear');
+          const result = execCli(args, { binary: 'parse' });
           if (result) totalGames += result.games_inserted || 0;
         } catch (e) {
           console.error('parse-cli error for', df.name, e.message);
@@ -746,9 +752,7 @@ router.post('/api/versions/import-online', async (req, res) => {
         }
       }
 
-      const row = get('SELECT id FROM set_versions WHERE source = ? AND version = ?', [srcLabel, version]);
-      if (row) run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, row.id]);
-
+      // set_versions already has collection_id from import; .version file for build fallback
       // Update .version file so fallback can find this version
       const col = get('SELECT c.folder FROM collections c WHERE c.id = ?', [collection_id])
       if (col?.folder) {
@@ -762,7 +766,7 @@ router.post('/api/versions/import-online', async (req, res) => {
       }
 
       fbneoDatsCache = null;
-      res.json({ ok: true, version_id: row.id, total_games: totalGames });
+      res.json({ ok: true, total_games: totalGames });
       return;
     }
 
@@ -793,7 +797,7 @@ router.post('/api/versions/import-online', async (req, res) => {
             mameNickname = parenMatch ? parenMatch[1].trim() : null;
             const ver = cellText.replace(/\([^)]+\)/g, '').replace(/[()]/g, '').trim().split(/\s+/)[0];
             const parsed = parseMameVersion(ver);
-            if (fmtVersion(parsed) === version || (nickname && nickname.trim() === version)) {
+            if (fmtVersion(parsed) === version || (mameNickname && mameNickname.trim() === version)) {
               const linkMatch = rowMatch[1].match(/<a[^>]+href="([^"]+)"/i);
               if (linkMatch) url = linkMatch[1].replace(/&amp;/g, '&');
               break;
@@ -938,7 +942,7 @@ router.post('/api/versions/import-online', async (req, res) => {
         console.log(`[mame-import] Selected: ${foundDat} (${(fs.statSync(foundDat).size / 1024 / 1024).toFixed(1)} MB)`);
         try { fs.writeFileSync('/tmp/mame_debug_sample.txt', fs.readFileSync(foundDat, { encoding: 'utf-8', flag: 'r' }).slice(0, 500)); } catch {}
 
-        const result = execCli(['import', foundDat, 'MAME', version], { binary: 'parse' });
+        const result = execCli(['import', foundDat, version, '--collection-id', collection_id], { binary: 'parse' });
         if (!result) throw new Error('CLI returned null');
         console.log(`[mame-import] Format: ${result.format}, games: ${result.games_inserted}, version_id: ${result.version_id}`);
         // Check the server log for per-game import details on stderr
@@ -949,13 +953,13 @@ router.post('/api/versions/import-online', async (req, res) => {
           if (/MAME_CHD_.*\.dat$/i.test(base)) {
             console.log(`[mame-import] Also importing ${base} (subtype: chd)`);
             try {
-              execCli(['import', fp, 'MAME', version, '--subtype', 'chd', '--existing-only'], { binary: 'parse' });
+              execCli(['import', fp, version, '--collection-id', collection_id, '--subtype', 'chd', '--existing-only'], { binary: 'parse' });
             } catch (e) { console.error(`[mame-import] CHD import failed: ${e.message}`); }
           }
           if (/MAME_Samples_.*\.dat$/i.test(base)) {
             console.log(`[mame-import] Also importing ${base} (subtype: sample)`);
             try {
-              execCli(['import', fp, 'MAME', version, '--subtype', 'sample', '--existing-only'], { binary: 'parse' });
+              execCli(['import', fp, version, '--collection-id', collection_id, '--subtype', 'sample', '--existing-only'], { binary: 'parse' });
             } catch (e) { console.error(`[mame-import] Samples import failed: ${e.message}`); }
           }
         }
@@ -963,8 +967,6 @@ router.post('/api/versions/import-online', async (req, res) => {
         const versionId = result.version_id;
         const totalGames = result.games_inserted || 0;
         if (!versionId) throw new Error(`Failed to create version for MAME "${version}"`);
-
-        run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, versionId]);
 
         // Update .version file so fallback can find this version
         const col = get('SELECT c.folder FROM collections c WHERE c.id = ?', [collection_id])
@@ -1007,7 +1009,7 @@ router.post('/api/versions/import-dat', async (req, res) => {
     }
     if (!text || text.length < 10) return res.status(400).json({ error: 'Empty or invalid DAT content' });
 
-    let source = 'Custom';
+    const collectionId = req.body?.collection_id || 0;
     let version = 'unknown';
     const gameNames = [];
 
@@ -1017,7 +1019,6 @@ router.post('/api/versions/import-dat', async (req, res) => {
       while ((match = gameRegex.exec(text)) !== null) gameNames.push(match[1]);
       const verMatch = text.match(/version\s*=\s*["']?([\d.]+)/i);
       if (verMatch) version = verMatch[1];
-      if (text.match(/<(?:mame|datafile|clrmamepro)[^>]*>/i)) source = 'DAT';
     } else {
       const gameRegex = /game\s*\([\s\S]*?name\s+([^\s")]+)/gi;
       let match;
@@ -1027,7 +1028,7 @@ router.post('/api/versions/import-dat', async (req, res) => {
     if (gameNames.length === 0) return res.status(400).json({ error: 'No games found in DAT file.' });
 
     const db = getDb();
-    db.run('INSERT INTO set_versions (source, version) VALUES (?, ?)', [source, version]);
+    db.run('INSERT INTO set_versions (collection_id, version) VALUES (?, ?)', [collectionId, version]);
     const idResult = db.exec('SELECT last_insert_rowid() as id');
     const versionId = idResult[0]?.values[0]?.[0];
     if (!versionId) return res.status(500).json({ error: 'Failed to create version' });
@@ -1057,38 +1058,21 @@ router.post('/api/versions/import-dat', async (req, res) => {
 router.get('/api/versions/available', async (req, res) => {
   await dbReady;
   try {
-    const source = (req.query.source || 'MAME').toUpperCase();
+    const source = (req.query.source || 'mame').toLowerCase();
 
-    if (source === 'FBNEO') {
+    if (source === 'fbneo') {
       const fbneo = await getFBNeoVersions();
       return res.json(fbneo);
     }
-    if (source === 'OFFLINELIST') {
+    if (source === 'offlinelist') {
       const offlinelist = await getOfflineListVersions();
       return res.json(offlinelist);
     }
-    if (source === 'DATOMATIC') {
+    if (source === 'datomatic') {
       const datomatic = getDatomicVersions();
       return res.json(datomatic);
     }
-    if (source === 'FBALPHA43' || source === 'FBALPHA44') {
-      const is43 = source === 'FBALPHA43';
-      const src = is43 ? 'FBAlpha43' : 'FBAlpha44';
-      const repo = is43 ? FBALPHA43_REPO : FBALPHA44_REPO;
-      const ver = is43 ? '0.2.97.43' : '0.2.97.44';
-      const imported = all("SELECT id, source, version FROM set_versions WHERE source = ? ORDER BY version", [src]);
-      return res.json({
-        source: src,
-        latest: ver,
-        hasNewer: false,
-        available: [{ version: ver, source: src, repo }],
-        imported,
-        missing: imported.length === 0 ? [{ version: ver, source: src, repo }] : [],
-      });
-    }
-    if (source === 'NPS') {
-      const imported = all("SELECT id, source, version FROM set_versions WHERE source = 'NPS' ORDER BY version");
-      const importedSet = new Set(imported.map(v => v.version));
+    if (source === 'nps') {
       const available = NPS_PLATFORMS.map(p => ({
         version: p,
         source: 'NPS',
@@ -1146,8 +1130,8 @@ router.get('/api/versions/available', async (req, res) => {
       }
     }
 
-    const imported = all('SELECT id, source, version, created_at FROM set_versions WHERE source = ? ORDER BY version', ['MAME']);
-    const importedParsed = imported.map(v => ({ id: v.id, source: v.source, version: v.version, parsed: parseMameVersion(v.version) }));
+    const imported = all('SELECT sv.id, sv.version, sv.created_at FROM set_versions sv JOIN collections c ON c.id = sv.collection_id WHERE c.dataset_preset = ? ORDER BY sv.version', ['mame']);
+    const importedParsed = imported.map(v => ({ id: v.id, source: 'mame', version: v.version, parsed: parseMameVersion(v.version) }));
     const availableDats = rows.filter(r => r.hasDat && !importedParsed.some(iv => cmpVersion(iv.parsed, r.parsed) === 0));
     const hasNewer = latestVer ? !importedParsed.some(iv => cmpVersion(iv.parsed, latestVer) === 0) : false;
 
@@ -1159,7 +1143,7 @@ router.get('/api/versions/available', async (req, res) => {
       }
     }
     const result = {
-      source: 'MAME',
+      source: 'mame',
       latest: latestVer ? fmtVersion(latestVer) : null, latestParsed: latestVer,
       available: sortVersions(rows.filter(r => r.hasDat).map(r => r.version)).map(ver => {
         const r = rows.find(row => row.version === ver && row.hasDat)
@@ -1191,8 +1175,6 @@ router.post('/api/versions/import-nps', async (req, res) => {
     if (!versionId) return res.status(500).json({ error: 'Failed to create version' });
 
     const result = await importNps(platform, versionId);
-
-    run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [collection_id, versionId]);
 
     res.json({ ok: true, version_id: versionId, ...result });
   } catch (e) { res.status(500).json({ error: e.message }); }

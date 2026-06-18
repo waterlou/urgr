@@ -1,15 +1,16 @@
 pub const CREATE_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS set_versions (
-    id          INTEGER PRIMARY KEY,
-    source      TEXT NOT NULL,
-    version     TEXT NOT NULL,
-    dir         TEXT,
-    created_at  TEXT DEFAULT (datetime('now')),
-    UNIQUE(source, version)
+    id              INTEGER PRIMARY KEY,
+    collection_id   INTEGER,
+    version         TEXT NOT NULL,
+    dir             TEXT,
+    created_at      TEXT DEFAULT (datetime('now')),
+    UNIQUE(collection_id, version)
 );
 
 CREATE TABLE IF NOT EXISTS games (
     id              INTEGER PRIMARY KEY,
+    collection_id   INTEGER,
     name            TEXT NOT NULL,
     description     TEXT NOT NULL DEFAULT '',
     year            TEXT,
@@ -24,7 +25,7 @@ CREATE TABLE IF NOT EXISTS games (
     driver_emulation TEXT,
     sampleof        TEXT,
     created_at      TEXT DEFAULT (datetime('now')),
-    UNIQUE(name)
+    UNIQUE(collection_id, name, platform)
 );
 
 CREATE TABLE IF NOT EXISTS game_rom_sets (
@@ -67,23 +68,16 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 ";
 
-/// Individual ALTER TABLE statements for existing databases.
-/// Applied one at a time, skipping errors (column may already exist).
-pub const MIGRATIONS: &[&str] = &[
-    "ALTER TABLE games ADD COLUMN isbios INTEGER NOT NULL DEFAULT 0",
-    "ALTER TABLE games ADD COLUMN isdevice INTEGER NOT NULL DEFAULT 0",
-    "ALTER TABLE games ADD COLUMN runnable INTEGER",
-    "ALTER TABLE games ADD COLUMN driver_status TEXT",
-    "ALTER TABLE games ADD COLUMN driver_emulation TEXT",
-    "ALTER TABLE game_rom_sets ADD COLUMN available INTEGER NOT NULL DEFAULT 0",
-    "ALTER TABLE games ADD COLUMN sampleof TEXT",
-];
-
 pub const INDEXES: &str = "
 CREATE INDEX IF NOT EXISTS idx_game_rom_sets_version ON game_rom_sets(version_id);
 CREATE INDEX IF NOT EXISTS idx_game_rom_sets_game ON game_rom_sets(game_id);
 CREATE INDEX IF NOT EXISTS idx_rom_files_set ON game_rom_files(rom_set_id);
 CREATE INDEX IF NOT EXISTS idx_rom_files_sha1 ON game_rom_files(sha1);
+CREATE INDEX IF NOT EXISTS idx_games_collection ON games(collection_id);
 CREATE INDEX IF NOT EXISTS idx_games_name ON games(name);
 CREATE INDEX IF NOT EXISTS idx_games_runnable ON games(runnable);
 ";
+
+/// Individual ALTER TABLE statements for existing databases.
+/// Applied one at a time, skipping errors (column may already exist).
+pub const MIGRATIONS: &[&str] = &[];

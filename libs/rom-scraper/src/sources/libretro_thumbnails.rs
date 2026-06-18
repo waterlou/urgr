@@ -77,6 +77,14 @@ impl LibretroThumbnails {
     }
 }
 
+/// When platform is arcade/MAME and dataset_preset is 'fbneo', use 'fbneo' for folder lookup.
+fn resolve_platform<'a>(platform: Option<&'a str>, dataset_preset: Option<&str>) -> Option<&'a str> {
+    match (platform, dataset_preset) {
+        (Some("arcade" | "mame"), Some("fbneo")) => Some("fbneo"),
+        _ => platform,
+    }
+}
+
 #[async_trait]
 impl crate::sources::GameScraper for LibretroThumbnails {
     fn name(&self) -> &str { "libretro-thumbnails" }
@@ -86,14 +94,58 @@ impl crate::sources::GameScraper for LibretroThumbnails {
     fn priority(&self) -> u32 { self.priority }
 
     async fn search_by_name(&self, query: &str, platform: Option<&str>) -> Result<Vec<Game>> {
+        self.search_by_name_with(query, platform, None).await
+    }
+
+    async fn search_by_name_with(&self, query: &str, platform: Option<&str>, dataset_preset: Option<&str>) -> Result<Vec<Game>> {
+        let plat = resolve_platform(platform, dataset_preset).unwrap_or("unknown");
+        let plat = platform.unwrap_or("unknown");
+        let folder = match Self::platform_to_folder(plat) {
+            Some(f) => f,
+            None => return Ok(vec![]),
+        };
+
+        // Try multiple name variants for the lookup
+        fn name_variants(name: &str) -> Vec<String> {
+            let mut v = Vec::new();
+            v.push(name.to_string());
+            // MAME DAT uses ": " but libretro may use " - " or "_ "
+            if name.contains(':') {
+                v.push(name.replace(": ", " - "));
+                v.push(name.replace(": ", "_ "));
+                v.push(name.replace(':', " - "));
+                v.push(name.replace(':', "_ "));
+            }
+            if name.contains("_ ") {
+                v.push(name.replace("_ ", " - "));
+            }
+            if name.contains('_') {
+                v.push(name.replace('_', " - "));
+            }
+            v
+        }
+
+        let alts = name_variants(query);
+        let mut found = false;
+        for alt in &alts {
+            let encoded = url_encode(alt);
+            let test_url = format!("{RETRO_BASE}/{folder}/Named_Titles/{encoded}.png");
+            if self.client.head(&test_url).await.is_ok() {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return Ok(vec![]);
+        }
         Ok(vec![Game {
-            id: format!("{}/{}", platform.unwrap_or("unknown"), query),
+            id: format!("{}/{}", plat, query),
             title: query.to_string(),
             alternative_titles: vec![],
             platform: Platform {
-                id: platform.unwrap_or("unknown").to_string(),
-                name: Self::platform_to_folder(platform.unwrap_or("unknown")).unwrap_or("unknown").to_string(),
-                short_name: platform.unwrap_or("unknown").to_string(),
+                id: plat.to_string(),
+                name: folder.to_string(),
+                short_name: plat.to_string(),
             },
             description: String::new(),
             publisher: None,
@@ -113,27 +165,57 @@ impl crate::sources::GameScraper for LibretroThumbnails {
     }
 
     async fn get_game_detail(&self, game_id: &str) -> Result<Game> {
+        self.get_game_detail_with(game_id, None).await
+    }
+
+    async fn get_game_detail_with(&self, game_id: &str, dataset_preset: Option<&str>) -> Result<Game> {
         let (platform, game_name) = game_id.split_once('/')
             .ok_or_else(|| Error::Config("Invalid game_id format. Expected 'platform/name'".into()))?;
+        let effective_platform = resolve_platform(Some(platform), dataset_preset).unwrap_or(platform);
 
-        let folder = Self::platform_to_folder(platform)
+        let folder = Self::platform_to_folder(effective_platform)
             .ok_or_else(|| Error::Config(format!("Unknown platform: {}", platform)))?;
 
-        let encoded_name = url_encode(game_name);
         let base_url = format!("{RETRO_BASE}/{}/", url_encode(folder));
+
+        // Generate alternative names for URL matching
+        fn name_variants(name: &str) -> Vec<String> {
+            let mut variants = Vec::new();
+            variants.push(name.to_string());
+            // MAME DAT uses ": " but libretro may use " - " or "_ "
+            if name.contains(':') {
+                variants.push(name.replace(": ", " - "));
+                variants.push(name.replace(": ", "_ "));
+                variants.push(name.replace(':', " - "));
+                variants.push(name.replace(':', "_ "));
+            }
+            if name.contains("_ ") {
+                variants.push(name.replace("_ ", " - "));
+            }
+            if name.contains('_') {
+                variants.push(name.replace('_', " - "));
+            }
+            variants
+        }
+
+        let name_alts = name_variants(game_name);
 
         let mut covers = Vec::new();
         let mut screenshots = Vec::new();
         let mut logos = Vec::new();
 
         for subdir in &["Named_Boxarts", "Named_Snaps", "Named_Titles"] {
-            let url = format!("{base_url}{subdir}/{encoded_name}.png");
-            if self.client.head(&url).await.is_ok() {
-                match *subdir {
-                    "Named_Boxarts" => covers.push(MediaItem { url, kind: MediaType::Cover2D }),
-                    "Named_Snaps" => screenshots.push(MediaItem { url, kind: MediaType::Screenshot }),
-                    "Named_Titles" => logos.push(MediaItem { url, kind: MediaType::Logo }),
-                    _ => {}
+            for alt_name in &name_alts {
+                let enc_alt = url_encode(alt_name);
+                let url = format!("{base_url}{subdir}/{enc_alt}.png");
+                if self.client.head(&url).await.is_ok() {
+                    match *subdir {
+                        "Named_Boxarts" => covers.push(MediaItem { url, kind: MediaType::Cover2D }),
+                        "Named_Snaps" => screenshots.push(MediaItem { url, kind: MediaType::Screenshot }),
+                        "Named_Titles" => logos.push(MediaItem { url, kind: MediaType::Logo }),
+                        _ => {}
+                    }
+                    break; // found a match for this subdir
                 }
             }
         }

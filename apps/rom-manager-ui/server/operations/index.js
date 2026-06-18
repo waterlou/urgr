@@ -172,6 +172,10 @@ export class OperationManager {
         const { VerifyOperation } = await import('./verify.js');
         OpClass = VerifyOperation;
         break;
+      case 'progettosnaps':
+        const { ProgettoSnapsOperation } = await import('./progettosnaps.js');
+        OpClass = ProgettoSnapsOperation;
+        break;
       default:
         throw new Error(`Unknown operation type: ${type}`);
     }

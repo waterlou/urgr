@@ -37,12 +37,12 @@ router.get('/api/collections', async (req, res) => {
   try {
     const rows = all('SELECT c.* FROM collections c ORDER BY c.name');
     const result = rows.map(c => {
-      const versions = all(`SELECT sv.id, sv.source, sv.version, sv.dir, sv.created_at,
+      const versions = all(`SELECT sv.id, c.dataset_preset as source, sv.version, sv.dir, sv.created_at,
           (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games
-        FROM collection_versions cv
-        JOIN set_versions sv ON sv.id = cv.version_id
-        WHERE cv.collection_id = ?
-        ORDER BY cv.version_id DESC`, [c.id]);
+        FROM set_versions sv
+        JOIN collections c ON c.id = sv.collection_id
+        WHERE sv.collection_id = ?
+        ORDER BY sv.version DESC`, [c.id]);
       versions.sort((a, b) => sortVersions([a.version, b.version])[0] === a.version ? -1 : 1);
       const vids = versions.map(v => v.id);
       let total = 0;
@@ -76,7 +76,7 @@ router.post('/api/collections', async (req, res) => {
       [name, finalSlug, platform || null, logo || '', finalFolder, has_dataset ? 1 : 0, dataset_preset || null, scrape_mode || 'auto', scrape_source_priority || null]);
     const col = get('SELECT * FROM collections WHERE slug = ?', [finalSlug]);
     if (uploaded_version_id) {
-      run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [col.id, uploaded_version_id]);
+      run('UPDATE set_versions SET collection_id = ? WHERE id = ?', [col.id, uploaded_version_id]);
     }
     res.status(201).json(col);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -121,11 +121,11 @@ router.delete('/api/collections/:id', async (req, res) => {
   await dbReady;
   try {
     run('DELETE FROM collection_builds WHERE collection_id = ?', [req.params.id]);
-    run('DELETE FROM collection_versions WHERE collection_id = ?', [req.params.id]);
+    // set_versions cascade with collection; collection delete handles FK
     run('DELETE FROM collections WHERE id = ?', [req.params.id]);
     const orphaned = all(`
       SELECT sv.id FROM set_versions sv
-      WHERE NOT EXISTS (SELECT 1 FROM collection_versions cv WHERE cv.version_id = sv.id)
+      WHERE sv.collection_id IS NULL
     `);
     for (const v of orphaned) {
       const gameIds = all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [v.id]).map(r => r.game_id);
@@ -146,7 +146,7 @@ router.get('/api/collections/:id/games', async (req, res) => {
     const collection = get('SELECT * FROM collections WHERE id = ?', [id]);
     if (!collection) return res.status(404).json({ error: 'not found' });
 
-    const versions = all('SELECT version_id FROM collection_versions WHERE collection_id = ?', [id]);
+    const versions = all('SELECT id as version_id FROM set_versions WHERE collection_id = ?', [id]);
     if (!versions.length) return res.json({ collection, games: [], platforms: [], total: 0 });
 
     const vids = version_id ? [Number(version_id)] : versions.map(v => v.version_id);
@@ -189,12 +189,13 @@ router.get('/api/collections/:id/games', async (req, res) => {
 
     let games = all(`
       SELECT g.name, g.description, g.year, g.manufacturer, parent_g.name as cloneof, g.platform,
-        MIN(g.id) as id, MIN(grs.version_id) as version_id, MIN(sv.source) as source, MIN(sv.version) as version,
-        GROUP_CONCAT(sv.source || '||' || sv.version, ',') as versions_tags,
+        MIN(g.id) as id, MIN(grs.version_id) as version_id, MIN(c.dataset_preset) as source, MIN(sv.version) as version,
+        GROUP_CONCAT(c.dataset_preset || '||' || sv.version, ',') as versions_tags,
         MAX(COALESCE(gs.rating, 0)) as rating,
         MAX(COALESCE(gs.favourite, 0)) as favourite,
         MAX(COALESCE(gs.play_count, 0)) as play_count
       FROM games g
+      JOIN collections c ON c.id = g.collection_id
       JOIN game_rom_sets grs ON grs.game_id = g.id
       JOIN set_versions sv ON sv.id = grs.version_id
       LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
@@ -212,28 +213,55 @@ router.get('/api/collections/:id/games', async (req, res) => {
     });
     // Attach covers/screenshots from game_media (try own name, fall back to cloneof)
     const gameNames = [...new Set(games.flatMap(g => [g.name, g.cloneof].filter(Boolean)))];
-    if (gameNames.length > 0) {
-      const ph = gameNames.map(() => '?').join(',');
-      const mediaRows = all(`SELECT gm.name, gm.covers, gm.screenshots FROM game_media gm WHERE gm.name IN (${ph})`, gameNames);
-      const mediaMap = {};
-      for (const m of mediaRows) {
-        try { mediaMap[m.name] = { covers: JSON.parse(m.covers) || [], screenshots: JSON.parse(m.screenshots) || [] }; } catch {}
-      }
-      games = games.map(g => ({
-        ...g,
-        covers: mediaMap[g.name]?.covers || mediaMap[g.cloneof]?.covers || [],
-        screenshots: mediaMap[g.name]?.screenshots || mediaMap[g.cloneof]?.screenshots || [],
-      }));
+    const colScrape = get('SELECT scrape_source_priority FROM collections WHERE id = ?', [id]);
+    let enabledSet = null;
+    if (colScrape?.scrape_source_priority) {
+      try {
+        const arr = JSON.parse(colScrape.scrape_source_priority);
+        enabledSet = Array.isArray(arr) ? new Set(arr) : null;
+      } catch {}
     }
 
-    const platforms = all(`SELECT DISTINCT sv.source as platform FROM set_versions sv WHERE sv.id IN (${ph})`, vids).map(p => p.platform);
+    if (gameNames.length > 0) {
+      const ph = gameNames.map(() => '?').join(',');
+      const mediaRows = all(`SELECT gm.name, gm.covers, gm.screenshots, gm.source FROM game_media gm WHERE gm.name IN (${ph})`, gameNames);
+      const mediaMap = {};
+      for (const m of mediaRows) {
+        if (enabledSet && !enabledSet.has(m.source || '')) continue;
+        try { mediaMap[m.name] = { covers: JSON.parse(m.covers) || [], screenshots: JSON.parse(m.screenshots) || [] }; } catch {}
+      }
+      const psDir = path.join(dataDir, 'media', 'progettosnaps');
+      games = games.map(g => {
+        let covers = mediaMap[g.name]?.covers || mediaMap[g.cloneof]?.covers || [];
+        let screenshots = mediaMap[g.name]?.screenshots || mediaMap[g.cloneof]?.screenshots || [];
+
+        if (!enabledSet || enabledSet.has('progettosnaps')) {
+          try {
+            if (fs.existsSync(path.join(psDir, 'title', g.name + '.png'))) {
+              covers = [`/media/progettosnaps/title/${g.name}.png`];
+            }
+          } catch {}
+          try {
+            if (fs.existsSync(path.join(psDir, 'snap', g.name + '.png'))) {
+              screenshots = [`/media/progettosnaps/snap/${g.name}.png`];
+            }
+          } catch {}
+        }
+
+        return { ...g, covers, screenshots };
+      });
+    }
+
+    const platforms = all(`SELECT DISTINCT c.dataset_preset as platform FROM set_versions sv
+      JOIN collections c ON c.id = sv.collection_id
+      WHERE sv.id IN (${ph})`, vids).map(p => p.platform);
 
     const collectionVersions = all(`
-      SELECT sv.id, sv.source, sv.version, sv.created_at,
+      SELECT sv.id, c.dataset_preset as source, sv.version, sv.created_at,
         (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games
       FROM set_versions sv
-      JOIN collection_versions cv ON cv.version_id = sv.id
-      WHERE cv.collection_id = ?
+      JOIN collections c ON c.id = sv.collection_id
+      WHERE sv.collection_id = ?
     `, [id]);
     collectionVersions.sort((a, b) => sortVersions([a.version, b.version])[0] === a.version ? -1 : 1);
 
@@ -245,12 +273,12 @@ router.get('/api/collections/:id/versions', async (req, res) => {
   await dbReady;
   try {
     const versions = all(`
-      SELECT sv.*,
+      SELECT sv.*, c.dataset_preset as source,
         (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games,
         (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id AND available = 1) as available_games
       FROM set_versions sv
-      JOIN collection_versions cv ON cv.version_id = sv.id
-      WHERE cv.collection_id = ?
+      JOIN collections c ON c.id = sv.collection_id
+      WHERE sv.collection_id = ?
     `, [req.params.id]);
     versions.sort((a, b) => sortVersions([a.version, b.version])[0] === a.version ? -1 : 1);
     res.json(versions);
@@ -262,7 +290,7 @@ router.post('/api/collections/:id/versions', async (req, res) => {
   try {
     const { version_id } = req.body;
     if (!version_id) return res.status(400).json({ error: 'version_id required' });
-    run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)', [req.params.id, version_id]);
+    run('UPDATE set_versions SET collection_id = ? WHERE id = ?', [req.params.id, version_id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -271,9 +299,9 @@ router.delete('/api/collections/:id/versions/:versionId', async (req, res) => {
   await dbReady;
   try {
     const versionId = Number(req.params.versionId);
-    run('DELETE FROM collection_versions WHERE collection_id = ? AND version_id = ?', [req.params.id, versionId]);
+    run('UPDATE set_versions SET collection_id = NULL WHERE id = ? AND collection_id = ?', [versionId, req.params.id]);
 
-    const stillUsed = get('SELECT COUNT(*) as c FROM collection_versions WHERE version_id = ?', [versionId]).c;
+    const stillUsed = get('SELECT COUNT(*) as c FROM set_versions WHERE id = ? AND collection_id IS NOT NULL', [versionId]).c;
     if (stillUsed === 0) {
       const gameIds = all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [versionId]).map(r => r.game_id);
       run('DELETE FROM game_rom_files WHERE rom_set_id IN (SELECT id FROM game_rom_sets WHERE version_id = ?)', [versionId]);
@@ -368,18 +396,22 @@ function finalizeScan(scanResult, col, version_id, collectionDir, sv, buildId, j
 
   runNow('UPDATE game_rom_sets SET available = 0 WHERE version_id = ?', [version_id]);
   if (matchedNamesArr.length > 0) {
-    const ph = matchedNamesArr.map(() => '?').join(',');
-    runNow(`UPDATE game_rom_sets SET available = 1
-      WHERE version_id = ? AND game_id IN (
-        SELECT g.id FROM games g WHERE g.name IN (${ph})
-      )`, [version_id, ...matchedNamesArr]);
+    const CHUNK = 500;
+    for (let i = 0; i < matchedNamesArr.length; i += CHUNK) {
+      const chunk = matchedNamesArr.slice(i, i + CHUNK);
+      const ph = chunk.map(() => '?').join(',');
+      runNow(`UPDATE game_rom_sets SET available = 1
+        WHERE version_id = ? AND game_id IN (
+          SELECT g.id FROM games g WHERE g.name IN (${ph})
+        )`, [version_id, ...chunk]);
+    }
   }
   syncGameAvailability(all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [version_id]).map(r => r.game_id));
 
   const totalDb = get('SELECT COUNT(DISTINCT g.name) as c FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ?', [version_id]).c;
   const matched = get('SELECT COUNT(DISTINCT g.name) as c FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ? AND grs.available = 1', [version_id]).c;
   let reused = 0;
-  const priorVersions = all('SELECT DISTINCT sv.version, sv.id FROM set_versions sv JOIN collection_versions cv ON cv.version_id = sv.id WHERE cv.collection_id = ? AND sv.id < ? ORDER BY sv.id', [col.id, version_id]);
+  const priorVersions = all('SELECT DISTINCT sv.version, sv.id FROM set_versions sv WHERE sv.collection_id = ? AND sv.id < ? ORDER BY sv.id', [col.id, version_id]);
   if (priorVersions.length > 0 && fs.existsSync(collectionDir)) {
     const currentNames = new Set(all('SELECT DISTINCT g.name FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ?', [version_id]).map(r => r.name));
     for (const pv of priorVersions) {
@@ -409,14 +441,15 @@ router.post('/api/collections/:id/build', async (req, res) => {
 
     const col = get('SELECT id, slug, folder FROM collections WHERE id = ?', [req.params.id]);
     if (!col) return res.status(404).json({ error: 'Collection not found' });
-    const sv = get('SELECT source, version FROM set_versions WHERE id = ?', [version_id]);
+    const sv = get('SELECT sv.version, c.dataset_preset as source FROM set_versions sv JOIN collections c ON c.id = sv.collection_id WHERE sv.id = ?', [version_id]);
     if (!sv) return res.status(404).json({ error: 'Version not found' });
 
-    const isNps = sv.source === 'NPS';
+    const isNps = sv.source === 'nps';
     const needsImportDir = !isNps && !scan;
     if (needsImportDir && !import_dir) return res.status(400).json({ error: 'import_dir required for DAT builds' });
 
     const collectionDir = path.join(romsDir, col.folder || col.slug);
+    fs.mkdirSync(collectionDir, { recursive: true });
 
     // Create/update collection_builds record
     const buildFormat = scan ? 'scan' : isNps ? 'pkg' : 'split';
@@ -486,7 +519,7 @@ router.post('/api/collections/:id/build', async (req, res) => {
           doneJob(jobId, { built: result.built, skipped: result.skipped });
         } else {
           // DAT build — uses progress streaming
-          const args = ['build', sv.source, import_dir, '--version-id', String(version_id), '--base-dir', collectionDir, '--collection-dir', collectionDir, '--progress'];
+          const args = ['build', import_dir, '--collection-id', String(col.id), '--version-id', String(version_id), '--base-dir', collectionDir, '--collection-dir', collectionDir, '--progress'];
           execCliStream(args, {
             binary: 'build',
             onProgress: (p) => updateProgress(jobId, p.pct || 0, p.msg || ''),
@@ -546,9 +579,10 @@ router.get('/api/collections/:id/builds', async (req, res) => {
   await dbReady;
   try {
     const builds = all(`
-      SELECT cb.*, sv.version, sv.source
+      SELECT cb.*, sv.version, c.dataset_preset as source
       FROM collection_builds cb
       JOIN set_versions sv ON sv.id = cb.version_id
+      JOIN collections c ON c.id = sv.collection_id
       WHERE cb.collection_id = ?
       ORDER BY cb.created_at DESC
     `, [req.params.id]);
@@ -563,7 +597,7 @@ router.post('/api/collections/:id/builds', async (req, res) => {
     const colId = req.params.id;
     const version = get('SELECT * FROM set_versions WHERE id = ?', [version_id]);
     if (!version) return res.status(400).json({ error: 'Version not found' });
-    const link = get('SELECT 1 FROM collection_versions WHERE collection_id = ? AND version_id = ?', [colId, version_id]);
+    const link = get('SELECT 1 FROM set_versions WHERE collection_id = ? AND id = ?', [colId, version_id]);
     if (!link) return res.status(400).json({ error: 'Version not linked to this collection' });
 
     const existingBuilds = all('SELECT * FROM collection_builds WHERE collection_id = ? ORDER BY id', [colId]);
@@ -593,7 +627,7 @@ router.post('/api/collections/:id/builds', async (req, res) => {
     } else {
       runNow("INSERT INTO collection_builds (collection_id, version_id, status, format, games_total, started_at) VALUES (?, ?, 'building', ?, ?, datetime('now'))", [colId, version_id, format, total]);
     }
-    res.json(get('SELECT cb.*, sv.version, sv.source FROM collection_builds cb JOIN set_versions sv ON sv.id = cb.version_id WHERE cb.collection_id = ? AND cb.version_id = ?', [colId, version_id]));
+    res.json(get('SELECT cb.*, sv.version, c.dataset_preset as source FROM collection_builds cb JOIN set_versions sv ON sv.id = cb.version_id JOIN collections c ON c.id = sv.collection_id WHERE cb.collection_id = ? AND cb.version_id = ?', [colId, version_id]));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -611,7 +645,7 @@ router.put('/api/collections/:id/builds/:buildId', async (req, res) => {
       vals.push(req.params.buildId, req.params.id);
       runNow(`UPDATE collection_builds SET ${sets.join(', ')} WHERE id = ? AND collection_id = ?`, vals);
     }
-    res.json(get('SELECT cb.*, sv.version, sv.source FROM collection_builds cb JOIN set_versions sv ON sv.id = cb.version_id WHERE cb.id = ?', [req.params.buildId]));
+    res.json(get('SELECT cb.*, sv.version, c.dataset_preset as source FROM collection_builds cb JOIN set_versions sv ON sv.id = cb.version_id JOIN collections c ON c.id = sv.collection_id WHERE cb.id = ?', [req.params.buildId]));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -623,7 +657,7 @@ router.post('/api/collections/:id/builds/:buildId/run', async (req, res) => {
       return res.status(400).json({ error: 'source and import_dir are required' });
     }
     const buildId = req.params.buildId;
-    const build = get('SELECT cb.*, sv.version, sv.source FROM collection_builds cb JOIN set_versions sv ON sv.id = cb.version_id WHERE cb.id = ? AND cb.collection_id = ?', [buildId, req.params.id]);
+    const build = get('SELECT cb.*, sv.version, c.dataset_preset as source FROM collection_builds cb JOIN set_versions sv ON sv.id = cb.version_id JOIN collections c ON c.id = sv.collection_id WHERE cb.id = ? AND cb.collection_id = ?', [buildId, req.params.id]);
     if (!build) return res.status(404).json({ error: 'Build not found' });
 
     runNow("UPDATE collection_builds SET status = 'building' WHERE id = ?", [buildId]);
@@ -861,9 +895,9 @@ router.post('/api/collections/:id/scan-nps', async (req, res) => {
     const col = get('SELECT * FROM collections WHERE id = ?', [req.params.id]);
     if (!col) return res.status(404).json({ error: 'Collection not found' });
 
-    const sv = get('SELECT * FROM set_versions WHERE id = ?', [version_id]);
+    const sv = get('SELECT c.dataset_preset as source FROM set_versions sv JOIN collections c ON c.id = sv.collection_id WHERE sv.id = ?', [version_id]);
     if (!sv) return res.status(404).json({ error: 'Version not found' });
-    if (sv.source !== 'NPS') return res.status(400).json({ error: 'Version is not an NPS version' });
+    if (sv.source !== 'nps') return res.status(400).json({ error: 'Version is not an NPS version' });
 
     const result = scanNpsDir(dir, version_id);
     res.json({ ok: true, ...result });
@@ -879,9 +913,9 @@ router.post('/api/collections/:id/build-nps', async (req, res) => {
     const col = get('SELECT * FROM collections WHERE id = ?', [req.params.id]);
     if (!col) return res.status(404).json({ error: 'Collection not found' });
 
-    const sv = get('SELECT * FROM set_versions WHERE id = ?', [version_id]);
+    const sv = get('SELECT c.dataset_preset as source FROM set_versions sv JOIN collections c ON c.id = sv.collection_id WHERE sv.id = ?', [version_id]);
     if (!sv) return res.status(404).json({ error: 'Version not found' });
-    if (sv.source !== 'NPS') return res.status(400).json({ error: 'Version is not an NPS version' });
+    if (sv.source !== 'nps') return res.status(400).json({ error: 'Version is not an NPS version' });
 
     const collectionDir = path.join(romsDir, col.folder || col.slug);
     fs.mkdirSync(collectionDir, { recursive: true });
@@ -894,7 +928,7 @@ router.post('/api/collections/:id/build-nps', async (req, res) => {
 router.post('/api/collections/:id/scrape-all', async (req, res) => {
   await dbReady;
   try {
-    const versions = all('SELECT version_id FROM collection_versions WHERE collection_id = ?', [req.params.id]);
+    const versions = all('SELECT id as version_id FROM set_versions WHERE collection_id = ?', [req.params.id]);
     if (!versions.length) return res.status(400).json({ error: 'No versions linked to this collection' });
 
     const vids = versions.map(v => v.version_id);

@@ -67,7 +67,7 @@ export default function GameDetail() {
   async function handleScrape() {
     setScraping(true); setScrapeError(null); setScrapedTitle(null);
     try {
-      const result = await scrapeGameMetadata(gameId);
+      const result = await scrapeGameMetadata(gameId, versionId);
       if (result?.scraped) setScrapedTitle(result.title || 'Scraped');
       getGame(gameId, versionId).then(setGame).catch(() => {});
     } catch (e) {

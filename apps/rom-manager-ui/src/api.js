@@ -181,12 +181,12 @@ export function getVersionGames(id, { limit, offset, q } = {}) {
   return fetchJson(`/versions/${id}/games${p.toString() ? '?' + p.toString() : ''}`);
 }
 
-export function getAvailableVersions(source) {
-  const qs = source ? `?source=${encodeURIComponent(source)}` : '';
+export function getAvailableVersions(datasetPreset) {
+  const qs = datasetPreset ? `?source=${encodeURIComponent(datasetPreset)}` : '';
   return fetchJson(`/versions/available${qs}`);
 }
-export function importOnlineVersion(collectionId, version, source, refresh) {
-  return fetchWithBody('/versions/import-online', 'POST', { collection_id: collectionId, version, source, refresh });
+export function importOnlineVersion(collectionId, version, datasetPreset, refresh) {
+  return fetchWithBody('/versions/import-online', 'POST', { collection_id: collectionId, version, source: datasetPreset, refresh });
 }
 export function importDat(content) {
   return fetchWithBody('/versions/import-dat', 'POST', { content });
@@ -213,8 +213,8 @@ export function scraperScrape(file, game_name, platform) {
 export function hashFile(file) {
   return fetchWithBody('/scraper/hash', 'POST', { file });
 }
-export function scrapeGameMetadata(gameId) {
-  return fetchWithBody(`/games/${gameId}/scrape`, 'POST');
+export function scrapeGameMetadata(gameId, versionId) {
+  return fetchWithBody(`/games/${gameId}/scrape`, 'POST', versionId ? { version_id: versionId } : {});
 }
 export function batchScrapeGameMetadata(gameIds, overwrite) {
   return fetchWithBody('/games/batch-scrape', 'POST', { game_ids: gameIds, overwrite });
@@ -270,6 +270,7 @@ export function cancelJob(jobId) {
 // ==============================
 export function getSettings() { return fetchJson('/settings'); }
 export function saveSettings(data) { return fetchWithBody('/settings', 'PUT', data); }
+export function repairDatabase() { return fetchWithBody('/settings/repair-db', 'POST', {}); }
 
 // ==============================
 // Filesystem
@@ -351,4 +352,11 @@ export function cancelOperation(operationId) {
 }
 export function createOperation(type, collectionId, params = {}) {
   return fetchWithBody('/operations', 'POST', { type, collection_id: collectionId, ...params });
+}
+
+// ==============================
+// ProgettoSnaps
+// ==============================
+export function downloadProgettoSnaps() {
+  return fetchWithBody('/operations', 'POST', { type: 'progettosnaps', collection_id: null });
 }

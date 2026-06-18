@@ -56,9 +56,7 @@ export class ImportOperation extends Operation {
     const result = execCli(args, { binary: 'parse' });
 
     if (result?.version_id) {
-      // Link to collection
-      run('INSERT OR IGNORE INTO collection_versions (collection_id, version_id) VALUES (?, ?)',
-        [this.collectionId, result.version_id]);
+      // set_versions already has collection_id from import; no link needed
     }
 
     reloadDb();

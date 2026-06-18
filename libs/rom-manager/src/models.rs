@@ -34,7 +34,7 @@ impl FromStr for MergeMode {
 #[derive(Debug, Clone)]
 pub struct SetVersion {
     pub id: i64,
-    pub source: String,
+    pub collection_id: i64,
     pub version: String,
     pub dir: Option<String>,
     pub total_games: i64,

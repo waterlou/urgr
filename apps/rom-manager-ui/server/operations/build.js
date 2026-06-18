@@ -76,7 +76,7 @@ export class BuildOperation extends Operation {
     const matched = get('SELECT COUNT(*) as c FROM game_rom_sets WHERE version_id = ? AND available = 1', [version_id]).c;
 
     let reused = 0;
-    const priorVersions = all('SELECT DISTINCT sv.version, sv.id FROM set_versions sv JOIN collection_versions cv ON cv.version_id = sv.id WHERE cv.collection_id = ? AND sv.id < ? ORDER BY sv.id', [this.collectionId, version_id]);
+    const priorVersions = all('SELECT DISTINCT sv.version, sv.id FROM set_versions sv WHERE sv.collection_id = ? AND sv.id < ? ORDER BY sv.id', [this.collectionId, version_id]);
     if (priorVersions.length > 0 && fs.existsSync(collectionDir)) {
       const currentNames = new Set(all('SELECT DISTINCT g.name FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ?', [version_id]).map(r => r.name));
       for (const pv of priorVersions) {

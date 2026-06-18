@@ -1,6 +1,7 @@
 export const ALL_SOURCES = [
   'arcadedb', 'thegamesdb', 'screenscraper', 'igdb',
   'libretro-thumbnails', 'no-intro-pictures', 'vgmuseum', 'sony-store',
+  'progettosnaps',
 ]
 
 export const SOURCE_LABELS = {
@@ -12,6 +13,7 @@ export const SOURCE_LABELS = {
   'no-intro-pictures': 'No-Intro Pictures',
   vgmuseum: 'VGMuseum',
   'sony-store': 'Sony PlayStation Store',
+  progettosnaps: 'ProgettoSnaps (pre-downloaded)',
 }
 
 export const SCRAPE_PRESETS = {

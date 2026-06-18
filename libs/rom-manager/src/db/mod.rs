@@ -48,38 +48,46 @@ impl Database {
 
     pub fn import_version(
         &self,
-        source: &str,
+        collection_id: Option<i64>,
         version: &str,
         dir: Option<&str>,
     ) -> Result<i64> {
         let tx = self.conn.unchecked_transaction()?;
         tx.execute(
-            "INSERT OR IGNORE INTO set_versions (source, version, dir) VALUES (?1, ?2, ?3)",
-            params![source, version, dir],
+            "INSERT OR IGNORE INTO set_versions (collection_id, version, dir) VALUES (?1, ?2, ?3)",
+            params![collection_id, version, dir],
         )?;
-        let id: i64 = tx.query_row(
-            "SELECT id FROM set_versions WHERE source = ?1 AND version = ?2",
-            params![source, version],
-            |r| r.get(0),
-        )?;
+        let id: i64 = if let Some(cid) = collection_id {
+            tx.query_row(
+                "SELECT id FROM set_versions WHERE collection_id = ?1 AND version = ?2",
+                params![cid, version],
+                |r| r.get(0),
+            )?
+        } else {
+            tx.query_row(
+                "SELECT id FROM set_versions WHERE collection_id IS NULL AND version = ?1",
+                params![version],
+                |r| r.get(0),
+            )?
+        };
         tx.commit()?;
         Ok(id)
     }
 
     pub fn list_versions(&self) -> Result<Vec<SetVersion>> {
         let mut stmt = self.conn.prepare(
-            "SELECT sv.id, sv.source, sv.version, sv.dir,
+            "SELECT sv.id, sv.collection_id, sv.version, sv.dir,
                     (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games,
                     (SELECT COUNT(*) FROM game_rom_files grf
                      JOIN game_rom_sets grs ON grf.rom_set_id = grs.id
                      WHERE grs.version_id = sv.id) as total_roms
              FROM set_versions sv
-             ORDER BY sv.source, sv.version",
+             ORDER BY sv.collection_id, sv.version",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(SetVersion {
                 id: r.get(0)?,
-                source: r.get(1)?,
+                collection_id: r.get(1)?,
                 version: r.get(2)?,
                 dir: r.get(3)?,
                 total_games: r.get(4)?,
@@ -93,23 +101,23 @@ impl Database {
         Ok(versions)
     }
 
-    pub fn get_version_by_source_and_version(
+    pub fn get_version_by_collection_and_version(
         &self,
-        source: &str,
+        collection_id: i64,
         version: &str,
     ) -> Result<Option<SetVersion>> {
         let mut stmt = self.conn.prepare(
-            "SELECT sv.id, sv.source, sv.version, sv.dir,
+            "SELECT sv.id, sv.collection_id, sv.version, sv.dir,
                     (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games,
                     (SELECT COUNT(*) FROM game_rom_files grf
                      JOIN game_rom_sets grs ON grf.rom_set_id = grs.id
                      WHERE grs.version_id = sv.id) as total_roms
-             FROM set_versions sv WHERE sv.source = ?1 AND sv.version = ?2",
+             FROM set_versions sv WHERE sv.collection_id = ?1 AND sv.version = ?2",
         )?;
-        let mut rows = stmt.query_map(params![source, version], |r| {
+        let mut rows = stmt.query_map(params![collection_id, version], |r| {
             Ok(SetVersion {
                 id: r.get(0)?,
-                source: r.get(1)?,
+                collection_id: r.get(1)?,
                 version: r.get(2)?,
                 dir: r.get(3)?,
                 total_games: r.get(4)?,
@@ -124,7 +132,7 @@ impl Database {
 
     pub fn get_version(&self, id: i64) -> Result<Option<SetVersion>> {
         let mut stmt = self.conn.prepare(
-            "SELECT sv.id, sv.source, sv.version, sv.dir,
+            "SELECT sv.id, sv.collection_id, sv.version, sv.dir,
                     (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games,
                     (SELECT COUNT(*) FROM game_rom_files grf
                      JOIN game_rom_sets grs ON grf.rom_set_id = grs.id
@@ -134,7 +142,7 @@ impl Database {
         let mut rows = stmt.query_map(params![id], |r| {
             Ok(SetVersion {
                 id: r.get(0)?,
-                source: r.get(1)?,
+                collection_id: r.get(1)?,
                 version: r.get(2)?,
                 dir: r.get(3)?,
                 total_games: r.get(4)?,
@@ -161,21 +169,21 @@ impl Database {
         )?)
     }
 
-    pub fn latest_version(&self, source: &str) -> Result<Option<SetVersion>> {
+    pub fn latest_version(&self, collection_id: i64) -> Result<Option<SetVersion>> {
         let mut stmt = self.conn.prepare(
-            "SELECT sv.id, sv.source, sv.version, sv.dir,
+            "SELECT sv.id, sv.collection_id, sv.version, sv.dir,
                     (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games,
                     (SELECT COUNT(*) FROM game_rom_files grf
                      JOIN game_rom_sets grs ON grf.rom_set_id = grs.id
                      WHERE grs.version_id = sv.id) as total_roms
              FROM set_versions sv
-             WHERE sv.source = ?1
+             WHERE sv.collection_id = ?1
              ORDER BY sv.version DESC LIMIT 1",
         )?;
-        let mut rows = stmt.query_map(params![source], |r| {
+        let mut rows = stmt.query_map(params![collection_id], |r| {
             Ok(SetVersion {
                 id: r.get(0)?,
-                source: r.get(1)?,
+                collection_id: r.get(1)?,
                 version: r.get(2)?,
                 dir: r.get(3)?,
                 total_games: r.get(4)?,
@@ -190,11 +198,11 @@ impl Database {
 
     // ── Games ──
 
-    pub fn insert_game(&self, game: &ParsedGame) -> Result<i64> {
+    pub fn insert_game(&self, collection_id: i64, game: &ParsedGame) -> Result<i64> {
         let id: i64 = self.conn.query_row(
-            "INSERT INTO games (name, description, year, manufacturer, platform, isbios, isdevice, runnable, driver_status, driver_emulation, sampleof)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-             ON CONFLICT(name) DO UPDATE SET
+            "INSERT INTO games (collection_id, name, description, year, manufacturer, platform, isbios, isdevice, runnable, driver_status, driver_emulation, sampleof)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             ON CONFLICT(collection_id, name, platform) DO UPDATE SET
                description = excluded.description,
                year = excluded.year,
                manufacturer = excluded.manufacturer,
@@ -207,6 +215,7 @@ impl Database {
                sampleof = excluded.sampleof
              RETURNING id",
             params![
+                collection_id,
                 game.name,
                 game.description,
                 game.year,
@@ -347,14 +356,14 @@ impl Database {
         }
     }
 
-    pub fn get_game_by_name(&self, name: &str) -> Result<Option<Game>> {
+    pub fn get_game_by_name(&self, collection_id: i64, name: &str) -> Result<Option<Game>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, name, description, year, manufacturer, platform,
                     parent_game_id, synopsis, isbios, isdevice,
                     runnable, driver_status, driver_emulation, sampleof
-             FROM games WHERE name = ?1",
+             FROM games WHERE collection_id = ?1 AND name = ?2",
         )?;
-        let mut rows = stmt.query_map(params![name], |r| {
+        let mut rows = stmt.query_map(params![collection_id, name], |r| {
             Ok(Game {
                 id: r.get(0)?,
                 name: r.get(1)?,
@@ -634,11 +643,11 @@ impl Database {
         Ok(())
     }
 
-    /// Check if a game exists in this version
-    pub fn game_exists(&self, name: &str, version_id: i64) -> Result<bool> {
+    /// Check if a game exists in this version and collection
+    pub fn game_exists(&self, name: &str, version_id: i64, collection_id: i64) -> Result<bool> {
         let result = self.conn.query_row(
-            "SELECT 1 FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE g.name = ?1 AND grs.version_id = ?2",
-            params![name, version_id],
+            "SELECT 1 FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE g.collection_id = ?1 AND g.name = ?2 AND grs.version_id = ?3",
+            params![collection_id, name, version_id],
             |r| r.get::<_, i64>(0),
         );
         match result {
@@ -887,7 +896,7 @@ mod tests {
     fn test_db_perf_bulk_insert() {
         use std::time::Instant;
         let db = make_db();
-        let vid = db.import_version("perf", "v1", None).unwrap();
+        let vid = db.import_version(Some(0), "perf", "v1", None).unwrap();
         let games = bulk_games("g", 5_000);
         let start = Instant::now();
         for game in &games {
@@ -907,7 +916,7 @@ mod tests {
     fn test_db_perf_bulk_insert_with_roms() {
         use std::time::Instant;
         let db = make_db();
-        let vid = db.import_version("perf", "v2", None).unwrap();
+        let vid = db.import_version(Some(0), "perf", "v2", None).unwrap();
         let games = bulk_games("gr", 2_000);
 
         for game in &games {
@@ -946,8 +955,8 @@ mod tests {
     fn test_db_perf_diff_large() {
         use std::time::Instant;
         let db = make_db();
-        let va = db.import_version("perf", "A", None).unwrap();
-        let vb = db.import_version("perf", "B", None).unwrap();
+        let va = db.import_version(Some(0), "perf", "A", None).unwrap();
+        let vb = db.import_version(Some(0), "perf", "B", None).unwrap();
 
         let games_a = bulk_games("a", 3_000);
 

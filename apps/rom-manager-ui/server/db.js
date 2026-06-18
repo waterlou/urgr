@@ -14,69 +14,6 @@ async function ensureSqlJs() {
 await ensureSqlJs();
 
 const SCHEMA = `
-CREATE TABLE IF NOT EXISTS set_versions (
-    id          INTEGER PRIMARY KEY,
-    source      TEXT NOT NULL,
-    version     TEXT NOT NULL,
-    dir         TEXT,
-    created_at  TEXT DEFAULT (datetime('now')),
-    UNIQUE(source, version)
-);
-
-CREATE TABLE IF NOT EXISTS games (
-    id              INTEGER PRIMARY KEY,
-    name            TEXT NOT NULL,
-    description     TEXT NOT NULL DEFAULT '',
-    year            TEXT,
-    manufacturer    TEXT,
-    platform        TEXT DEFAULT '',
-    parent_game_id  INTEGER,
-    synopsis        TEXT DEFAULT '',
-    title_id        TEXT,
-    content_id      TEXT,
-    created_at      TEXT DEFAULT (datetime('now')),
-    UNIQUE(name)
-);
-
-CREATE TABLE IF NOT EXISTS game_rom_sets (
-    id              INTEGER PRIMARY KEY,
-    game_id         INTEGER NOT NULL,
-    version_id      INTEGER NOT NULL,
-    romof           TEXT,
-    status          TEXT NOT NULL DEFAULT 'good',
-    available       INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
-    FOREIGN KEY (version_id) REFERENCES set_versions(id),
-    UNIQUE(game_id, version_id)
-);
-
-CREATE TABLE IF NOT EXISTS game_rom_files (
-    id              INTEGER PRIMARY KEY,
-    rom_set_id      INTEGER NOT NULL,
-    filename        TEXT NOT NULL,
-    size            INTEGER,
-    crc32           TEXT,
-    md5             TEXT,
-    sha1            TEXT,
-    status          TEXT NOT NULL DEFAULT 'good',
-    merge_target    TEXT,
-    subtype         TEXT DEFAULT 'game',
-    pkg_url         TEXT DEFAULT '',
-    FOREIGN KEY (rom_set_id) REFERENCES game_rom_sets(id) ON DELETE CASCADE,
-    UNIQUE(rom_set_id, filename)
-);
-
-CREATE TABLE IF NOT EXISTS meta (
-    key   TEXT PRIMARY KEY,
-    value TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_games_name ON games(name);
-CREATE INDEX IF NOT EXISTS idx_rom_sets_version ON game_rom_sets(version_id);
-CREATE INDEX IF NOT EXISTS idx_rom_sets_game ON game_rom_sets(game_id);
-CREATE INDEX IF NOT EXISTS idx_rom_files_set ON game_rom_files(rom_set_id);
-CREATE INDEX IF NOT EXISTS idx_rom_files_sha1 ON game_rom_files(sha1);
-CREATE INDEX IF NOT EXISTS idx_rom_files_crc32 ON game_rom_files(crc32);
 
 CREATE TABLE IF NOT EXISTS collections (
     id          INTEGER PRIMARY KEY,
@@ -92,16 +29,75 @@ CREATE TABLE IF NOT EXISTS collections (
     created_at  TEXT DEFAULT (datetime('now')),
     updated_at  TEXT DEFAULT (datetime('now'))
 );
-
 CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_slug ON collections(slug);
 
-CREATE TABLE IF NOT EXISTS collection_versions (
-    id            INTEGER PRIMARY KEY,
-    collection_id INTEGER NOT NULL,
-    version_id    INTEGER NOT NULL,
-    FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE,
-    FOREIGN KEY (version_id) REFERENCES set_versions(id),
-    UNIQUE(collection_id, version_id)
+CREATE TABLE IF NOT EXISTS set_versions (
+    id              INTEGER PRIMARY KEY,
+    collection_id   INTEGER REFERENCES collections(id) ON DELETE SET NULL,
+    version         TEXT NOT NULL,
+    dir             TEXT,
+    created_at      TEXT DEFAULT (datetime('now')),
+    UNIQUE(collection_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_sv_collection ON set_versions(collection_id);
+
+CREATE TABLE IF NOT EXISTS games (
+    id              INTEGER PRIMARY KEY,
+    collection_id   INTEGER REFERENCES collections(id) ON DELETE SET NULL,
+    name            TEXT NOT NULL,
+    description     TEXT NOT NULL DEFAULT '',
+    year            TEXT,
+    manufacturer    TEXT,
+    platform        TEXT DEFAULT '',
+    parent_game_id  INTEGER,
+    synopsis        TEXT DEFAULT '',
+    title_id        TEXT,
+    content_id      TEXT,
+    runnable        INTEGER,
+    isbios          INTEGER NOT NULL DEFAULT 0,
+    isdevice        INTEGER NOT NULL DEFAULT 0,
+    driver_status   TEXT,
+    driver_emulation TEXT,
+    sampleof        TEXT,
+    created_at      TEXT DEFAULT (datetime('now')),
+    UNIQUE(collection_id, name, platform)
+);
+CREATE INDEX IF NOT EXISTS idx_games_collection ON games(collection_id);
+CREATE INDEX IF NOT EXISTS idx_games_name ON games(name);
+
+CREATE TABLE IF NOT EXISTS game_rom_sets (
+    id              INTEGER PRIMARY KEY,
+    game_id         INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    version_id      INTEGER NOT NULL REFERENCES set_versions(id),
+    romof           TEXT,
+    status          TEXT NOT NULL DEFAULT 'good',
+    available       INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(game_id, version_id)
+);
+CREATE INDEX IF NOT EXISTS idx_rs_version ON game_rom_sets(version_id);
+CREATE INDEX IF NOT EXISTS idx_rs_game ON game_rom_sets(game_id);
+
+CREATE TABLE IF NOT EXISTS game_rom_files (
+    id              INTEGER PRIMARY KEY,
+    rom_set_id      INTEGER NOT NULL REFERENCES game_rom_sets(id) ON DELETE CASCADE,
+    filename        TEXT NOT NULL,
+    size            INTEGER,
+    crc32           TEXT,
+    md5             TEXT,
+    sha1            TEXT,
+    status          TEXT NOT NULL DEFAULT 'good',
+    merge_target    TEXT,
+    subtype         TEXT DEFAULT 'game',
+    pkg_url         TEXT DEFAULT '',
+    UNIQUE(rom_set_id, filename)
+);
+CREATE INDEX IF NOT EXISTS idx_rf_set ON game_rom_files(rom_set_id);
+CREATE INDEX IF NOT EXISTS idx_rf_sha1 ON game_rom_files(sha1);
+CREATE INDEX IF NOT EXISTS idx_rf_crc32 ON game_rom_files(crc32);
+
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
 );
 
 CREATE TABLE IF NOT EXISTS game_sets (
@@ -115,10 +111,8 @@ CREATE TABLE IF NOT EXISTS game_sets (
 
 CREATE TABLE IF NOT EXISTS game_set_games (
     id            INTEGER PRIMARY KEY,
-    game_set_id   INTEGER NOT NULL,
-    game_id       INTEGER NOT NULL,
-    FOREIGN KEY (game_set_id) REFERENCES game_sets(id) ON DELETE CASCADE,
-    FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+    game_set_id   INTEGER NOT NULL REFERENCES game_sets(id) ON DELETE CASCADE,
+    game_id       INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS game_media (
@@ -129,23 +123,21 @@ CREATE TABLE IF NOT EXISTS game_media (
     screenshots TEXT DEFAULT '[]',
     fanarts     TEXT DEFAULT '[]',
     videos      TEXT DEFAULT '[]',
+    source      TEXT DEFAULT '',
     scraped_at  TEXT,
     PRIMARY KEY (name, platform)
 );
 
 CREATE TABLE IF NOT EXISTS game_state (
-    game_id         INTEGER PRIMARY KEY,
+    game_id         INTEGER PRIMARY KEY REFERENCES games(id),
     available       INTEGER NOT NULL DEFAULT 0,
     rating          INTEGER NOT NULL DEFAULT 0,
     favourite       INTEGER NOT NULL DEFAULT 0,
     play_count      INTEGER NOT NULL DEFAULT 0,
-    updated_at      TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (game_id) REFERENCES games(id)
+    updated_at      TEXT DEFAULT (datetime('now'))
 );
-
-CREATE INDEX IF NOT EXISTS idx_game_state_favourite ON game_state(favourite);
-CREATE INDEX IF NOT EXISTS idx_game_state_available ON game_state(available);
-CREATE INDEX IF NOT EXISTS idx_game_state_game ON game_state(game_id);
+CREATE INDEX IF NOT EXISTS idx_gs_favourite ON game_state(favourite);
+CREATE INDEX IF NOT EXISTS idx_gs_available ON game_state(available);
 
 CREATE TABLE IF NOT EXISTS scrape_jobs (
     id              TEXT PRIMARY KEY,
@@ -163,8 +155,8 @@ CREATE TABLE IF NOT EXISTS scrape_jobs (
 
 CREATE TABLE IF NOT EXISTS collection_builds (
     id              INTEGER PRIMARY KEY,
-    collection_id   INTEGER NOT NULL,
-    version_id      INTEGER NOT NULL,
+    collection_id   INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    version_id      INTEGER NOT NULL REFERENCES set_versions(id),
     status          TEXT NOT NULL DEFAULT 'not_started',
     format          TEXT NOT NULL DEFAULT 'split',
     games_total     INTEGER DEFAULT 0,
@@ -172,14 +164,12 @@ CREATE TABLE IF NOT EXISTS collection_builds (
     started_at      TEXT,
     completed_at    TEXT,
     created_at      TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE,
-    FOREIGN KEY (version_id) REFERENCES set_versions(id),
     UNIQUE(collection_id, version_id)
 );
 
 CREATE TABLE IF NOT EXISTS download_queue (
     id              INTEGER PRIMARY KEY,
-    game_id         INTEGER NOT NULL,
+    game_id         INTEGER NOT NULL REFERENCES games(id),
     version_id      INTEGER NOT NULL,
     pkg_url         TEXT NOT NULL,
     filename        TEXT NOT NULL,
@@ -191,8 +181,7 @@ CREATE TABLE IF NOT EXISTS download_queue (
     error           TEXT,
     retry_count     INTEGER DEFAULT 0,
     created_at      TEXT DEFAULT (datetime('now')),
-    completed_at    TEXT,
-    FOREIGN KEY (game_id) REFERENCES games(id)
+    completed_at    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS operations (
@@ -208,9 +197,14 @@ CREATE TABLE IF NOT EXISTS operations (
     created_at      TEXT DEFAULT (datetime('now')),
     updated_at      TEXT DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_ops_status ON operations(status);
+CREATE INDEX IF NOT EXISTS idx_ops_collection ON operations(collection_id);
 
-CREATE INDEX IF NOT EXISTS idx_operations_status ON operations(status);
-CREATE INDEX IF NOT EXISTS idx_operations_collection ON operations(collection_id);
+CREATE TABLE IF NOT EXISTS recently_played (
+    game_id   INTEGER PRIMARY KEY REFERENCES games(id),
+    played_at TEXT DEFAULT (datetime('now'))
+);
+
 `;
 
 export function initDb(dbPath) {
@@ -227,25 +221,6 @@ export function initDb(dbPath) {
   db.run('PRAGMA journal_mode=WAL');
   db.run('PRAGMA foreign_keys = ON');
   db.run(SCHEMA);
-
-  // Migration: add videos column to game_media
-  try { db.run("ALTER TABLE game_media ADD COLUMN videos TEXT DEFAULT '[]'"); } catch (_) {}
-  // Migration: add fanarts column to game_media
-  try { db.run("ALTER TABLE game_media ADD COLUMN fanarts TEXT DEFAULT '[]'"); } catch (_) {}
-  // Migration: add scrape_mode column to collections
-  try { db.run("ALTER TABLE collections ADD COLUMN scrape_mode TEXT DEFAULT 'auto'"); } catch (_) {}
-  // Migration: add scrape_source_priority column to collections
-  try { db.run("ALTER TABLE collections ADD COLUMN scrape_source_priority TEXT DEFAULT NULL"); } catch (_) {}
-  // Migration: add available column to game_rom_sets (per-version availability flag)
-  try { db.run("ALTER TABLE game_rom_sets ADD COLUMN available INTEGER NOT NULL DEFAULT 0"); } catch (_) {}
-
-  // Create recently_played table (simple cross-version list)
-  try {
-    db.run(`CREATE TABLE IF NOT EXISTS recently_played (
-      game_id   INTEGER PRIMARY KEY,
-      played_at TEXT DEFAULT (datetime('now'))
-    )`);
-  } catch (_) {}
 
   // Mark orphaned operations as failed
   try {

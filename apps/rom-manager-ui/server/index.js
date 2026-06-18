@@ -67,6 +67,10 @@ const igdbDir = path.join(dataDir, 'media', 'igdb');
 fs.mkdirSync(igdbDir, { recursive: true });
 app.use('/media/igdb', express.static(igdbDir));
 
+const progettosnapsDir = path.join(dataDir, 'media', 'progettosnaps');
+fs.mkdirSync(progettosnapsDir, { recursive: true });
+app.use('/media/progettosnaps', express.static(progettosnapsDir));
+
 app.use((req, res) => {
   const filePath = path.join(distDir, 'index.html');
   if (fs.existsSync(filePath)) {

@@ -16,6 +16,9 @@ export class ScrapeOperation extends Operation {
     // Import scrapeSingleGame lazily to avoid circular deps
     const { scrapeSingleGame } = await import('../routes/games.js');
 
+    // Pick a collection version to pass context (for source priority)
+    const versions = all('SELECT id as version_id FROM set_versions WHERE collection_id = ? ORDER BY id DESC LIMIT 1', [this.collectionId]);
+
     // Find unscraped games
     let games;
     if (gameIds && gameIds.length > 0) {
@@ -23,8 +26,7 @@ export class ScrapeOperation extends Operation {
     } else {
       games = all(`SELECT DISTINCT g.id FROM games g
         JOIN game_rom_sets grs ON grs.game_id = g.id
-        JOIN collection_versions cv ON cv.version_id = grs.version_id
-        WHERE cv.collection_id = ? AND (g.manufacturer IS NULL OR g.manufacturer = '' OR g.year IS NULL OR g.year = '')
+                WHERE grs.version_id IN (SELECT id FROM set_versions WHERE collection_id = ?) AND (g.manufacturer IS NULL OR g.manufacturer = '' OR g.year IS NULL OR g.year = '')
         ORDER BY g.name`, [this.collectionId]);
     }
 
@@ -47,7 +49,8 @@ export class ScrapeOperation extends Operation {
 
       const gid = games[i].id;
       try {
-        const result = await scrapeSingleGame(gid);
+        const versionId = versions.length > 0 ? versions[0].version_id : undefined;
+        const result = await scrapeSingleGame(gid, versionId);
         if (result.scraped) scraped++;
         else skipped++;
         this.updateProgress(Math.round(((i + 1) / total) * 100), `[${i + 1}/${total}] ${result.scraped ? 'scraped' : 'skipped'} ${result.title || ''}`);

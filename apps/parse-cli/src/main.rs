@@ -119,14 +119,16 @@ fn main() -> ExitCode {
     }
     let json = has_json();
 
-    if args.len() < 5 || args[1] != "import" {
+    if args.len() < 4 || args[1] != "import" {
         print_usage();
         return ExitCode::FAILURE;
     }
 
     let file = &args[2];
-    let source = &args[3];
-    let version = &args[4];
+    let version = &args[3];
+    let collection_id = args.iter().position(|a| a == "--collection-id")
+        .and_then(|p| args.get(p + 1))
+        .and_then(|s| s.parse::<i64>().ok());
     let dir = args.iter().position(|a| a == "--dir")
         .and_then(|p| args.get(p + 1));
     let platform = args.iter().position(|a| a == "--platform")
@@ -134,6 +136,7 @@ fn main() -> ExitCode {
     let subtype = args.iter().position(|a| a == "--subtype")
         .and_then(|p| args.get(p + 1));
     let existing_only = args.iter().any(|a| a == "--existing-only");
+    let no_clear = args.iter().any(|a| a == "--no-clear");
 
     // MAME filter flags
     let status_filter = args.iter().position(|a| a == "--status")
@@ -164,7 +167,11 @@ fn main() -> ExitCode {
 
     let warnings = stats.errors.clone();
 
-    let version_id = match db.import_version(source, version, dir.map(|s| s.as_str())) {
+    let cid = collection_id.unwrap_or_else(|| {
+        eprintln!("Error: --collection-id <id> is required");
+        std::process::exit(1);
+    });
+    let version_id = match db.import_version(Some(cid), version, dir.map(|s| s.as_str())) {
         Ok(id) => id,
         Err(e) => { eprintln!("Failed to import version: {}", e); return ExitCode::FAILURE; }
     };
@@ -172,7 +179,7 @@ fn main() -> ExitCode {
     // Apply MAME filters before insertion
     let filtered: Vec<ParsedGame> = games.into_iter().filter(|game| {
         if existing_only {
-            let exists = db.game_exists(&game.name, version_id).unwrap_or(false);
+            let exists = db.game_exists(&game.name, version_id, cid).unwrap_or(false);
             if !exists { return false; }
         }
         if let Some(ref status) = status_filter {
@@ -191,11 +198,13 @@ fn main() -> ExitCode {
 
     let games_inserted = filtered.len();
     let mut rom_count = 0usize;
-    if let Err(e) = db.clear_game_roms_for_version(version_id) {
+    if !existing_only && !no_clear {
+        if let Err(e) = db.clear_game_roms_for_version(version_id) {
         eprintln!("Failed to clear existing ROM sets: {}", e);
         return ExitCode::FAILURE;
     }
-    eprintln!("[import] Importing {} games for version_id={}", games_inserted, version_id);
+  }
+  eprintln!("[import] Importing {} games for version_id={}", games_inserted, version_id);
     for game in &filtered {
         eprintln!("  {}", game.name);
         let mut game_clone = game.clone();
@@ -203,7 +212,7 @@ fn main() -> ExitCode {
         if let Some(p) = platform {
             game_clone.platform = p.to_string();
         }
-        let gid = match db.insert_game(&game_clone) {
+        let gid = match db.insert_game(cid, &game_clone) {
             Ok(id) => id,
             Err(e) => { eprintln!("Failed to insert game {}: {}", game_clone.name, e); return ExitCode::FAILURE; }
         };

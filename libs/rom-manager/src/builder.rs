@@ -84,6 +84,8 @@ pub struct BuildResult {
 
 struct ImportIndex {
     name_to_path: HashMap<String, PathBuf>,
+    /// Platform-aware map: (game_name, platform) → path (more specific than name_to_path)
+    name_plat_path: HashMap<(String, String), PathBuf>,
     /// Pre-computed CRC32 sets per import zip: zip_stem → Set of CRC32 strings
     zip_crcs: HashMap<String, std::collections::HashSet<String>>,
     /// Individual non-zip files indexed by CRC32: CRC → file path
@@ -92,20 +94,34 @@ struct ImportIndex {
     crc_to_zips: HashMap<String, Vec<String>>,
 }
 
+/// Known platform folder names that the builder recognizes in the import directory.
+/// When a zip sits under one of these subdirectories, it's indexed by both name and platform.
+const KNOWN_PLATFORMS: &[&str] = &[
+    "arcade", "coleco", "fds", "gamegear", "megadriv", "msx", "neogeo", "nes",
+    "ngp", "pce", "sg1000", "sgx", "sms", "tg16", "zxspectrum",
+];
+
 impl ImportIndex {
     fn scan(dir: &Path, db: &Database, version_id: i64) -> Result<Self> {
         let mut name_to_path = HashMap::new();
+        let mut name_plat_path = HashMap::new();
         let mut zip_crcs = HashMap::new();
         let mut loose_files = HashMap::new();
         let mut crc_to_zips: HashMap<String, Vec<String>> = HashMap::new();
         if !dir.is_dir() {
-            return Ok(Self { name_to_path, zip_crcs, loose_files, crc_to_zips });
+            return Ok(Self { name_to_path, name_plat_path, zip_crcs, loose_files, crc_to_zips });
         }
         for entry in walk_files(dir)? {
             let ext = entry.extension().and_then(|e| e.to_str()).unwrap_or("");
             if ext == "zip" {
                 let stem = entry.file_stem().unwrap_or_default().to_string_lossy().to_string();
                 name_to_path.entry(stem.clone()).or_insert_with(|| entry.clone());
+                // Also index by platform if the zip sits under a known platform subdirectory
+                if let Some(parent_name) = entry.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()) {
+                    if KNOWN_PLATFORMS.contains(&parent_name) {
+                        name_plat_path.entry((stem.clone(), parent_name.to_string())).or_insert_with(|| entry.clone());
+                    }
+                }
                 let crcs = compute_zip_crcs(&entry);
                 if !crcs.is_empty() {
                     for crc in &crcs {
@@ -124,14 +140,27 @@ impl ImportIndex {
             }
         }
         info!("Import index: {} zips, {} loose files", name_to_path.len(), loose_files.len());
-        Ok(Self { name_to_path, zip_crcs, loose_files, crc_to_zips })
+        Ok(Self { name_to_path, name_plat_path, zip_crcs, loose_files, crc_to_zips })
     }
 
-    fn find_match(&self, game_name: &str, expected_roms: &[RomFile]) -> Option<PathBuf> {
+    fn find_match(&self, game_name: &str, platform: Option<&str>, expected_roms: &[RomFile]) -> Option<PathBuf> {
         if expected_roms.is_empty() { return None; }
+        // Try platform-specific path first (e.g. import_dir/arcade/zoom909.zip)
+        if let Some(plat) = platform {
+            if let Some(path) = self.name_plat_path.get(&(game_name.to_string(), plat.to_string())) {
+                if let Some(zip_crc_set) = self.zip_crcs.get(game_name) {
+                    let all_match = expected_roms.iter()
+                        .filter(|r| r.merge_target.is_none())
+                        .filter_map(|r| r.crc32.as_deref())
+                        .filter(|c| !c.is_empty())
+                        .all(|ec| zip_crc_set.contains(ec));
+                    if all_match { return Some(path.clone()); }
+                }
+            }
+        }
+        // Fallback: flat lookup by name
         let path = self.name_to_path.get(game_name)?;
         let zip_crc_set = self.zip_crcs.get(game_name)?;
-        // ALL expected CRCs must be present in the zip (skip merge_target ROMs — split format)
         let all_match = expected_roms.iter()
             .filter(|r| r.merge_target.is_none())
             .filter_map(|r| r.crc32.as_deref())
@@ -193,7 +222,7 @@ impl ImportIndex {
     /// Falls back when name-based match fails — looks up expected CRCs in the
     /// reverse CRC index, finds the zip stem that contains all expected CRCs,
     /// then renames the import zip to `<game_name>.zip` so future runs find it.
-    fn find_by_content(&self, game_name: &str, expected_roms: &[RomFile]) -> Option<PathBuf> {
+    fn find_by_content(&self, game_name: &str, platform: Option<&str>, expected_roms: &[RomFile]) -> Option<PathBuf> {
         let expected_crcs: Vec<&str> = expected_roms.iter()
             .filter(|r| r.merge_target.is_none())
             .filter_map(|r| r.crc32.as_deref())
@@ -367,7 +396,7 @@ fn find_in_fallback(
 
 pub fn build_version(
     db: &Database,
-    source: &str,
+    collection_id: i64,
     import_dir: &Path,
     base_dir: &Path,
     collection_dir: Option<&Path>,
@@ -394,7 +423,8 @@ pub fn build_version(
         let _ = write_progress(progress_path, &p);
     }
 
-    let progress_path = base_dir.join(source).join(PROGRESS_FILENAME);
+    let source_dir = format!("collection_{}", collection_id);
+    let progress_path = base_dir.join(&source_dir).join(PROGRESS_FILENAME);
 
     // ── Phase 0: Load versions ──
     progress(on_progress, "loading", 0, "Loading versions...", 0, 0, 0, &progress_path);
@@ -403,8 +433,8 @@ pub fn build_version(
             Error::Source(format!("Version id {} not found", vid))
         })?
     } else {
-        db.latest_version(source)?.ok_or_else(|| {
-            Error::Source(format!("No version found for source '{}'", source))
+        db.latest_version(collection_id)?.ok_or_else(|| {
+            Error::Source(format!("No version found for collection_id '{}'", collection_id))
         })?
     };
 
@@ -418,7 +448,7 @@ pub fn build_version(
             let versions: Vec<&str> = content.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
             let pos = versions.iter().position(|v| *v == latest.version)?;
             if pos > 0 {
-                db.get_version_by_source_and_version(source, versions[pos - 1]).ok().flatten()
+                db.get_version_by_collection_and_version(collection_id, versions[pos - 1]).ok().flatten()
             } else {
                 None // first version in .version file — no prior
             }
@@ -433,11 +463,11 @@ pub fn build_version(
     let version_dir = if let Some(cd) = collection_dir {
         cd.join(&latest.version)
     } else {
-        base_dir.join(source).join(&latest.version)
+        base_dir.join(&source_dir).join(&latest.version)
     };
     let deleted_dir = base_dir.join(DELETED_DIR_NAME);
     let status_path = version_dir.join(STATUS_FILENAME);
-    let mode_path = base_dir.join(source).join(MODE_FILENAME);
+    let mode_path = base_dir.join(&source_dir).join(MODE_FILENAME);
 
     // Check mode consistency at source level
     let requested_mode = if force_update { "update" } else { "collect" };
@@ -445,8 +475,8 @@ pub fn build_version(
         if existing != requested_mode {
             return Err(Error::Source(format!(
                 "Mode mismatch: previous build used '{}' mode, but '{}' was requested.\n\
-                 All builds for source '{}' must use the same mode.",
-                existing, requested_mode, source
+                 All builds for collection '{}' must use the same mode.",
+                existing, requested_mode, collection_id
             )));
         }
     } else {
@@ -454,7 +484,7 @@ pub fn build_version(
     }
 
     let mut status = BuildStatus {
-        source: source.to_string(),
+        source: source_dir.clone(),
         version: latest.version.clone(),
         mode: if force_update { "update" } else { "collect" }.to_string(),
         prev_version: prev.as_ref().map(|p| p.version.clone()),
@@ -479,12 +509,12 @@ pub fn build_version(
         let unchanged = diff.unchanged as usize;
         let need_copy: Vec<String> = diff.added.iter().chain(diff.changed.iter()).cloned().collect();
         let removed = diff.removed;
-        info!("Diff {}/{} → {}/{}: +{} ~{} -{} ({}u)",
-            source, p.version, source, latest.version,
+        info!("Diff collection {}/{} → collection {}/{}: +{} ~{} -{} ({}u)",
+            collection_id, p.version, collection_id, latest.version,
             diff.added.len(), diff.changed.len(), removed.len(), unchanged);
         (need_copy, unchanged, removed)
     } else {
-        info!("First build for {} — all {} games need copying", source, latest.total_games);
+        info!("First build for collection {} — all {} games need copying", collection_id, latest.total_games);
         let all: Vec<String> = db.list_games(latest.id)?
             .iter()
             .map(|g| g.name.clone())
@@ -500,7 +530,7 @@ pub fn build_version(
     if !dry_run {
         if force_update {
             if let Some(ref p) = prev {
-                let old_dir = base_dir.join(source).join(&p.version);
+                let old_dir = base_dir.join(&source_dir).join(&p.version);
                 if old_dir.exists() && !version_dir.exists() {
                     info!("Renaming {} → {}", old_dir.display(), version_dir.display());
                     std::fs::create_dir_all(version_dir.parent().unwrap())?;
@@ -670,9 +700,16 @@ pub fn build_version(
         let check_roms = compute_game_roms(&expected_roms, ge.copied(), &all_games, db, latest.id)?;
 
         // Try to find matching ROM in import folder
-        if let Some(src_path) = index.find_match(game_name, &check_roms) {
+        let plat_str = platform.map(|s| s.as_str());
+        if let Some(src_path) = index.find_match(game_name, plat_str, &check_roms) {
             if verbose { eprintln!("  {game_name}: added (copying from {})", src_path.display()); }
             if !dry_run {
+                if !src_path.exists() {
+                    info!("  {game_name}: source {} missing, skipping", src_path.display());
+                    let (reason, rom_details) = index.explain_missing(game_name, &check_roms);
+                    missing.push(MissingGame { name: game_name.clone(), reason, rom_details, sampleof: None, sample_details: vec![] });
+                    continue;
+                }
                 info!("  Copying {} → {}", src_path.display(), dest.display());
                 std::fs::copy(&src_path, &dest)?;
 
@@ -689,7 +726,7 @@ pub fn build_version(
                 }
             }
             added += 1;
-        } else if let Some(src_path) = index.find_by_content(game_name, &check_roms) {
+        } else if let Some(src_path) = index.find_by_content(game_name, plat_str, &check_roms) {
             // Found by content hash (not by name) — rename already done by find_by_content
             if verbose { eprintln!("  {game_name}: matched by content hash (renamed from {})", src_path.display()); }
             if !dry_run {
@@ -802,6 +839,7 @@ pub fn build_version(
             if dest_existed.contains(sample_name.as_str()) {
                 samples_existed += 1;
             } else if let Some(src) = prior_samples.get(sample_name.as_str()) {
+                if let Some(parent) = dst.parent() { std::fs::create_dir_all(parent)?; }
                 std::fs::copy(src, &dst)?;
                 samples_reused += 1;
             } else if let Some(import_path) = index.name_to_path.get(sample_name.as_str()) {
@@ -824,6 +862,7 @@ pub fn build_version(
                         continue;
                     }
                 }
+                if let Some(parent) = dst.parent() { std::fs::create_dir_all(parent)?; }
                 std::fs::copy(import_path, &dst)?;
                 samples_added += 1;
             } else {
@@ -891,7 +930,7 @@ pub fn build_version(
         // ── Phase 7: Replace old version (update mode) ──
         if force_update {
             if let Some(ref p) = prev {
-                info!("Removing old version: {} {}", source, p.version);
+                info!("Removing old version: {} {}", source_dir, p.version);
                 db.delete_version(p.id)?;
             }
         }
@@ -912,7 +951,8 @@ pub fn build_version(
                 info!("  {}: no own ROMs to check, removing from missing", old_mg.name);
                 continue;
             }
-            if index.find_match(&old_mg.name, &check).is_some() {
+            let plat = ge.map(|g| g.platform.as_str()).filter(|p| !p.is_empty());
+            if index.find_match(&old_mg.name, plat, &check).is_some() {
                 info!("  {}: no longer missing (matched by re-evaluation)", old_mg.name);
                 continue;
             }
@@ -1090,8 +1130,11 @@ fn write_progress(path: &Path, progress: &BuildProgress) -> Result<()> {
 }
 
 fn write_status(path: &Path, status: &BuildStatus) -> Result<()> {
-    let json = serde_json::to_string_pretty(status)
-        .map_err(|e| Error::Parse(format!("Failed to serialize build status: {}", e)))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string(status)
+        .map_err(|e| Error::Parse(format!("Failed to serialize status: {}", e)))?;
     std::fs::write(path, json)?;
     Ok(())
 }
@@ -1212,7 +1255,7 @@ fn move_to_deleted(
     // If destination already exists, try with source+version
     if dest.exists() {
         let v = &version.version;
-        dest = deleted_dir.join(format!("{}_{}_v{}.{}", stem, version.source, v, ext));
+        dest = deleted_dir.join(format!("{}_{}_v{}.{}", stem, version.collection_id, v, ext));
     }
 
     info!("  Moving to deleted: {} → {}", src.display(), dest.display());
@@ -1682,7 +1725,7 @@ mod tests {
             driver_emulation: None,
             roms: Vec::new(),
         };
-        let gid = db.insert_game(&parsed).unwrap();
+        let gid = db.insert_game(0, &parsed).unwrap();
         db.insert_rom_set(gid, vid, None).unwrap();
         gid
     }
@@ -1875,7 +1918,7 @@ mod tests {
 
         let sha1 = content_sha1(content);
         let db = make_db();
-        let vid = db.import_version("test", "v1.0", None).unwrap();
+        let vid = db.import_version(Some(0), "test", "v1.0", None).unwrap();
         let gid = add_game(&db, vid, "game1");
         add_rom(&db, gid, vid, "rom.bin", &sha1);
 
@@ -1933,7 +1976,7 @@ mod tests {
 
         // Create DB, import version 0.1
         let db = make_db();
-        let vid1 = db.import_version("test", "0.1", None).unwrap();
+        let vid1 = db.import_version(Some(0), "test", "0.1", None).unwrap();
 
         for (_i, name) in game_names.iter().enumerate() {
             let gid = add_game(&db, vid1, name);
@@ -1982,7 +2025,7 @@ mod tests {
         assert_eq!(result2.missing, 0);
 
         // ── Prepare v0.2: modify 30 games, add 10 new ones ──
-        let vid2 = db.import_version("test", "0.2", None).unwrap();
+        let vid2 = db.import_version(Some(0), "test", "0.2", None).unwrap();
         let mut v2_sha1_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         let mut v2_crc_map: std::collections::HashMap<String, Vec<(String, String)>> = std::collections::HashMap::new();
 

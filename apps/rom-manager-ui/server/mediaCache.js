@@ -97,15 +97,21 @@ function extFromContentType(contentType) {
 }
 
 export async function getMedia(url, gameName, mediaType) {
+  // Direct mount-prefix match: resolve the full relative path from the URL
   for (const source of CACHE_SOURCES) {
     if (url.startsWith(source.mountPrefix)) {
-      const localPath = await findLocalFile(source.cacheDir, gameName, mediaType);
-      if (localPath) return readCached(localPath);
+      const relativePath = url.slice(source.mountPrefix.length);
+      const filePath = path.join(source.cacheDir, relativePath);
+      try {
+        await fsp.access(filePath);
+        return readCached(filePath);
+      } catch {}
     }
   }
 
   for (const source of CACHE_SOURCES) {
     if (typeof url === 'string' && url.includes(source.hostPattern)) {
+      // Try cache with flat structure (legacy files)
       const cached = await findLocalFile(source.cacheDir, gameName, mediaType);
       if (cached) {
         const relPath = path.relative(source.cacheDir, cached);
@@ -113,10 +119,40 @@ export async function getMedia(url, gameName, mediaType) {
         return { ...localData, localUrl: source.mountPrefix + relPath };
       }
 
+      // For libretro-thumbnails, also try structured path from URL
+      if (source.name === 'libretro-thumbnails') {
+        try {
+          const parsed = new URL(url);
+          const urlPath = parsed.pathname.replace(/^\//, '');
+          const structuredPath = path.join(source.cacheDir, urlPath);
+          await fsp.access(structuredPath);
+          const data = await readCached(structuredPath);
+          return { ...data, localUrl: source.mountPrefix + urlPath };
+        } catch {}
+      }
+
       const result = await fetchWithTimeout(url, source.timeout);
       if (result) {
         const { buf, contentType } = result;
         const ext = extFromContentType(contentType);
+
+        // For libretro-thumbnails, preserve the full URL path structure
+        if (source.name === 'libretro-thumbnails') {
+          try {
+            const parsed = new URL(url);
+            const urlPath = parsed.pathname.replace(/^\//, '');
+            const cachedPath = path.join(source.cacheDir, urlPath);
+            await fsp.mkdir(path.dirname(cachedPath), { recursive: true });
+            await fsp.writeFile(cachedPath, buf);
+            return {
+              data: buf,
+              mime: MIME_MAP[ext] || contentType || 'application/octet-stream',
+              localUrl: source.mountPrefix + urlPath,
+            };
+          } catch {}
+        }
+
+        // Default flat structure: {cacheDir}/{gameName}/{mediaType}.{ext}
         const gameDir = path.join(source.cacheDir, gameName);
         const cachedPath = path.join(gameDir, mediaType + ext);
         try {

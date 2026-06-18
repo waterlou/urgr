@@ -13,8 +13,9 @@ export class ExportOperation extends Operation {
     this.updateProgress(0, 'Exporting...');
 
     try {
-      const games = all(`SELECT g.*, sv.source, sv.version
+      const games = all(`SELECT g.*, c.dataset_preset as source, sv.version
         FROM games g
+        JOIN collections c ON c.id = g.collection_id
         JOIN game_rom_sets grs ON grs.game_id = g.id
         JOIN set_versions sv ON sv.id = grs.version_id
         WHERE grs.version_id = ?`, [version_id]);

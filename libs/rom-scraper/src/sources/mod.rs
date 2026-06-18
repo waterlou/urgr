@@ -35,6 +35,17 @@ pub trait GameScraper: Send + Sync {
         platform: Option<&str>,
     ) -> Result<Vec<Game>>;
 
+    /// Search by name with optional dataset_preset (e.g. 'fbneo' to disambiguate MAME vs FBNeo folders).
+    /// Default implementation ignores dataset_preset and delegates to search_by_name.
+    async fn search_by_name_with(
+        &self,
+        query: &str,
+        platform: Option<&str>,
+        _dataset_preset: Option<&str>,
+    ) -> Result<Vec<Game>> {
+        self.search_by_name(query, platform).await
+    }
+
     async fn search_by_hash(
         &self,
         hash: &str,
@@ -43,6 +54,16 @@ pub trait GameScraper: Send + Sync {
     ) -> Result<Vec<Game>>;
 
     async fn get_game_detail(&self, game_id: &str) -> Result<Game>;
+
+    /// Get game detail with optional dataset_preset.
+    /// Default implementation ignores dataset_preset and delegates to get_game_detail.
+    async fn get_game_detail_with(
+        &self,
+        game_id: &str,
+        _dataset_preset: Option<&str>,
+    ) -> Result<Game> {
+        self.get_game_detail(game_id).await
+    }
 }
 
 pub struct ScraperRegistry {
@@ -199,6 +220,24 @@ impl ScraperRegistry {
         )))
     }
 
+    pub async fn search_by_name_from_source_with(
+        &self,
+        query: &str,
+        source: &ScrapeSource,
+        platform: Option<&str>,
+        dataset_preset: Option<&str>,
+    ) -> Result<Vec<Game>> {
+        for scraper in &self.scrapers {
+            if &scraper.source_type() != source {
+                continue;
+            }
+            return scraper.search_by_name_with(query, platform, dataset_preset).await;
+        }
+        Err(crate::Error::Config(format!(
+            "Scraper '{}' is not configured", source
+        )))
+    }
+
     pub async fn get_game_detail(
         &self,
         game_id: &str,
@@ -209,6 +248,21 @@ impl ScraperRegistry {
                 continue;
             }
             return scraper.get_game_detail(game_id).await.map(Some);
+        }
+        Ok(None)
+    }
+
+    pub async fn get_game_detail_from_source_with(
+        &self,
+        game_id: &str,
+        source: &ScrapeSource,
+        dataset_preset: Option<&str>,
+    ) -> Result<Option<Game>> {
+        for scraper in &self.scrapers {
+            if &scraper.source_type() != source {
+                continue;
+            }
+            return scraper.get_game_detail_with(game_id, dataset_preset).await.map(Some);
         }
         Ok(None)
     }

@@ -102,9 +102,10 @@ router.get('/api/game-sets/:id/exports', async (req, res) => {
     const gs = get('SELECT * FROM game_sets WHERE id = ?', [req.params.id]);
     if (!gs) return res.status(404).json({ error: 'not found' });
     const games = all(`
-      SELECT g.name, g.description, g.year, g.manufacturer, parent_g.name as cloneof, sv.source, sv.version, grf.size
+      SELECT g.name, g.description, g.year, g.manufacturer, parent_g.name as cloneof, c.dataset_preset as source, sv.version, grf.size
       FROM game_set_games gsg
       JOIN games g ON g.id = gsg.game_id
+      JOIN collections c ON c.id = g.collection_id
       LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
       LEFT JOIN game_rom_sets grs ON grs.game_id = g.id AND grs.id = (SELECT MIN(id) FROM game_rom_sets WHERE game_id = g.id)
       LEFT JOIN set_versions sv ON sv.id = grs.version_id
