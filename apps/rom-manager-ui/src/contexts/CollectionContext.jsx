@@ -43,7 +43,7 @@ export function CollectionProvider({ children }) {
     }
   }, []);
 
-  const loadGames = useCallback(async (view, id, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, romsOnly, versionFilter, collectionSubView, yearFilter, manufacturerFilter) => {
+  const loadGames = useCallback(async (view, id, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, romsOnly, versionFilter, collectionSubView, yearFilter, manufacturerFilter, platformFilter) => {
     setLoading(true);
     setOffset(0);
     try {
@@ -54,6 +54,7 @@ export function CollectionProvider({ children }) {
         roms_only: romsOnly ? 'true' : undefined,
         year: yearFilter || undefined,
         manufacturer: manufacturerFilter || undefined,
+        platform: platformFilter || undefined,
       };
       if (view === 'browse') {
         data = await getGames(common);
@@ -65,7 +66,7 @@ export function CollectionProvider({ children }) {
       }
       if (data) {
         setGames(data.games || []);
-        setActiveMeta(data.collection || data.game_set || null);
+        setActiveMeta(data.collection ? { ...data.collection, platforms: data.platforms } : data.game_set || null);
         setTotalGames(data.total || 0);
         setHasMore((data.games || []).length < (data.total || 0));
       }
@@ -76,7 +77,7 @@ export function CollectionProvider({ children }) {
     }
   }, []);
 
-  const loadMore = useCallback(async (view, id, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, romsOnly, versionFilter, yearFilter, manufacturerFilter) => {
+  const loadMore = useCallback(async (view, id, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, romsOnly, versionFilter, yearFilter, manufacturerFilter, platformFilter) => {
     if (loadingMoreRef.current || !hasMore) return;
     loadingMoreRef.current = true;
     setLoading(true);
@@ -88,6 +89,7 @@ export function CollectionProvider({ children }) {
         roms_only: romsOnly ? 'true' : undefined,
         year: yearFilter || undefined,
         manufacturer: manufacturerFilter || undefined,
+        platform: platformFilter || undefined,
       };
       if (view === 'browse') {
         data = await getGames(common);

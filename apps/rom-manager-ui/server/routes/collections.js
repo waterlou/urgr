@@ -142,7 +142,7 @@ router.get('/api/collections/:id/games', async (req, res) => {
   await dbReady;
   try {
     const { id } = req.params;
-    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, parents_only, favourites_only, roms_only, version_id, year, manufacturer } = req.query;
+    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, parents_only, favourites_only, roms_only, version_id, year, manufacturer, platform } = req.query;
     const collection = get('SELECT * FROM collections WHERE id = ?', [id]);
     if (!collection) return res.status(404).json({ error: 'not found' });
 
@@ -179,6 +179,10 @@ router.get('/api/collections/:id/games', async (req, res) => {
     if (manufacturer) {
       whereExtra += ' AND g.manufacturer = ?';
       extraParams.push(manufacturer);
+    }
+    if (platform) {
+      whereExtra += ' AND g.platform = ?';
+      extraParams.push(platform);
     }
 
     // Always LEFT JOIN game_state for available/favourite/rating data
@@ -224,16 +228,22 @@ router.get('/api/collections/:id/games', async (req, res) => {
 
     if (gameNames.length > 0) {
       const ph = gameNames.map(() => '?').join(',');
-      const mediaRows = all(`SELECT gm.name, gm.covers, gm.screenshots, gm.source FROM game_media gm WHERE gm.name IN (${ph})`, gameNames);
+      const mediaRows = all(`SELECT gm.name, gm.platform, gm.covers, gm.screenshots, gm.source FROM game_media gm WHERE gm.name IN (${ph})`, gameNames);
       const mediaMap = {};
       for (const m of mediaRows) {
         if (enabledSet && !enabledSet.has(m.source || '')) continue;
-        try { mediaMap[m.name] = { covers: JSON.parse(m.covers) || [], screenshots: JSON.parse(m.screenshots) || [] }; } catch {}
+        try {
+          const entry = { covers: JSON.parse(m.covers) || [], screenshots: JSON.parse(m.screenshots) || [] };
+          mediaMap[m.name + '|||' + (m.platform || '')] = entry;
+        } catch {}
       }
       const psDir = path.join(dataDir, 'media', 'progettosnaps');
       games = games.map(g => {
-        let covers = mediaMap[g.name]?.covers || mediaMap[g.cloneof]?.covers || [];
-        let screenshots = mediaMap[g.name]?.screenshots || mediaMap[g.cloneof]?.screenshots || [];
+        const plat = (g.platform || '').trim() || 'arcade';
+        const mediaKey = g.name + '|||' + plat;
+        const cloneofKey = g.cloneof ? g.cloneof + '|||' + plat : null;
+        let covers = mediaMap[mediaKey]?.covers || (cloneofKey ? mediaMap[cloneofKey]?.covers : null) || [];
+        let screenshots = mediaMap[mediaKey]?.screenshots || (cloneofKey ? mediaMap[cloneofKey]?.screenshots : null) || [];
 
         if (!enabledSet || enabledSet.has('progettosnaps')) {
           try {
@@ -252,9 +262,12 @@ router.get('/api/collections/:id/games', async (req, res) => {
       });
     }
 
-    const platforms = all(`SELECT DISTINCT c.dataset_preset as platform FROM set_versions sv
-      JOIN collections c ON c.id = sv.collection_id
-      WHERE sv.id IN (${ph})`, vids).map(p => p.platform);
+    const platforms = all(`
+      SELECT DISTINCT g.platform as platform FROM games g
+      JOIN game_rom_sets grs ON grs.game_id = g.id
+      WHERE grs.version_id IN (${ph}) AND g.platform != '' AND g.platform IS NOT NULL
+      ORDER BY g.platform
+    `, vids).map(p => p.platform);
 
     const collectionVersions = all(`
       SELECT sv.id, c.dataset_preset as source, sv.version, sv.created_at,

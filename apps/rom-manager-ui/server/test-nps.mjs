@@ -97,6 +97,7 @@ describe('NPS import', () => {
       dbPath = join(mkdtempSync(join(os.tmpdir(), 'nps-test-')), 'test.db')
       initDb(dbPath)
       db = getDb()
+      db.run("INSERT INTO collections (name, slug, dataset_preset) VALUES (?, ?, ?)", ['NPS Test', 'nps-test', 'nps'])
     })
 
     after(() => {
@@ -113,7 +114,7 @@ describe('NPS import', () => {
     })
 
     it('imports games from mock PSV TSV', async () => {
-      db.run('INSERT INTO set_versions (source, version) VALUES (?, ?)', ['NPS', 'PSV'])
+      db.run('INSERT INTO set_versions (collection_id, version) VALUES (?, ?)', [1, 'PSV'])
       const idResult = db.exec('SELECT last_insert_rowid() as id')
       const versionId = idResult[0]?.values[0]?.[0]
       assert.ok(versionId)
@@ -140,7 +141,7 @@ describe('NPS import', () => {
         return { ok: true, text: async () => '' }
       }
 
-      const result = await importNps('PSV', versionId)
+      const result = await importNps('PSV', versionId, 1)
 
       // 2 game names, 6 ROM files (US+EU for Ninja, JP+US+EU+ASIA for P4G)
       assert.equal(result.gamesImported, 2, 'should create 2 games')
@@ -198,7 +199,7 @@ describe('NPS import', () => {
       assert.equal(excluded[0]?.values?.length || 0, 0, 'MISSING/Themes/Demos not imported')
 
       // Verify re-import skips existing
-      const result2 = await importNps('PSV', versionId)
+      const result2 = await importNps('PSV', versionId, 1)
       assert.equal(result2.gamesImported, 0, 're-import should skip all')
       assert.equal(result2.romsImported, 0, 're-import should skip all ROMs')
 
@@ -220,11 +221,11 @@ describe('NPS import', () => {
         return { ok: true, text: async () => '' }
       }
 
-      db.run('INSERT INTO set_versions (source, version) VALUES (?, ?)', ['NPS', 'TEST'])
+      db.run('INSERT INTO set_versions (collection_id, version) VALUES (?, ?)', [1, 'TEST'])
       const idResult = db.exec('SELECT last_insert_rowid() as id')
       const versionId = idResult[0]?.values[0]?.[0]
 
-      const result = await importNps('PSV', versionId)
+      const result = await importNps('PSV', versionId, 1)
       // Multi-region "US, EU" splits into 2 variants, but they're the same PKG filename
       // so only 1 ROM file with dedup
       assert.equal(result.gamesImported, 1, '1 game row')

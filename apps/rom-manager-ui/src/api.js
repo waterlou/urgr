@@ -44,7 +44,7 @@ export function updateScrapePriority(id, enabledSources) {
   return fetchWithBody(`/collections/${id}`, 'PUT', { scrape_source_priority: JSON.stringify(enabledSources) });
 }
 export function deleteCollection(id) { return fetchWithBody(`/collections/${id}`, 'DELETE'); }
-export function getCollectionGames(id, { limit, offset, sort, order, q, parents_only, favourites_only, roms_only, version_id, year, manufacturer } = {}) {
+export function getCollectionGames(id, { limit, offset, sort, order, q, parents_only, favourites_only, roms_only, version_id, year, manufacturer, platform } = {}) {
   const p = new URLSearchParams();
   if (limit) p.set('limit', limit);
   if (offset) p.set('offset', offset);
@@ -57,6 +57,7 @@ export function getCollectionGames(id, { limit, offset, sort, order, q, parents_
   if (version_id) p.set('version_id', version_id);
   if (year) p.set('year', year);
   if (manufacturer) p.set('manufacturer', manufacturer);
+  if (platform) p.set('platform', platform);
   return fetchJson(`/collections/${id}/games${p.toString() ? '?' + p.toString() : ''}`);
 }
 
@@ -270,7 +271,6 @@ export function cancelJob(jobId) {
 // ==============================
 export function getSettings() { return fetchJson('/settings'); }
 export function saveSettings(data) { return fetchWithBody('/settings', 'PUT', data); }
-export function repairDatabase() { return fetchWithBody('/settings/repair-db', 'POST', {}); }
 
 // ==============================
 // Filesystem

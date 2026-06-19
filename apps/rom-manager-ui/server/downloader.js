@@ -86,8 +86,8 @@ export async function processNext() {
     broadcastQueue()
 
     const col = get(`SELECT c.folder, c.slug FROM collections c
-      JOIN set_versions sv2 ON sv2.id = cv.version_id
-      WHERE cv.version_id = ? LIMIT 1`, [item.version_id])
+      JOIN set_versions sv ON sv.id = ?
+      WHERE c.id = sv.collection_id LIMIT 1`, [item.version_id])
     const colFolder = col?.folder || col?.slug || String(item.version_id)
     const game = get('SELECT platform FROM games WHERE id = ?', [item.game_id])
     const platform = game?.platform || 'Games'

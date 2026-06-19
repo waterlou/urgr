@@ -1169,12 +1169,12 @@ router.post('/api/versions/import-nps', async (req, res) => {
     if (!NPS_PLATFORM_MAP[platform]) return res.status(400).json({ error: `Invalid platform: ${platform}. Valid: ${NPS_PLATFORMS.join(', ')}` });
 
     const db = getDb();
-    db.run('INSERT INTO set_versions (source, version) VALUES (?, ?)', ['NPS', platform]);
+    db.run('INSERT INTO set_versions (collection_id, version) VALUES (?, ?)', [collection_id, platform]);
     const idResult = db.exec('SELECT last_insert_rowid() as id');
     const versionId = idResult[0]?.values[0]?.[0];
     if (!versionId) return res.status(500).json({ error: 'Failed to create version' });
 
-    const result = await importNps(platform, versionId);
+    const result = await importNps(platform, versionId, collection_id);
 
     res.json({ ok: true, version_id: versionId, ...result });
   } catch (e) { res.status(500).json({ error: e.message }); }

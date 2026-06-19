@@ -72,7 +72,7 @@ fn cmd_summary(db: Database, _db_path: String) -> ExitCode {
         println!();
         println!("Available versions (use `db-cli versions <db>` for details):");
         for v in &versions {
-            println!("  [{}] {} {}", v.id, v.source, v.version);
+            println!("  [{}] col:{} {}", v.id, v.collection_id, v.version);
         }
     }
     ExitCode::SUCCESS
@@ -82,7 +82,7 @@ fn cmd_versions(db: Database, _db_path: String) -> ExitCode {
     let all_args: Vec<String> = std::env::args().collect();
     let source_filter: Option<String> = all_args
         .iter()
-        .position(|a| a == "--source")
+        .position(|a| a == "--collection-id")
         .and_then(|p| all_args.get(p + 1).cloned());
 
     let versions = match db.list_versions() {
@@ -92,21 +92,21 @@ fn cmd_versions(db: Database, _db_path: String) -> ExitCode {
 
     let filtered: Vec<_> = versions
         .into_iter()
-        .filter(|v| source_filter.as_ref().map_or(true, |s| v.source == *s))
+        .filter(|v| source_filter.as_ref().map_or(true, |s| v.collection_id.to_string() == *s))
         .collect();
 
     if filtered.is_empty() {
         println!("No versions found{}.",
-            source_filter.map_or(String::new(), |s| format!(" for source '{}'", s)));
+            source_filter.map_or(String::new(), |s| format!(" for collection_id '{}'", s)));
         return ExitCode::SUCCESS;
     }
 
-    println!("ID   Source        Version        Games   ROMs   Directory");
+    println!("ID   ColID  Version        Games   ROMs   Directory");
     println!("{}", "─".repeat(72));
     for v in &filtered {
         let dir = v.dir.as_deref().unwrap_or("-");
-        println!("{:<4} {:<13} {:<14} {:>6} {:>6} {}",
-            v.id, v.source, v.version, v.total_games, v.total_roms, dir);
+        println!("{:<4} {:<6} {:<14} {:>6} {:>6} {}",
+            v.id, v.collection_id, v.version, v.total_games, v.total_roms, dir);
     }
     ExitCode::SUCCESS
 }

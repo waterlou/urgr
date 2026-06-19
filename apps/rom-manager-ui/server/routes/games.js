@@ -39,7 +39,7 @@ function attachMedia(games) {
   if (!games || games.length === 0) return games;
   const names = [...new Set(games.flatMap(g => [g.name, g.cloneof].filter(Boolean)))];
   const ph = names.map(() => '?').join(',');
-  const mediaRows = all(`SELECT gm.name, gm.covers, gm.screenshots, gm.fanarts, gm.videos FROM game_media gm WHERE gm.name IN (${ph})`, names);
+  const mediaRows = all(`SELECT gm.name, gm.platform, gm.covers, gm.screenshots, gm.fanarts, gm.videos FROM game_media gm WHERE gm.name IN (${ph})`, names);
   const mediaMap = {};
   for (const m of mediaRows) {
     let covers = []; let screenshots = []; let fanarts = []; let videos = [];
@@ -47,12 +47,13 @@ function attachMedia(games) {
     try { screenshots = JSON.parse(m.screenshots) || []; } catch {}
     try { fanarts = JSON.parse(m.fanarts) || []; } catch {}
     try { videos = JSON.parse(m.videos) || []; } catch {}
-    mediaMap[m.name] = { covers, screenshots, fanarts, videos };
+    mediaMap[m.name + '|||' + (m.platform || '')] = { covers, screenshots, fanarts, videos };
   }
   const psDir = path.join(dataDir, 'media', 'progettosnaps');
 
   return games.map(g => {
     let covers, screenshots;
+    const plat = (g.platform || '').trim() || 'arcade';
 
     // Prefer progettosnaps pre-downloaded files over scraped URLs
     try {
@@ -65,15 +66,17 @@ function attachMedia(games) {
         screenshots = [`/media/progettosnaps/snap/${g.name}.png`];
       }
     } catch {}
-    if (!covers) covers = mediaMap[g.name]?.covers || mediaMap[g.cloneof]?.covers || [];
-    if (!screenshots) screenshots = mediaMap[g.name]?.screenshots || mediaMap[g.cloneof]?.screenshots || [];
+    const mediaKey = g.name + '|||' + plat;
+    const cloneofKey = g.cloneof ? g.cloneof + '|||' + plat : null;
+    if (!covers) covers = mediaMap[mediaKey]?.covers || (cloneofKey ? mediaMap[cloneofKey]?.covers : null) || [];
+    if (!screenshots) screenshots = mediaMap[mediaKey]?.screenshots || (cloneofKey ? mediaMap[cloneofKey]?.screenshots : null) || [];
 
     return {
       ...g,
       covers,
       screenshots,
-      fanarts: mediaMap[g.name]?.fanarts || mediaMap[g.cloneof]?.fanarts || [],
-      videos: mediaMap[g.name]?.videos || mediaMap[g.cloneof]?.videos || [],
+      fanarts: mediaMap[mediaKey]?.fanarts || (cloneofKey ? mediaMap[cloneofKey]?.fanarts : null) || [],
+      videos: mediaMap[mediaKey]?.videos || (cloneofKey ? mediaMap[cloneofKey]?.videos : null) || [],
     };
   });
 }
@@ -1122,8 +1125,7 @@ async function serveGameMedia(req, res, mediaType, dbField, opts = {}) {
     const canonical = canonicalName(game, scrapeMode);
     const mediaPlat = (game.platform || '').trim() || 'arcade';
 
-  const enabledSet = getEnabledSourceSet(game.collection_id);
-  console.log('[scrape-debug] game.collection_id=' + game.collection_id + ', enabledSet=' + (enabledSet ? JSON.stringify([...enabledSet]) : 'null'));
+    const enabledSet = getEnabledSourceSet(game.collection_id);
 
     // Prefer progettosnaps pre-downloaded media (only if enabled)
     if (!enabledSet || enabledSet.has('progettosnaps')) {

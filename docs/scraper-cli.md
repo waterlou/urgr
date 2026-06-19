@@ -212,7 +212,7 @@ Each collection has a `scrape_source_priority` field (JSON array of source names
 
 Controls two things:
 1. **Which sources are used during scraping** — `scrapeSingleGame()` currently tries ArcadeDB first for arcade games, then searches across all configured sources. (Respecting the priority order during scraping is a future enhancement.)
-2. **Which media is displayed** — The `getEnabledSourceSet(versionId)` helper reads the priority and filters media at display time in all serving paths:
+2. **Which media is displayed** — The `getEnabledSourceSet(collectionId)` helper reads the priority and filters media at display time in all serving paths:
    - Collection game listing (`GET /api/collections/:id/games`)
    - Game detail (`GET /api/games/:id`)
    - Individual media (`GET /api/games/:id/media`, `GET /api/games/:id/cover`)

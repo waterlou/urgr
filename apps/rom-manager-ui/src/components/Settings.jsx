@@ -7,7 +7,6 @@ import {
 import {
   getSettings, saveSettings, testIgdbConnection, testTgdbConnection,
   downloadProgettoSnaps, createOperation, cancelOperation, subscribeOperationsSSE,
-  repairDatabase,
 } from '../api.js';
 import { useUI } from '../contexts/UIContext.jsx';
 
@@ -21,8 +20,6 @@ export default function Settings() {
   const [testResults, setTestResults] = useState({});
   const [psOp, setPsOp] = useState(null);
   const [psStatus, setPsStatus] = useState(null);
-  const [repairRunning, setRepairRunning] = useState(false);
-  const [repairResult, setRepairResult] = useState(null);
 
   useEffect(() => {
     getSettings().then(setValues).catch(() => {});
@@ -197,40 +194,6 @@ export default function Settings() {
                     }
                   }}>
                   {psStatus === 'running' ? 'Downloading...' : 'Download ProgettoSnaps Images'}
-                </Button>
-
-                <Divider sx={{ my: 3 }} />
-
-                <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>Database Repair</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Fix orphaned versions not linked to collections, infer missing source info for
-                  media entries, and report games with no ROM data.
-                </Typography>
-
-                {repairResult && (
-                  <List dense sx={{ mb: 2 }}>
-                    {repairResult.map((r, i) => (
-                      <ListItem key={i}>
-                        <ListItemText
-                          primary={r.details}
-                          secondary={r.names ? r.names.join(', ') : null}
-                        />
-                      </ListItem>
-                    ))}
-                  </List>
-                )}
-
-                <Button variant="contained" disabled={repairRunning}
-                  onClick={async () => {
-                    setRepairRunning(true); setRepairResult(null);
-                    try {
-                      const res = await repairDatabase();
-                      setRepairResult(res.results || []);
-                    } catch (e) {
-                      setRepairResult([{ details: 'Error: ' + e.message }]);
-                    } finally { setRepairRunning(false); }
-                  }}>
-                  {repairRunning ? <CircularProgress size={16} /> : 'Run Database Repair'}
                 </Button>
               </Box>
             )}

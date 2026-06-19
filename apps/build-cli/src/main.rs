@@ -153,10 +153,10 @@ fn print_usage() {
     eprintln!("  diff <version-id-a> <version-id-b>");
     eprintln!("  fixdat <version-id-a> <version-id-b> --output <file>");
     eprintln!("  export <version-id> <output-dir> --format split|merged|non-merged [--input-dir <dir>] [--progress]");
-    eprintln!("  build <source> <import-dir> [--update] [--dry-run] [--version-id <id>] [--base-dir <dir>] [--collection-dir <dir>] [--progress] [--verbose]");
+        eprintln!("  build <import-dir> --collection-id <id> [--update] [--dry-run] [--version-id <id>] [--base-dir <dir>] [--collection-dir <dir>] [--progress] [--verbose]");
     eprintln!();
-    eprintln!("  Build automatically detects the latest version for <source> from the");
-    eprintln!("  database. Use --update to upgrade in-place (renames old folder, deletes");
+        eprintln!("  Build uses the collection_id to find the latest version from the");
+        eprintln!("  database. Use --update to upgrade in-place (renames old folder, deletes");
     eprintln!("  old version from DB). Default mode creates a delta folder for each version.");
     eprintln!();
     eprintln!("Global flags:");

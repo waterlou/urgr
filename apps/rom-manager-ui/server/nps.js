@@ -68,7 +68,7 @@ async function fetchTsv(url) {
   return await resp.text();
 }
 
-export async function importNps(platform, versionId) {
+export async function importNps(platform, versionId, collectionId) {
   const db = getDb();
   const info = NPS_PLATFORM_MAP[platform];
   if (!info) throw new Error(`Unknown NPS platform: ${platform}`);
@@ -140,9 +140,9 @@ export async function importNps(platform, versionId) {
     if (!parentVariant) parentVariant = g.variants.find(v => v.region === 'JP');
     if (!parentVariant) parentVariant = g.variants[0];
 
-    // Insert or update the game (unique by name)
-    run('INSERT INTO games (name, description, platform, title_id, content_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, platform = excluded.platform, title_id = excluded.title_id, content_id = excluded.content_id',
-      [parentName, g.originalName, info.folder, parentVariant.titleId, parentVariant.contentId]);
+    // Insert or update the game (unique by collection_id, name, platform)
+    run('INSERT INTO games (collection_id, name, description, platform, title_id, content_id) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(collection_id, name, platform) DO UPDATE SET description = excluded.description, platform = excluded.platform, title_id = excluded.title_id, content_id = excluded.content_id',
+      [collectionId, parentName, g.originalName, info.folder, parentVariant.titleId, parentVariant.contentId]);
 
     const gameRow = get('SELECT id FROM games WHERE name = ?', [parentName]);
     if (!gameRow) continue;

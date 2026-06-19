@@ -1918,7 +1918,7 @@ mod tests {
 
         let sha1 = content_sha1(content);
         let db = make_db();
-        let vid = db.import_version(Some(0), "test", "v1.0", None).unwrap();
+        let vid = db.import_version(Some(0), "v1.0", None).unwrap();
         let gid = add_game(&db, vid, "game1");
         add_rom(&db, gid, vid, "rom.bin", &sha1);
 
@@ -1926,7 +1926,7 @@ mod tests {
         let progress = |_: &BuildProgress| {};
 
         let result = build_version(
-            &db, "test", &import_dir, &root, Some(root),
+            &db, 0, &import_dir, &root, Some(root),
             false, true, Some(vid), &progress, &cancelled, false,
         ).expect("build_version should succeed");
 
@@ -1976,7 +1976,7 @@ mod tests {
 
         // Create DB, import version 0.1
         let db = make_db();
-        let vid1 = db.import_version(Some(0), "test", "0.1", None).unwrap();
+        let vid1 = db.import_version(Some(0), "0.1", None).unwrap();
 
         for (_i, name) in game_names.iter().enumerate() {
             let gid = add_game(&db, vid1, name);
@@ -1997,7 +1997,7 @@ mod tests {
 
         // ── Build v0.1: all 100 should be added ──
         let result = build_version(
-            &db, "test", &import_dir, root, Some(root),
+            &db, 0, &import_dir, root, Some(root),
             false, false, Some(vid1), &progress, &cancelled, false,
         ).expect("build_version v0.1 should succeed");
 
@@ -2016,7 +2016,7 @@ mod tests {
 
         // ── Build v0.1 again: all 100 should now be "existed" ──
         let result2 = build_version(
-            &db, "test", &import_dir, root, Some(root),
+            &db, 0, &import_dir, root, Some(root),
             false, false, Some(vid1), &progress, &cancelled, false,
         ).expect("build_version v0.1 second run should succeed");
 
@@ -2025,7 +2025,7 @@ mod tests {
         assert_eq!(result2.missing, 0);
 
         // ── Prepare v0.2: modify 30 games, add 10 new ones ──
-        let vid2 = db.import_version(Some(0), "test", "0.2", None).unwrap();
+        let vid2 = db.import_version(Some(0), "0.2", None).unwrap();
         let mut v2_sha1_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         let mut v2_crc_map: std::collections::HashMap<String, Vec<(String, String)>> = std::collections::HashMap::new();
 
@@ -2104,7 +2104,7 @@ mod tests {
 
         // ── Build v0.2: 40 added (30 modified + 10 new), 70 reused from v0.1 ──
         let result3 = build_version(
-            &db, "test", &import_dir, root, Some(root),
+            &db, 0, &import_dir, root, Some(root),
             false, false, Some(vid2), &progress, &cancelled, false,
         ).expect("build_version v0.2 should succeed");
 
@@ -2121,7 +2121,7 @@ mod tests {
         // In delta mode, reused games stay in prior version dir. Only added games
         // are in v0.2/roms/. So exists should equal the number of added games.
         let result4 = build_version(
-            &db, "test", &import_dir, root, Some(root),
+            &db, 0, &import_dir, root, Some(root),
             false, false, Some(vid2), &progress, &cancelled, false,
         ).expect("build_version v0.2 second run should succeed");
 

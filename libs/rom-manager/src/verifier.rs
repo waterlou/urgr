@@ -119,7 +119,7 @@ mod tests {
             driver_emulation: None,
             roms: Vec::new(),
         };
-        let gid = db.insert_game(&parsed).unwrap();
+        let gid = db.insert_game(0, &parsed).unwrap();
         db.insert_rom_set(gid, vid, None).unwrap();
         gid
     }
@@ -138,7 +138,7 @@ mod tests {
     fn test_verify_all_present() {
         let tmp = tempfile::TempDir::new().unwrap();
         let db = make_db();
-        let vid = db.import_version(Some(0), "mame", "0.261", Some("/roms/v261")).unwrap();
+        let vid = db.import_version(Some(0), "0.261", Some("/roms/v261")).unwrap();
         add_game(&db, vid, "game_a");
         add_game(&db, vid, "game_b");
 
@@ -155,7 +155,7 @@ mod tests {
     fn test_verify_missing_games() {
         let tmp = tempfile::TempDir::new().unwrap();
         let db = make_db();
-        let vid = db.import_version(Some(0), "mame", "0.261", Some("/roms/v261")).unwrap();
+        let vid = db.import_version(Some(0), "0.261", Some("/roms/v261")).unwrap();
         add_game(&db, vid, "present");
         add_game(&db, vid, "missing");
 
@@ -170,7 +170,7 @@ mod tests {
     fn test_verify_unscanned_game() {
         let tmp = tempfile::TempDir::new().unwrap();
         let db = make_db();
-        let vid = db.import_version(Some(0), "mame", "0.261", Some("/roms/v261")).unwrap();
+        let vid = db.import_version(Some(0), "0.261", Some("/roms/v261")).unwrap();
         add_game(&db, vid, "game");
 
         let result = verify_version(&db, vid, tmp.path(), &[]).unwrap();
@@ -187,8 +187,8 @@ mod tests {
         create_zip(&v250_dir, "game");
 
         let db = make_db();
-        let new_id = db.import_version(Some(0), "mame", "0.261", Some("/roms/v261")).unwrap();
-        let old_id = db.import_version(Some(0), "mame", "0.250", Some("/roms/v250")).unwrap();
+        let new_id = db.import_version(Some(0), "0.261", Some("/roms/v261")).unwrap();
+        let old_id = db.import_version(Some(0), "0.250", Some("/roms/v250")).unwrap();
         add_game(&db, new_id, "game");
 
         let result = verify_version(
@@ -207,7 +207,7 @@ mod tests {
     fn test_verify_mixed_results() {
         let tmp = tempfile::TempDir::new().unwrap();
         let db = make_db();
-        let vid = db.import_version(Some(0), "mame", "0.261", Some("/roms/v261")).unwrap();
+        let vid = db.import_version(Some(0), "0.261", Some("/roms/v261")).unwrap();
         add_game(&db, vid, "p");
         add_game(&db, vid, "m");
 

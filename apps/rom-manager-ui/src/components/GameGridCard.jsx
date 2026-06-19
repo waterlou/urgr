@@ -6,8 +6,7 @@ import {
 import {
   Star, StarBorder, MoreVert, PlaylistAdd, PlaylistRemove,
 } from '@mui/icons-material';
-import { updateGameRating } from '../api.js';
-import { coverUrl } from '../api.js';
+import { updateGameRating, coverUrl, screenshotUrl } from '../api.js';
 
 function hashColor(name) {
   let hash = 0;
@@ -34,14 +33,17 @@ export default function GameGridCard({ game, onSelect, onRating, onFavourite, on
     onFavourite?.(game.id, { favourite: newFav });
   }
 
-  const showImage = listImageMode !== 'none' && !imgFailed && (game.covers?.[0] || game.cover_url);
+  const showImage = listImageMode !== 'none' && !imgFailed && (
+    listImageMode === 'screenshot' ? game.screenshots?.[0] : (game.covers?.[0] || game.cover_url)
+  );
 
   return (
     <Card sx={{ position: 'relative', cursor: 'pointer', '&:hover': { boxShadow: 6 } }} onClick={() => onSelect?.(game)}>
       <Box sx={{ position: 'relative', aspectRatio: '1/1', bgcolor: '#111', overflow: 'hidden' }}>
         {showImage ? (
           listImageMode === 'screenshot' && game.screenshots?.[0] ? (
-            <CardMedia component="img" image={game.screenshots[0]} sx={{ width: '100%', height: '100%', objectFit: 'contain', p: 0.5 }} />
+            <CardMedia component="img" image={screenshotUrl(game.id)} sx={{ width: '100%', height: '100%', objectFit: 'contain', p: 0.5 }}
+              onError={() => setImgFailed(true)} />
           ) : (
             <CardMedia component="img" image={coverUrl(game.id)} sx={{ width: '100%', height: '100%', objectFit: 'contain', p: 0.5 }}
               onError={() => setImgFailed(true)}

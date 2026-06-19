@@ -55,7 +55,7 @@ router.get('/api/game-sets/:id/games', async (req, res) => {
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
     const total = get('SELECT COUNT(*) as c FROM game_set_games WHERE game_set_id = ?', [id]).c;
     const games = all(`
-      SELECT g.*, parent_g.name as cloneof, sv_min.source, sv_min.version, COALESCE(gs.rating, 0) as rating, COALESCE(gs.favourite, 0) as favourite, COALESCE(gs.play_count, 0) as play_count
+      SELECT g.*, parent_g.name as cloneof, sv_min.version, COALESCE(gs.rating, 0) as rating, COALESCE(gs.favourite, 0) as favourite, COALESCE(gs.play_count, 0) as play_count
       FROM game_set_games gsg
       JOIN games g ON g.id = gsg.game_id
       LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id

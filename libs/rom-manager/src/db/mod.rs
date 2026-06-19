@@ -729,30 +729,30 @@ mod tests {
     #[test]
     fn test_import_version() {
         let db = make_db();
-        let id = db.import_version("mame", "0.261", Some("/roms/mame261")).unwrap();
+        let id = db.import_version(Some(0), "0.261", Some("/roms/mame261")).unwrap();
         assert!(id > 0);
 
         let versions = db.list_versions().unwrap();
         assert_eq!(versions.len(), 1);
-        assert_eq!(versions[0].source, "mame");
+        assert_eq!(versions[0].collection_id, 0);
         assert_eq!(versions[0].version, "0.261");
     }
 
     #[test]
     fn test_import_duplicate_version() {
         let db = make_db();
-        let id1 = db.import_version("mame", "0.261", None).unwrap();
-        let id2 = db.import_version("mame", "0.261", None).unwrap();
+        let id1 = db.import_version(Some(0), "0.261", None).unwrap();
+        let id2 = db.import_version(Some(0), "0.261", None).unwrap();
         assert_eq!(id1, id2);
     }
 
     #[test]
     fn test_get_version() {
         let db = make_db();
-        let id = db.import_version("mame", "0.261", None).unwrap();
+        let id = db.import_version(Some(0), "0.261", None).unwrap();
         let v = db.get_version(id).unwrap().expect("version exists");
         assert_eq!(v.version, "0.261");
-        assert_eq!(v.source, "mame");
+        assert_eq!(v.collection_id, 0);
     }
 
     #[test]
@@ -765,7 +765,7 @@ mod tests {
     #[test]
     fn test_delete_version() {
         let db = make_db();
-        let id = db.import_version("mame", "0.261", None).unwrap();
+        let id = db.import_version(Some(0), "0.261", None).unwrap();
         db.delete_version(id).unwrap();
         let v = db.get_version(id).unwrap();
         assert!(v.is_none());
@@ -774,8 +774,8 @@ mod tests {
     #[test]
     fn test_insert_game() {
         let db = make_db();
-        let vid = db.import_version("mame", "0.261", None).unwrap();
-        let gid = db.insert_game(&sample_game("sf2")).unwrap();
+        let vid = db.import_version(Some(0), "0.261", None).unwrap();
+        let gid = db.insert_game(0, &sample_game("sf2")).unwrap();
         assert!(gid > 0);
         db.insert_rom_set(gid, vid, None).unwrap();
 
@@ -787,10 +787,10 @@ mod tests {
     #[test]
     fn test_insert_games_batch() {
         let db = make_db();
-        let vid = db.import_version("mame", "0.261", None).unwrap();
+        let vid = db.import_version(Some(0), "0.261", None).unwrap();
         let games = vec![sample_game("game_a"), sample_game("game_b")];
         for game in &games {
-            let gid = db.insert_game(game).unwrap();
+            let gid = db.insert_game(0, game).unwrap();
             db.insert_rom_set(gid, vid, None).unwrap();
         }
         assert_eq!(db.get_game_count(vid).unwrap(), 2);
@@ -799,8 +799,8 @@ mod tests {
     #[test]
     fn test_rom_crud() {
         let db = make_db();
-        let vid = db.import_version("mame", "0.261", None).unwrap();
-        let gid = db.insert_game(&sample_game("sf2")).unwrap();
+        let vid = db.import_version(Some(0), "0.261", None).unwrap();
+        let gid = db.insert_game(0, &sample_game("sf2")).unwrap();
         let rsid = db.insert_rom_set(gid, vid, None).unwrap();
 
         let roms = vec![sample_rom("ic1", &"A".repeat(40))];
@@ -818,9 +818,9 @@ mod tests {
     #[test]
     fn test_get_game_count() {
         let db = make_db();
-        let vid = db.import_version("mame", "0.261", None).unwrap();
-        let g1 = db.insert_game(&sample_game("sf2")).unwrap();
-        let g2 = db.insert_game(&sample_game("sf3")).unwrap();
+        let vid = db.import_version(Some(0), "0.261", None).unwrap();
+        let g1 = db.insert_game(0, &sample_game("sf2")).unwrap();
+        let g2 = db.insert_game(0, &sample_game("sf3")).unwrap();
         db.insert_rom_set(g1, vid, None).unwrap();
         db.insert_rom_set(g2, vid, None).unwrap();
         let count = db.get_game_count(vid).unwrap();
@@ -830,16 +830,16 @@ mod tests {
     #[test]
     fn test_diff_versions_add_remove() {
         let db = make_db();
-        let va = db.import_version("mame", "0.250", None).unwrap();
-        let vb = db.import_version("mame", "0.261", None).unwrap();
+        let va = db.import_version(Some(0), "0.250", None).unwrap();
+        let vb = db.import_version(Some(0), "0.261", None).unwrap();
 
-        let g_shared = db.insert_game(&sample_game("shared")).unwrap();
-        let g_removed = db.insert_game(&sample_game("removed")).unwrap();
+        let g_shared = db.insert_game(0, &sample_game("shared")).unwrap();
+        let g_removed = db.insert_game(0, &sample_game("removed")).unwrap();
         db.insert_rom_set(g_shared, va, None).unwrap();
         db.insert_rom_set(g_removed, va, None).unwrap();
 
-        let g_shared2 = db.insert_game(&sample_game("shared")).unwrap();
-        let g_added = db.insert_game(&sample_game("added")).unwrap();
+        let g_shared2 = db.insert_game(0, &sample_game("shared")).unwrap();
+        let g_added = db.insert_game(0, &sample_game("added")).unwrap();
         db.insert_rom_set(g_shared2, vb, None).unwrap();
         db.insert_rom_set(g_added, vb, None).unwrap();
 
@@ -852,11 +852,11 @@ mod tests {
     #[test]
     fn test_diff_versions_changed_roms() {
         let db = make_db();
-        let va = db.import_version("mame", "0.250", None).unwrap();
-        let vb = db.import_version("mame", "0.261", None).unwrap();
+        let va = db.import_version(Some(0), "0.250", None).unwrap();
+        let vb = db.import_version(Some(0), "0.261", None).unwrap();
 
-        let ga_id = db.insert_game(&sample_game("sf2")).unwrap();
-        let gb_id = db.insert_game(&sample_game("sf2")).unwrap();
+        let ga_id = db.insert_game(0, &sample_game("sf2")).unwrap();
+        let gb_id = db.insert_game(0, &sample_game("sf2")).unwrap();
 
         let rsa = db.insert_rom_set(ga_id, va, None).unwrap();
         let rsb = db.insert_rom_set(gb_id, vb, None).unwrap();
@@ -896,11 +896,11 @@ mod tests {
     fn test_db_perf_bulk_insert() {
         use std::time::Instant;
         let db = make_db();
-        let vid = db.import_version(Some(0), "perf", "v1", None).unwrap();
+        let vid = db.import_version(Some(0), "v1", None).unwrap();
         let games = bulk_games("g", 5_000);
         let start = Instant::now();
         for game in &games {
-            let gid = db.insert_game(game).unwrap();
+            let gid = db.insert_game(0, game).unwrap();
             db.insert_rom_set(gid, vid, None).unwrap();
         }
         let elapsed = start.elapsed();
@@ -916,11 +916,11 @@ mod tests {
     fn test_db_perf_bulk_insert_with_roms() {
         use std::time::Instant;
         let db = make_db();
-        let vid = db.import_version(Some(0), "perf", "v2", None).unwrap();
+        let vid = db.import_version(Some(0), "v2", None).unwrap();
         let games = bulk_games("gr", 2_000);
 
         for game in &games {
-            db.insert_game(game).unwrap();
+            db.insert_game(0, game).unwrap();
         }
 
         let start = Instant::now();
@@ -955,20 +955,20 @@ mod tests {
     fn test_db_perf_diff_large() {
         use std::time::Instant;
         let db = make_db();
-        let va = db.import_version(Some(0), "perf", "A", None).unwrap();
-        let vb = db.import_version(Some(0), "perf", "B", None).unwrap();
+        let va = db.import_version(Some(0), "A", None).unwrap();
+        let vb = db.import_version(Some(0), "B", None).unwrap();
 
         let games_a = bulk_games("a", 3_000);
 
         for game in &games_a {
-            let gid = db.insert_game(game).unwrap();
+            let gid = db.insert_game(0, game).unwrap();
             db.insert_rom_set(gid, va, None).unwrap();
         }
 
         // same names, different instances
         let games_b = bulk_games("a", 3_000);
         for game in &games_b {
-            let gid = db.insert_game(game).unwrap();
+            let gid = db.insert_game(0, game).unwrap();
             db.insert_rom_set(gid, vb, None).unwrap();
         }
 
@@ -987,7 +987,7 @@ mod tests {
         // same batch, the parent lookup would fail because the parent wasn't yet in the DB.
         // Now resolve_parents uses an in-memory map of just-inserted names.
         let db = make_db();
-        let vid = db.import_version("mame", "0.261", None).unwrap();
+        let vid = db.import_version(Some(0), "0.261", None).unwrap();
 
         // Insert clone FIRST, parent SECOND — alphabetical order would be parent-first,
         // but DATs aren't guaranteed to be sorted that way.
@@ -1025,7 +1025,7 @@ mod tests {
         };
 
         for g in &[&clone, &parent] {
-            let gid = db.insert_game(g).unwrap();
+            let gid = db.insert_game(0, g).unwrap();
             db.insert_rom_set(gid, vid, None).unwrap();
         }
 
@@ -1052,12 +1052,12 @@ mod tests {
         // If the parent isn't in the same batch nor in the DB, the child should
         // simply not get a parent_game_id (no error).
         let db = make_db();
-        let vid = db.import_version("mame", "0.261", None).unwrap();
+        let vid = db.import_version(Some(0), "0.261", None).unwrap();
         let child = sample_game("lonely_clone");
         let mut child = child;
         child.cloneof = Some("nonexistent_parent".to_string());
 
-        let gid = db.insert_game(&child).unwrap();
+        let gid = db.insert_game(0, &child).unwrap();
         db.insert_rom_set(gid, vid, None).unwrap();
 
         // Should not error
@@ -1079,18 +1079,18 @@ mod tests {
     #[test]
     fn test_insert_returns_correct_id_on_upsert() {
         let db = make_db();
-        let va = db.import_version("mame", "0.261", None).unwrap();
-        let vb = db.import_version("mame", "0.262", None).unwrap();
+        let va = db.import_version(Some(0), "0.261", None).unwrap();
+        let vb = db.import_version(Some(0), "0.262", None).unwrap();
 
         // Insert game + rom_set for version a
-        let gid_a = db.insert_game(&sample_game("shared")).unwrap();
+        let gid_a = db.insert_game(0, &sample_game("shared")).unwrap();
         let rs_a = db.insert_rom_set(gid_a, va, None).unwrap();
-        let gid_b = db.insert_game(&sample_game("other")).unwrap();
+        let gid_b = db.insert_game(0, &sample_game("other")).unwrap();
         let rs_b = db.insert_rom_set(gid_b, vb, None).unwrap();
 
         // Now the critical scenario: re-insert "shared" (UPSERT path) and verify
         // the returned id is the ORIGINAL gid_a, not the most recent rowid.
-        let gid_a_again = db.insert_game(&sample_game("shared")).unwrap();
+        let gid_a_again = db.insert_game(0, &sample_game("shared")).unwrap();
         assert_eq!(gid_a_again, gid_a,
             "insert_game on conflict must return the original rowid, not last_insert_rowid()");
 
@@ -1103,7 +1103,7 @@ mod tests {
         db.insert_rom_files_batch(rs_b, &[sample_rom("ic1", &"A".repeat(40))]).unwrap();
 
         // Re-insert "shared" again — should STILL return gid_a.
-        let gid_a_third = db.insert_game(&sample_game("shared")).unwrap();
+        let gid_a_third = db.insert_game(0, &sample_game("shared")).unwrap();
         assert_eq!(gid_a_third, gid_a,
             "insert_game must return original rowid even after other table inserts");
     }
