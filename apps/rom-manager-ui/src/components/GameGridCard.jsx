@@ -1,12 +1,12 @@
 import { useState, useMemo } from 'react';
 import {
-  Card, CardMedia, CardContent, Typography, Box, IconButton, Rating, Chip,
+  Card, CardMedia, Typography, Box, IconButton, Chip,
   Menu, MenuItem, ListItemIcon, ListItemText,
 } from '@mui/material';
 import {
   Star, StarBorder, MoreVert, PlaylistAdd, PlaylistRemove,
 } from '@mui/icons-material';
-import { updateGameRating, coverUrl, screenshotUrl } from '../api.js';
+import { coverUrl, screenshotUrl } from '../api.js';
 
 function hashColor(name) {
   let hash = 0;
@@ -15,16 +15,11 @@ function hashColor(name) {
   return `hsl(${hue}, 45%, 30%)`;
 }
 
-export default function GameGridCard({ game, onSelect, onRating, onFavourite, onAddToGameSet, onRemoveFromGameSet, gameSets, gameSetId, listImageMode, onPlay }) {
+export default function GameGridCard({ game, onSelect, onFavourite, onAddToGameSet, onRemoveFromGameSet, gameSets, gameSetId, listImageMode, onPlay }) {
   const [anchorEl, setAnchorEl] = useState(null);
   const [imgFailed, setImgFailed] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const bg = useMemo(() => hashColor(game.name), [game.name]);
-
-  async function handleRating(e, v) {
-    const newRating = v === null ? 0 : Math.round(v * 2);
-    await updateGameRating(game.id, { rating: newRating, favourite: game.favourite }).catch(() => {});
-    onRating?.(game.id, { rating: newRating });
-  }
 
   function handleFav(e) {
     e.stopPropagation();
@@ -38,7 +33,7 @@ export default function GameGridCard({ game, onSelect, onRating, onFavourite, on
   );
 
   return (
-    <Card sx={{ position: 'relative', cursor: 'pointer', '&:hover': { boxShadow: 6 } }} onClick={() => onSelect?.(game)}>
+    <Card onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} sx={{ position: 'relative', cursor: 'pointer', '&:hover': { boxShadow: 6 } }} onClick={() => onSelect?.(game)}>
       <Box sx={{ position: 'relative', aspectRatio: '1/1', bgcolor: '#111', overflow: 'hidden' }}>
         {showImage ? (
           listImageMode === 'screenshot' && game.screenshots?.[0] ? (
@@ -89,17 +84,18 @@ export default function GameGridCard({ game, onSelect, onRating, onFavourite, on
         {game.source && (
           <Chip label={game.source} size="small" sx={{ position: 'absolute', bottom: 4, left: 4, height: 18, fontSize: 10 }} />
         )}
-      </Box>
-      <CardContent sx={{ p: 1, '&:last-child': { pb: 1 } }}>
-        <Typography variant="body2" noWrap fontWeight={600}>{game.name}</Typography>
-        <Typography variant="caption" color="text.secondary" noWrap>
-          {game.platform} {game.year && `· ${game.year}`}
-        </Typography>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <Rating value={(game.rating || 0) / 2} precision={0.5} size="small" onChange={handleRating}
-            onClick={(e) => e.stopPropagation()} />
+        <Box sx={{
+          position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 1,
+          background: 'linear-gradient(transparent, rgba(0,0,0,0.85) 40%)',
+          p: 1, transition: 'opacity 0.2s',
+          opacity: hovered ? 0 : 1,
+        }}>
+          <Typography variant="body2" noWrap fontWeight={600}>{game.name}</Typography>
+          <Typography variant="caption" color="grey.400" noWrap>
+            {game.description || game.platform}
+          </Typography>
         </Box>
-      </CardContent>
+      </Box>
     </Card>
   );
 }
