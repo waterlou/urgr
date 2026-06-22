@@ -5,6 +5,9 @@ pub struct Config {
     pub screenscraper: Option<ScreenScraperConfig>,
     pub igdb: Option<IgdbConfig>,
     pub thegamesdb: Option<TheGamesDbConfig>,
+    pub mobygames: Option<MobyGamesConfig>,
+    pub retroachievements: Option<RetroAchievementsConfig>,
+    pub steamgriddb: Option<SteamGridDBConfig>,
     pub cache_dir: Option<std::path::PathBuf>,
     pub source_priority: Vec<SourceEntry>,
 }
@@ -31,6 +34,21 @@ pub struct TheGamesDbConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct MobyGamesConfig {
+    pub api_key: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RetroAchievementsConfig {
+    pub api_key: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SteamGridDBConfig {
+    pub api_key: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct SourceEntry {
     pub source: ScrapeSource,
     pub priority: u32,
@@ -44,13 +62,19 @@ impl Default for Config {
             thegamesdb: Some(TheGamesDbConfig {
                 api_key: DEFAULT_TGDB_API_KEY.to_string(),
             }),
+            mobygames: None,
+            retroachievements: None,
+            steamgriddb: None,
             cache_dir: None,
             source_priority: vec![
                 SourceEntry { source: ScrapeSource::ArcadeDb, priority: 80 },
                 SourceEntry { source: ScrapeSource::TheGamesDb, priority: 100 },
+                SourceEntry { source: ScrapeSource::MobyGames, priority: 180 },
                 SourceEntry { source: ScrapeSource::ScreenScraper, priority: 200 },
                 SourceEntry { source: ScrapeSource::Igdb, priority: 300 },
+                SourceEntry { source: ScrapeSource::RetroAchievements, priority: 330 },
                 SourceEntry { source: ScrapeSource::LibretroThumbnails, priority: 350 },
+                SourceEntry { source: ScrapeSource::SteamGridDB, priority: 380 },
                 SourceEntry { source: ScrapeSource::NoIntroPictures, priority: 400 },
                 SourceEntry { source: ScrapeSource::Vgmuseum, priority: 450 },
                 SourceEntry { source: ScrapeSource::SonyStore, priority: 500 },
@@ -96,6 +120,27 @@ impl Config {
 
     pub fn with_thegamesdb(mut self, api_key: &str) -> Self {
         self.thegamesdb = Some(TheGamesDbConfig {
+            api_key: api_key.to_string(),
+        });
+        self
+    }
+
+    pub fn with_mobygames(mut self, api_key: &str) -> Self {
+        self.mobygames = Some(MobyGamesConfig {
+            api_key: api_key.to_string(),
+        });
+        self
+    }
+
+    pub fn with_retroachievements(mut self, api_key: &str) -> Self {
+        self.retroachievements = Some(RetroAchievementsConfig {
+            api_key: api_key.to_string(),
+        });
+        self
+    }
+
+    pub fn with_steamgriddb(mut self, api_key: &str) -> Self {
+        self.steamgriddb = Some(SteamGridDBConfig {
             api_key: api_key.to_string(),
         });
         self

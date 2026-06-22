@@ -134,7 +134,8 @@ fn print_usage() {
     eprintln!("  test                           Test connectivity to all configured providers");
     eprintln!();
     eprintln!("OPTIONS:");
-    eprintln!("  --source <s>       Provider: thegamesdb (default), screenscraper, igdb, arcadedb, libretro-thumbnails");
+    eprintln!("  --source <s>       Provider: thegamesdb (default), screenscraper, igdb, arcadedb, libretro-thumbnails,");
+    eprintln!("                     no-intro-pictures, sony-store, vgmuseum, mobygames, retroachievements, steamgriddb");
     eprintln!("                     (default: thegamesdb, or SCRAPER_SOURCE env var)");
     eprintln!("  --platform <p>     Platform filter (e.g., nes, snes, arcade)");
     eprintln!();
@@ -155,6 +156,15 @@ fn print_usage() {
     eprintln!();
     eprintln!("  TheGamesDB:");
     eprintln!("    TGDB_API_KEY         API key from thegamesdb.net (optional - built-in key active by default)");
+    eprintln!();
+    eprintln!("  MobyGames:");
+    eprintln!("    MOBYGAMES_API_KEY    API key from mobygames.com (free tier, 1 req/s)");
+    eprintln!();
+    eprintln!("  RetroAchievements:");
+    eprintln!("    RETROACHIEVEMENTS_API_KEY    API key from retroachievements.org (4 req/s)");
+    eprintln!();
+    eprintln!("  SteamGridDB:");
+    eprintln!("    STEAMGRIDDB_API_KEY  API key from steamgriddb.com (no rate limit documented)");
     eprintln!();
     eprintln!("EXAMPLES:");
     eprintln!("  scraper-cli search \"Super Mario\"");
@@ -619,6 +629,24 @@ fn build_config() -> Config {
         }
     }
 
+    if let Ok(key) = std::env::var("MOBYGAMES_API_KEY") {
+        if !key.is_empty() {
+            config = config.with_mobygames(&key);
+        }
+    }
+
+    if let Ok(key) = std::env::var("RETROACHIEVEMENTS_API_KEY") {
+        if !key.is_empty() {
+            config = config.with_retroachievements(&key);
+        }
+    }
+
+    if let Ok(key) = std::env::var("STEAMGRIDDB_API_KEY") {
+        if !key.is_empty() {
+            config = config.with_steamgriddb(&key);
+        }
+    }
+
     config
 }
 
@@ -634,8 +662,11 @@ fn parse_source(args: &[String]) -> Option<rom_scraper::ScrapeSource> {
             "no-intro-pictures" => Some(rom_scraper::ScrapeSource::NoIntroPictures),
             "sony-store" => Some(rom_scraper::ScrapeSource::SonyStore),
             "vgmuseum" => Some(rom_scraper::ScrapeSource::Vgmuseum),
+            "mobygames" => Some(rom_scraper::ScrapeSource::MobyGames),
+            "retroachievements" => Some(rom_scraper::ScrapeSource::RetroAchievements),
+            "steamgriddb" => Some(rom_scraper::ScrapeSource::SteamGridDB),
             _ => {
-                eprintln!("Unknown source '{}'. Valid: screenscraper, igdb, thegamesdb, arcadedb, libretro-thumbnails, no-intro-pictures, sony-store, vgmuseum", val);
+                eprintln!("Unknown source '{}'. Valid: screenscraper, igdb, thegamesdb, arcadedb, libretro-thumbnails, no-intro-pictures, sony-store, vgmuseum, mobygames, retroachievements, steamgriddb", val);
                 None
             }
         };
@@ -651,6 +682,9 @@ fn parse_source(args: &[String]) -> Option<rom_scraper::ScrapeSource> {
             "no-intro-pictures" => Some(rom_scraper::ScrapeSource::NoIntroPictures),
             "sony-store" => Some(rom_scraper::ScrapeSource::SonyStore),
             "vgmuseum" => Some(rom_scraper::ScrapeSource::Vgmuseum),
+            "mobygames" => Some(rom_scraper::ScrapeSource::MobyGames),
+            "retroachievements" => Some(rom_scraper::ScrapeSource::RetroAchievements),
+            "steamgriddb" => Some(rom_scraper::ScrapeSource::SteamGridDB),
             _ => None,
         };
     }

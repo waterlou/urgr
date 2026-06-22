@@ -1,9 +1,12 @@
 mod arcadedb;
 mod igdb;
 mod libretro_thumbnails;
+mod mobygames;
 mod no_intro_pictures;
+mod retroachievements;
 mod screenscraper;
 mod sony_store;
+mod steamgriddb;
 mod thegamesdb;
 mod vgmuseum;
 
@@ -17,9 +20,12 @@ use crate::models::{Game, HashType, ScrapeSource};
 pub use arcadedb::ArcadeDb;
 pub use igdb::Igdb;
 pub use libretro_thumbnails::LibretroThumbnails;
+pub use mobygames::MobyGames;
 pub use no_intro_pictures::NoIntroPictures;
+pub use retroachievements::RetroAchievements;
 pub use screenscraper::ScreenScraper;
 pub use sony_store::SonyStore;
+pub use steamgriddb::SteamGridDB;
 pub use thegamesdb::TheGamesDb;
 pub use vgmuseum::Vgmuseum;
 
@@ -82,6 +88,15 @@ impl ScraperRegistry {
         }
         if config.thegamesdb.is_some() {
             scrapers.push(Box::new(TheGamesDb::new(config)));
+        }
+        if config.mobygames.is_some() {
+            scrapers.push(Box::new(MobyGames::new(config)));
+        }
+        if config.retroachievements.is_some() {
+            scrapers.push(Box::new(RetroAchievements::new(config)));
+        }
+        if config.steamgriddb.is_some() {
+            scrapers.push(Box::new(SteamGridDB::new(config)));
         }
         // ArcadeDb is always available (no auth needed)
         scrapers.push(Box::new(ArcadeDb::new(config)));

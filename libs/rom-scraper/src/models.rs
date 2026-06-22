@@ -90,6 +90,9 @@ pub enum ScrapeSource {
     Vgmuseum,
     ArcadeDb,
     LibretroThumbnails,
+    MobyGames,
+    RetroAchievements,
+    SteamGridDB,
 }
 
 impl std::fmt::Display for ScrapeSource {
@@ -104,6 +107,9 @@ impl std::fmt::Display for ScrapeSource {
             Self::Vgmuseum => write!(f, "vgmuseum"),
             Self::ArcadeDb => write!(f, "arcadedb"),
             Self::LibretroThumbnails => write!(f, "libretro-thumbnails"),
+            Self::MobyGames => write!(f, "mobygames"),
+            Self::RetroAchievements => write!(f, "retroachievements"),
+            Self::SteamGridDB => write!(f, "steamgriddb"),
         }
     }
 }

@@ -42,6 +42,27 @@ const CACHE_SOURCES = [
     mountPrefix: '/media/igdb/',
     timeout: 10000,
   },
+  {
+    name: 'mobygames',
+    hostPattern: 'mobygames.com',
+    cacheDir: path.join(dataDir, 'media', 'mobygames'),
+    mountPrefix: '/media/mobygames/',
+    timeout: 15000,
+  },
+  {
+    name: 'retroachievements',
+    hostPattern: 'retroachievements.org',
+    cacheDir: path.join(dataDir, 'media', 'retroachievements'),
+    mountPrefix: '/media/retroachievements/',
+    timeout: 15000,
+  },
+  {
+    name: 'steamgriddb',
+    hostPattern: 'steamgriddb.com',
+    cacheDir: path.join(dataDir, 'media', 'steamgriddb'),
+    mountPrefix: '/media/steamgriddb/',
+    timeout: 10000,
+  },
 ];
 
 async function findLocalFile(cacheDir, gameName, mediaType) {

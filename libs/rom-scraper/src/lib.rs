@@ -4,6 +4,7 @@ pub mod error;
 pub mod hasher;
 pub mod matcher;
 pub mod models;
+pub mod rate_limiter;
 pub mod sources;
 
 pub use client::HttpClient;
@@ -14,4 +15,5 @@ pub use matcher::{match_rom_by_hashes, match_rom_by_path, parse_filename, Filena
 pub use models::{
     Game, HashType, Media, MediaItem, MediaType, Platform, RomInfo, ScrapeSource,
 };
-pub use sources::{ArcadeDb, GameScraper, Igdb, LibretroThumbnails, ScraperRegistry, ScreenScraper, TheGamesDb};
+pub use rate_limiter::RateLimiter;
+pub use sources::{ArcadeDb, GameScraper, Igdb, LibretroThumbnails, MobyGames, RetroAchievements, ScraperRegistry, ScreenScraper, SteamGridDB, TheGamesDb};

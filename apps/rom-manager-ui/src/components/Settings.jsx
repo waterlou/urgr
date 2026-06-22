@@ -91,6 +91,9 @@ export default function Settings() {
                   <Tab label="ScreenScraper" />
                   <Tab label="IGDB" />
                   <Tab label="TheGamesDB" />
+                  <Tab label="MobyGames" />
+                  <Tab label="RA" />
+                  <Tab label="SteamGridDB" />
                 </Tabs>
 
                 {subTab === 0 && (
@@ -127,14 +130,44 @@ export default function Settings() {
                   </Box>
                 )}
 
+                {subTab === 3 && (
+                  <Box>
+                    <TextField label="API Key" fullWidth value={values.MOBYGAMES_API_KEY || ''} onChange={e => set('MOBYGAMES_API_KEY', e.target.value)} sx={{ mb: 2 }} />
+                    <Typography variant="caption" color="text.secondary">
+                      Get a free API key at mobygames.com/info/api (1 request/second limit)
+                    </Typography>
+                  </Box>
+                )}
+
+                {subTab === 4 && (
+                  <Box>
+                    <TextField label="API Key" fullWidth value={values.RETROACHIEVEMENTS_API_KEY || ''} onChange={e => set('RETROACHIEVEMENTS_API_KEY', e.target.value)} sx={{ mb: 2 }} />
+                    <Typography variant="caption" color="text.secondary">
+                      Get an API key at retroachievements.org (4 requests/second limit)
+                    </Typography>
+                  </Box>
+                )}
+
+                {subTab === 5 && (
+                  <Box>
+                    <TextField label="API Key" fullWidth value={values.STEAMGRIDDB_API_KEY || ''} onChange={e => set('STEAMGRIDDB_API_KEY', e.target.value)} sx={{ mb: 2 }} />
+                    <Typography variant="caption" color="text.secondary">
+                      Get an API key at steamgriddb.com
+                    </Typography>
+                  </Box>
+                )}
+
                 <Divider sx={{ my: 2 }} />
                 <FormControl fullWidth>
                   <InputLabel>Default Scraper</InputLabel>
                   <Select value={values.SCRAPER_SOURCE || ''} onChange={e => set('SCRAPER_SOURCE', e.target.value)} label="Default Scraper">
-                    <MenuItem value="">All</MenuItem>
-                    <MenuItem value="thegamesdb">TheGamesDB</MenuItem>
-                    <MenuItem value="screenscraper">ScreenScraper</MenuItem>
-                    <MenuItem value="igdb">IGDB</MenuItem>
+                  <MenuItem value="">All</MenuItem>
+                  <MenuItem value="thegamesdb">TheGamesDB</MenuItem>
+                  <MenuItem value="screenscraper">ScreenScraper</MenuItem>
+                  <MenuItem value="igdb">IGDB</MenuItem>
+                  <MenuItem value="mobygames">MobyGames</MenuItem>
+                  <MenuItem value="retroachievements">RetroAchievements</MenuItem>
+                  <MenuItem value="steamgriddb">SteamGridDB</MenuItem>
                   </Select>
                 </FormControl>
               </>
