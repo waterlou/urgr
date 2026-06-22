@@ -196,7 +196,7 @@ Searches and scrapes game metadata from online providers. Outputs JSON to stdout
 | `detail <game-id> --source <s>` | Full game details by provider ID |
 | `test` | Check connectivity to all configured providers |
 
-**Providers:** TheGamesDB (default, built-in key), IGDB (needs Client ID/Secret), ScreenScraper (untested, needs dev account), VGMuseum (always-on, screenshots only), NoIntroPictures (always-on, box art), SonyStore (always-on, PSN screenshots).
+**Providers:** TheGamesDB (default, built-in key), IGDB (needs Client ID/Secret), ScreenScraper (untested, needs dev account), MobyGames (needs API key, 1 req/s, full metadata), RetroAchievements (needs API key, 4 req/s, hash matching + metadata), SteamGridDB (needs API key, artwork only), VGMuseum (always-on, screenshots only), NoIntroPictures (always-on, box art), SonyStore (always-on, PSN screenshots), ArcadeDB (always-on, MAME arcade), LibretroThumbnails (always-on, libretro covers).
 
 **scrape flow:** hash → filename parse → hash search → name search → `get_game_detail` enrichment.
 

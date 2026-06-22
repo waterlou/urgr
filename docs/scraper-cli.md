@@ -16,7 +16,7 @@ Retro game metadata scraper supporting multiple providers.
 
 | Flag | Description |
 |------|-------------|
-| `--source <s>` | Provider: `thegamesdb` (default), `screenscraper`, `igdb`, `no-intro-pictures`, `sony-store`, `vgmuseum` |
+| `--source <s>` | Provider: `thegamesdb` (default), `screenscraper`, `igdb`, `arcadedb`, `libretro-thumbnails`, `no-intro-pictures`, `sony-store`, `vgmuseum`, `mobygames`, `retroachievements`, `steamgriddb` |
 | `--platform <p>` | Platform filter (e.g. `nes`, `snes`, `arcade`) |
 
 ## Environment
@@ -33,6 +33,9 @@ Credentials may be set in `.env` (CWD) or `data/.env`. The server **Settings UI*
 | `SS_USERNAME` | ScreenScraper | Optional |
 | `SS_PASSWORD` | ScreenScraper | Optional |
 | `TGDB_API_KEY` | TheGamesDB | No (built-in key active by default) |
+| `MOBYGAMES_API_KEY` | MobyGames | Yes |
+| `RETROACHIEVEMENTS_API_KEY` | RetroAchievements | Yes |
+| `STEAMGRIDDB_API_KEY` | SteamGridDB | Yes |
 
 ## Provider Status
 
@@ -41,9 +44,14 @@ Credentials may be set in `.env` (CWD) or `data/.env`. The server **Settings UI*
 | **TheGamesDB** | ✅ | ✅ | ✅ | ✅ | Built-in API key, zero-config |
 | **IGDB (Twitch)** | ✅ | ✅ | ✅ | ✅ | Needs `IGDB_CLIENT_ID` + `IGDB_CLIENT_SECRET` in `.env` |
 | **ScreenScraper** | ❌ | ❌ | ❌ | ❌ | Not tested — needs `SS_DEVID` + `SS_DEVPASSWORD` |
-| **no-intro-pictures** | ⬜ placeholder | ❌ | ✅ covers/screenshots | ❌ | No auth needed. Fetch box art from GitHub raw URLs by platform + game name. |
-| **sony-store** | ⬜ placeholder | ❌ | ✅ screenshots | ❌ | No auth needed. Fetch screenshots from PlayStation Store API via content_id. |
-| **vgmuseum** | ✅ real search | ❌ | ✅ screenshots | ❌ | No auth needed. ~13,766 games across 50+ retro platforms. Uses browser User-Agent to bypass bot detection. |
+| **ArcadeDB** | ✅ real search | ❌ | ✅ covers/screenshots | ❌ | MAME arcade only. Uses MAME short names. |
+| **LibretroThumbnails** | ✅ real search | ❌ | ✅ covers/screenshots/titles | ❌ | All libretro platforms. Folder structure mirrors libretro slugs. |
+| **MobyGames** | ✅ real search | ❌ | ✅ covers/screenshots/genres | ❌ | 1 req/s rate limit. Needs `MOBYGAMES_API_KEY`. |
+| **RetroAchievements** | ✅ real search | ✅ hash | ✅ publisher/developer/genres | ❌ | 4 req/s. Hash index cached to disk. Needs `RETROACHIEVEMENTS_API_KEY`. |
+| **SteamGridDB** | ✅ real search | ❌ | ✅ covers/logos | ❌ | Artwork only (no text metadata). Filters NSFW/humor/epilepsy. Needs `STEAMGRIDDB_API_KEY`. |
+| **NoIntroPictures** | ⬜ placeholder | ❌ | ✅ covers/screenshots | ❌ | No auth needed. Fetch box art from GitHub raw URLs by platform + game name. |
+| **SonyStore** | ⬜ placeholder | ❌ | ✅ screenshots | ❌ | No auth needed. Fetch screenshots from PlayStation Store API via content_id. |
+| **VGMuseum** | ✅ real search | ❌ | ✅ screenshots | ❌ | No auth needed. ~13,766 games across 50+ retro platforms. Uses browser User-Agent to bypass bot detection. |
 
 ## scrape Flow
 
@@ -55,20 +63,20 @@ Credentials may be set in `.env` (CWD) or `data/.env`. The server **Settings UI*
 
 ## scrape Output Fields
 
-| Field | TGDB | IGDB |
-|-------|------|------|
-| `id` | ✅ Numeric ID | ✅ Numeric ID |
-| `title` | ✅ | ✅ |
-| `platform` | ✅ Platform name (e.g. "Super Nintendo (SNES)") | ✅ Platform name (e.g. "Game Boy Advance") |
-| `platform_short` | ✅ Alias (e.g. "super-nintendo-snes") | ✅ Abbreviation (e.g. "GBA"), empty if same as name |
-| `description` | ⬜ Empty (API limitation) | ✅ Full description |
-| `publisher` | ⬜ None (API limitation) | ✅ |
-| `developer` | ⬜ None (API limitation) | ✅ |
-| `genres` | ⬜ Empty (API limitation) | ✅ |
-| `rating` | ✅ | ✅ |
-| `covers` | ✅ Box art URLs | ✅ Cover URLs (`https:` prefixed) |
-| `screenshots` | ⬜ None | ✅ Screenshot URLs |
-| `release_date` | ✅ | ✅ |
+| Field | TGDB | IGDB | MobyGames | RAchievements | SteamGridDB |
+|-------|------|------|-----------|---------------|-------------|
+| `id` | ✅ Numeric ID | ✅ Numeric ID | ✅ Numeric ID | ✅ Numeric ID | ✅ Numeric ID |
+| `title` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `platform` | ✅ Platform name (e.g. "Super Nintendo (SNES)") | ✅ Platform name (e.g. "Game Boy Advance") | ✅ Platform name | ✅ Platform name | ⬜ Empty |
+| `platform_short` | ✅ Alias (e.g. "super-nintendo-snes") | ✅ Abbreviation (e.g. "GBA"), empty if same as name | ⬜ Empty | ⬜ Empty | ⬜ Empty |
+| `description` | ⬜ Empty (API limitation) | ✅ Full description | ✅ Full description | ⬜ Empty (API limitation) | ⬜ Empty |
+| `publisher` | ⬜ None (API limitation) | ✅ | ✅ | ✅ | ⬜ Empty |
+| `developer` | ⬜ None (API limitation) | ✅ | ✅ | ✅ | ⬜ Empty |
+| `genres` | ⬜ Empty (API limitation) | ✅ | ✅ | ✅ | ⬜ Empty |
+| `rating` | ✅ | ✅ | ✅ (moby_score) | ✅ | ⬜ Empty |
+| `covers` | ✅ Box art URLs | ✅ Cover URLs (`https:` prefixed) | ✅ Covers | ⬜ None | ✅ Grids/logos |
+| `screenshots` | ⬜ None | ✅ Screenshot URLs | ✅ Screenshots | ⬜ None | ⬜ None |
+| `release_date` | ✅ | ✅ | ✅ | ✅ | ⬜ Empty |
 
 ## Examples
 
@@ -89,6 +97,15 @@ scraper-cli scrape ~/roms/smb.zip --source igdb
 # Get full game detail by provider ID
 scraper-cli detail 1070 --source igdb
 scraper-cli detail 136 --source thegamesdb
+
+# MobyGames: search with description included
+scraper-cli search "Super Mario Bros" --source mobygames
+
+# RetroAchievements: hash-based ROM identification
+scraper-cli scrape ~/roms/smb.zip --source retroachievements
+
+# SteamGridDB: fetch covers/grids (artwork only)
+scraper-cli detail "12345" --source steamgriddb
 
 # Fetch box art from no-intro-pictures (free, no auth)
 scraper-cli detail "nes/1942 (Japan, USA)" --source no-intro-pictures
@@ -126,6 +143,11 @@ JSON object with `results` array:
     {"name": "thegamesdb",       "status": "ok",      "message": "Search returned 20 games"},
     {"name": "screenscraper",    "status": "skipped",  "message": "Not configured (SS_DEVID / SS_DEVPASSWORD)"},
     {"name": "igdb",             "status": "ok",      "message": "Search returned 1 games"},
+    {"name": "arcadedb",         "status": "ok",      "message": "Search returned 15 games"},
+    {"name": "libretro-thumbnails","status": "ok",    "message": "Repo reachable"},
+    {"name": "mobygames",        "status": "skipped", "message": "Not configured (MOBYGAMES_API_KEY)"},
+    {"name": "retroachievements","status": "skipped", "message": "Not configured (RETROACHIEVEMENTS_API_KEY)"},
+    {"name": "steamgriddb",      "status": "skipped", "message": "Not configured (STEAMGRIDDB_API_KEY)"},
     {"name": "no-intro-pictures","status": "ok",      "message": "GitHub raw reachable (HTTP 200)"},
     {"name": "sony-store",       "status": "ok",      "message": "Store reachable (HTTP 200)"},
     {"name": "vgmuseum",         "status": "ok",      "message": "Index page returned 982 game entries"}
@@ -164,6 +186,25 @@ JSON with full game metadata including `synopsis` (truncated to 500 chars).
 - No metadata (descriptions, developer, etc.) — screenshots only
 - HTML-based parsing (no API) — may break if site layout changes
 - Some game pages are missing closing `</a>` tags — parser handles gracefully
+
+### MobyGames
+- 1 request/second rate limit enforced by token-bucket RateLimiter
+- Free API key available at mobygames.com/info/api
+- Description text available directly from search results (no extra detail call needed)
+- Covers are `sample_cover` images (may be lower resolution than dedicated art sources)
+
+### RetroAchievements
+- Returns publisher, developer, genres, and release_date — but **no description/synopsis** (API limitation)
+- Hash lookup covers 42 platforms via per-console-ID JSON cache on disk
+- No synopsis means the server's fallback (IGDB/TheGamesDB) will fill it in
+- Game list fetch for large platforms (Arcade=23 with 10,000+ games) is slow on first run; results are cached as JSON per platform
+- `search_by_name()` does local substring match against cached per-platform game lists — no extra API call
+
+### SteamGridDB
+- **Artwork only** — `description`, `platform`, and all textual fields are empty strings
+- Use as supplement behind richer scrapers (IGDB, TheGamesDB, MobyGames)
+- By default filters out grids tagged NSFW, humor, or epilepsy
+- No rate limit documented; uses Bearer token auth with `STEAMGRIDDB_API_KEY`
 
 ### General
 - Hash-based ROM matching requires actual ROM content — empty/dummy files won't match
@@ -229,6 +270,9 @@ The `game_media` table has a `source TEXT` column (default `''`) that tracks whi
 | `screenscraper` | `scrapeSingleGame()` from `first.source` |
 | `igdb` | `scrapeSingleGame()` from `first.source` |
 | `libretro-thumbnails` | `scrapeSingleGame()` from `first.source` |
+| `mobygames` | `scrapeSingleGame()` from `first.source` |
+| `retroachievements` | `scrapeSingleGame()` from `first.source` |
+| `steamgriddb` | `scrapeSingleGame()` from `first.source` |
 | `no-intro-pictures` | No-Intro fallback in `scrapeSingleGame()` |
 | `sony-store` | NPS fanart fetch in `scrapeSingleGame()` |
 | `progettosnaps` | `serveGameMedia()` when serving pre-downloaded files |
@@ -279,6 +323,9 @@ Cache directories:
 - `data/media/libretro-thumbnails/`
 - `data/media/sony-store/`
 - `data/media/igdb/`
+- `data/media/mobygames/`
+- `data/media/retroachievements/`
+- `data/media/steamgriddb/`
 - `data/media/progettosnaps/`
 
 ## Source Platform Dependencies
@@ -291,6 +338,9 @@ Cache directories:
 | **LibretroThumbnails** | All libretro-supported platforms | Folder structure mirrors libretro platform slugs |
 | **NoIntroPictures** | No-Intro / DAT-O-MATIC collections | Uses No-Intro naming conventions |
 | **VGMuseum** | 50+ retro platforms (NES, SNES, Genesis, etc.) | Mapped explicitly in Rust source |
+| **MobyGames** | All platforms | API-based, platform-agnostic |
+| **RetroAchievements** | 42 mapped platforms (NES, SNES, Genesis, Arcade, etc.) | Per-platform console-ID mapping |
+| **SteamGridDB** | All platforms | API-based, platform-agnostic |
 | **TheGamesDB** | All platforms | API-based, platform-agnostic |
 | **IGDB** | All platforms | API-based, platform-agnostic |
 | **ScreenScraper** | All platforms | API-based, platform-agnostic |

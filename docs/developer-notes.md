@@ -173,3 +173,6 @@ Free, no-auth scraper for NPS collections. Fetches screenshots (hero image + scr
 - **ScreenScraper**: Requires `SS_DEVID` + `SS_DEVPASSWORD` (and optional `SS_USERNAME` + `SS_PASSWORD`) configured in Settings
 - **IGDB**: Requires `IGDB_CLIENT_ID` + `IGDB_CLIENT_SECRET` configured in Settings
 - **TheGamesDb**: Built-in API key, always available
+- **MobyGames**: Requires `MOBYGAMES_API_KEY` configured in Settings. 1 req/s rate limit. Returns description, covers, screenshots, genres.
+- **RetroAchievements**: Requires `RETROACHIEVEMENTS_API_KEY`. 4 req/s rate limit. Hash-based ROM matching across 42 platforms. Returns publisher, developer, genres, release_date — no description.
+- **SteamGridDB**: Requires `STEAMGRIDDB_API_KEY`. Artwork-only (covers/logos). No text metadata. Filters NSFW/humor/epilepsy tagged grids.

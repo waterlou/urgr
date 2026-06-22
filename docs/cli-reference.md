@@ -338,7 +338,7 @@ ia-cli search "MAME 0.287 roms"
 
 | Flag | Description |
 |------|-------------|
-| `--source <s>` | Provider: `thegamesdb` (default), `screenscraper`, `igdb`, `no-intro-pictures`, `sony-store`, `vgmuseum` |
+| `--source <s>` | Provider: `thegamesdb` (default), `screenscraper`, `igdb`, `arcadedb`, `libretro-thumbnails`, `no-intro-pictures`, `sony-store`, `vgmuseum`, `mobygames`, `retroachievements`, `steamgriddb` |
 | `--platform <p>` | Platform filter (e.g., `nes`, `snes`, `arcade`) |
 
 ### Providers
@@ -348,6 +348,11 @@ ia-cli search "MAME 0.287 roms"
 | **TheGamesDB** | ✅ Tested | None (built-in key) | Platform data, covers. No genres/descriptions for most games. |
 | **IGDB (Twitch)** | ✅ Tested | `IGDB_CLIENT_ID` + `IGDB_CLIENT_SECRET` | Full metadata: description, genres, publisher, developer, screenshots. |
 | **ScreenScraper** | ❌ Untested | `SS_DEVID` + `SS_DEVPASSWORD` | Requires dev account. |
+| **ArcadeDB** | ✅ Tested | None | MAME arcade only. Real search. |
+| **LibretroThumbnails** | ✅ Tested | None | Covers/screenshots/titles for all libretro platforms. |
+| **MobyGames** | ✅ Tested | `MOBYGAMES_API_KEY` | Full metadata: description, genres, covers, screenshots. 1 req/s. |
+| **RetroAchievements** | ✅ Tested | `RETROACHIEVEMENTS_API_KEY` | Hash lookups, publisher/developer/genres. No description. 4 req/s. |
+| **SteamGridDB** | ✅ Tested | `STEAMGRIDDB_API_KEY` | Artwork only (covers/logos). No text metadata. |
 | **VGMuseum** | ✅ Tested | None | Screenshots only. ~13,766 games across 50+ retro platforms. Uses browser UA to bypass bot detection. |
 | **NoIntroPictures** | ✅ Tested | None | Box art from GitHub raw URLs. |
 | **SonyStore** | ✅ Tested | None | Screenshots from PlayStation Store API. |
@@ -367,20 +372,20 @@ Credentials via `.env` (CWD) or `data/.env`. See [`docs/scraper-cli.md`](scraper
 
 ### Output fields (`scrape` match)
 
-| Field | TGDB | IGDB |
-|-------|------|------|
-| `id` | ✅ Numeric ID | ✅ Numeric ID |
-| `title` | ✅ | ✅ |
-| `platform` | ✅ Platform name (e.g., "Super Nintendo (SNES)") | ✅ Platform name (e.g., "Game Boy Advance") |
-| `platform_short` | ✅ Alias (e.g., "super-nintendo-snes") | ✅ Abbreviation (e.g., "GBA"), empty if same as name |
-| `description` | ⬜ Empty (API limitation) | ✅ Full description |
-| `publisher` | ⬜ None (API limitation) | ✅ |
-| `developer` | ⬜ None (API limitation) | ✅ |
-| `genres` | ⬜ Empty (API limitation) | ✅ |
-| `rating` | ✅ | ✅ |
-| `covers` | ✅ Box art URLs | ✅ Cover URLs (`https:` prefixed) |
-| `screenshots` | ⬜ None | ✅ Screenshot URLs |
-| `release_date` | ✅ | ✅ |
+| Field | TGDB | IGDB | MobyGames | RAchievements | SteamGridDB |
+|-------|------|------|-----------|---------------|-------------|
+| `id` | ✅ Numeric ID | ✅ Numeric ID | ✅ Numeric ID | ✅ Numeric ID | ✅ Numeric ID |
+| `title` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `platform` | ✅ Platform name (e.g., "Super Nintendo (SNES)") | ✅ Platform name (e.g., "Game Boy Advance") | ✅ Platform name | ✅ Platform name | ⬜ Empty |
+| `platform_short` | ✅ Alias (e.g., "super-nintendo-snes") | ✅ Abbreviation (e.g., "GBA"), empty if same as name | ⬜ Empty | ⬜ Empty | ⬜ Empty |
+| `description` | ⬜ Empty (API limitation) | ✅ Full description | ✅ Full description | ⬜ Empty (API limitation) | ⬜ Empty |
+| `publisher` | ⬜ None (API limitation) | ✅ | ✅ | ✅ | ⬜ Empty |
+| `developer` | ⬜ None (API limitation) | ✅ | ✅ | ✅ | ⬜ Empty |
+| `genres` | ⬜ Empty (API limitation) | ✅ | ✅ | ✅ | ⬜ Empty |
+| `rating` | ✅ | ✅ | ✅ (moby_score) | ✅ | ⬜ Empty |
+| `covers` | ✅ Box art URLs | ✅ Cover URLs (`https:` prefixed) | ✅ Covers | ⬜ None | ✅ Grids/logos |
+| `screenshots` | ⬜ None | ✅ Screenshot URLs | ✅ Screenshots | ⬜ None | ⬜ None |
+| `release_date` | ✅ | ✅ | ✅ | ✅ | ⬜ Empty |
 
 ---
 
