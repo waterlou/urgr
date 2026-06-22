@@ -84,14 +84,22 @@ export default function GameGridCard({ game, onSelect, onFavourite, onAddToGameS
         {game.source && (
           <Chip label={game.source} size="small" sx={{ position: 'absolute', bottom: 4, left: 4, height: 18, fontSize: 10 }} />
         )}
-        <Box sx={{
+        <Box sx={(theme) => ({
           position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 1,
-          background: 'linear-gradient(transparent, rgba(0,0,0,0.85) 40%)',
-          p: 1, transition: 'opacity 0.2s',
+          background: theme.palette.mode === 'dark'
+            ? 'linear-gradient(transparent, rgba(0,0,0,0.85) 30%)'
+            : 'linear-gradient(transparent, rgba(255,255,255,0.85) 30%)',
+          p: 1, pt: 2, transition: 'opacity 0.2s',
           opacity: hovered ? 0 : 1,
-        }}>
-          <Typography variant="body2" noWrap fontWeight={600}>{game.name}</Typography>
-          <Typography variant="caption" color="grey.400" noWrap>
+        })}>
+          <Typography variant="caption" noWrap fontWeight={600} sx={(theme) => ({
+            color: theme.palette.mode === 'light' ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.5)',
+          })}>{game.name}</Typography>
+          <Typography variant="body2" sx={(theme) => ({
+            color: theme.palette.mode === 'light' ? '#000' : '#fff',
+            overflow: 'hidden', textOverflow: 'ellipsis',
+            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+          })}>
             {game.description || game.platform}
           </Typography>
         </Box>
