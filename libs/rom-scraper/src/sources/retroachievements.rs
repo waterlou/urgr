@@ -227,6 +227,7 @@ impl RetroAchievements {
             id: detail.ID.to_string(),
             title: detail.Title,
             alternative_titles: vec![],
+            region_titles: std::collections::HashMap::new(),
             platform: Platform {
                 id: detail.ConsoleName.to_lowercase().replace(' ', "-"),
                 name: detail.ConsoleName.clone(),

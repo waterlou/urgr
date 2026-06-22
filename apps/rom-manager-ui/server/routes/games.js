@@ -16,6 +16,42 @@ import { syncGameAvailability } from '../operations/syncAvailability.js';
 
 const router = Router();
 
+// Load translations for localized game titles
+let translationsData = null;
+let translationsByName = null;
+let translationsByDesc = null;
+
+function loadTranslations() {
+  const p = path.join(dataDir, 'translations.json');
+  try {
+    const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+    translationsData = raw;
+    translationsByName = raw;
+    translationsByDesc = {};
+    for (const [name, entry] of Object.entries(raw)) {
+      if (entry.description) {
+        translationsByDesc[entry.description] = name;
+      }
+    }
+  } catch {
+    translationsData = {};
+    translationsByName = {};
+    translationsByDesc = {};
+  }
+}
+
+function getTranslations(name, description) {
+  let entry = translationsByName?.[name];
+  if (!entry && description) {
+    const n = translationsByDesc?.[description];
+    if (n) entry = translationsByName[n];
+  }
+  return entry?.translations || null;
+}
+
+// Load on startup
+loadTranslations();
+
 function gameRow(row) {
   return {
     id: row.id,
@@ -357,6 +393,7 @@ router.get('/:id', async (req, res) => {
       available: state?.available || 0,
       play_count: state?.play_count || 0,
       clones, parent,
+      translations: getTranslations(game.name, game.description),
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

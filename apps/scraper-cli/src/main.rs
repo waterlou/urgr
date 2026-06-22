@@ -3,6 +3,7 @@ use std::process::ExitCode;
 
 use rom_scraper::{compute_hashes, parse_filename, Config, HttpClient, ScraperRegistry};
 use serde::Serialize;
+use std::collections::HashMap;
 
 #[derive(Serialize)]
 struct HashOutput {
@@ -28,6 +29,7 @@ struct SearchResult {
     platform: String,
     release_date: Option<String>,
     source: String,
+    region_titles: HashMap<String, String>,
 }
 
 #[derive(Serialize)]
@@ -49,6 +51,7 @@ struct ScrapeMatch {
     videos: Vec<String>,
     logos: Vec<String>,
     roms: Vec<RomEntry>,
+    region_titles: HashMap<String, String>,
 }
 
 #[derive(Serialize)]
@@ -69,6 +72,7 @@ struct DetailOutput {
     videos: Vec<String>,
     logos: Vec<String>,
     roms: Vec<RomEntry>,
+    region_titles: HashMap<String, String>,
 }
 
 #[derive(Serialize)]
@@ -110,6 +114,7 @@ fn game_to_match(game: &rom_scraper::Game) -> ScrapeMatch {
             filename: r.filename.clone(),
             crc: r.crc32.clone(),
         }).collect(),
+        region_titles: game.region_titles.clone(),
     }
 }
 
@@ -464,6 +469,7 @@ async fn cmd_search(args: &[String]) -> ExitCode {
                 platform: g.platform.name.clone(),
                 release_date: g.release_date.clone(),
                 source: g.source.to_string(),
+                region_titles: g.region_titles.clone(),
             }).collect();
             print_json(&serde_json::json!({"results": results}));
             ExitCode::SUCCESS
@@ -590,6 +596,7 @@ async fn cmd_detail(args: &[String]) -> ExitCode {
                     filename: r.filename.clone(),
                     crc: r.crc32.clone(),
                 }).collect(),
+                region_titles: game.region_titles.clone(),
             });
             ExitCode::SUCCESS
         }
@@ -710,6 +717,7 @@ mod tests {
             id: id.to_string(),
             title: title.to_string(),
             alternative_titles: Vec::new(),
+            region_titles: HashMap::new(),
             platform: Platform {
                 id: String::new(),
                 name: platform_name.to_string(),
@@ -901,7 +909,9 @@ mod tests {
             screenshots: vec![],
             fanarts: vec![],
             videos: vec![],
+            logos: vec![],
             roms: vec![],
+            region_titles: HashMap::new(),
         };
         let json = serde_json::to_value(&out).unwrap();
         assert_eq!(json["id"], "42");
@@ -918,6 +928,7 @@ mod tests {
             platform: "SNES".into(),
             release_date: Some("1990-11-21".into()),
             source: "thegamesdb".into(),
+            region_titles: HashMap::new(),
         };
         let json = serde_json::to_value(&r).unwrap();
         assert_eq!(json["id"], "7");

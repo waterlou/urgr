@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use async_trait::async_trait;
 use serde_json::Value;
 
@@ -96,12 +97,34 @@ impl ScreenScraper {
             .unwrap_or("Unknown");
 
         let mut alt_titles = Vec::new();
+        let mut region_titles = HashMap::new();
         if let Some(noms) = game_val.get("noms") {
+            // Array format: { "nom": [{"text": "...", "region": "us", "langue": "en"}, ...] }
             if let Some(nom_arr) = noms.get("nom").and_then(|v| v.as_array()) {
                 for n in nom_arr {
-                    if let Some(t) = n.as_str() {
+                    if let Some(text) = n.get("text").and_then(|v| v.as_str()) {
+                        let region = n.get("region").and_then(|v| v.as_str()).unwrap_or("");
+                        if text != title {
+                            alt_titles.push(text.to_string());
+                        }
+                        if !region.is_empty() {
+                            region_titles.entry(region.to_string()).or_insert_with(|| text.to_string());
+                        }
+                    } else if let Some(t) = n.as_str() {
                         if t != title {
                             alt_titles.push(t.to_string());
+                        }
+                    }
+                }
+            }
+            // Flat key format: { "nom_us": "Super Mario Bros.", "nom_jp": "スーパーマリオブラザーズ", ... }
+            if let Some(obj) = noms.as_object() {
+                for (key, val) in obj {
+                    if let Some(region) = key.strip_prefix("nom_") {
+                        if region != "nom" && region != "ss" {
+                            if let Some(text) = val.as_str() {
+                                region_titles.entry(region.to_string()).or_insert_with(|| text.to_string());
+                            }
                         }
                     }
                 }
@@ -172,6 +195,7 @@ impl ScreenScraper {
             id: id.to_string(),
             title: title.to_string(),
             alternative_titles: alt_titles,
+            region_titles,
             platform,
             description,
             publisher,

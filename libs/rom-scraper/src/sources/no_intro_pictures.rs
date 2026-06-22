@@ -96,6 +96,7 @@ impl crate::sources::GameScraper for NoIntroPictures {
             id: format!("{}/{}", platform.unwrap_or("unknown"), query),
             title: query.to_string(),
             alternative_titles: vec![],
+            region_titles: std::collections::HashMap::new(),
             platform: Platform {
                 id: platform.unwrap_or("unknown").to_string(),
                 name: Self::platform_to_folder(platform.unwrap_or("unknown")),
@@ -159,6 +160,7 @@ impl crate::sources::GameScraper for NoIntroPictures {
             id: game_id.to_string(),
             title: game_name.to_string(),
             alternative_titles: vec![],
+            region_titles: std::collections::HashMap::new(),
             platform: Platform {
                 id: platform.to_string(),
                 name: folder.clone(),

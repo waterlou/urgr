@@ -142,6 +142,7 @@ impl crate::sources::GameScraper for LibretroThumbnails {
             id: format!("{}/{}", plat, query),
             title: query.to_string(),
             alternative_titles: vec![],
+            region_titles: std::collections::HashMap::new(),
             platform: Platform {
                 id: plat.to_string(),
                 name: folder.to_string(),
@@ -224,6 +225,7 @@ impl crate::sources::GameScraper for LibretroThumbnails {
             id: game_id.to_string(),
             title: game_name.to_string(),
             alternative_titles: vec![],
+            region_titles: std::collections::HashMap::new(),
             platform: Platform {
                 id: platform.to_string(),
                 name: folder.to_string(),

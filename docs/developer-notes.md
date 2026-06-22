@@ -176,3 +176,18 @@ Free, no-auth scraper for NPS collections. Fetches screenshots (hero image + scr
 - **MobyGames**: Requires `MOBYGAMES_API_KEY` configured in Settings. 1 req/s rate limit. Returns description, covers, screenshots, genres.
 - **RetroAchievements**: Requires `RETROACHIEVEMENTS_API_KEY`. 4 req/s rate limit. Hash-based ROM matching across 42 platforms. Returns publisher, developer, genres, release_date — no description.
 - **SteamGridDB**: Requires `STEAMGRIDDB_API_KEY`. Artwork-only (covers/logos). No text metadata. Filters NSFW/humor/epilepsy tagged grids.
+
+### Translation Builder
+
+`scripts/build-translations.mjs` generates `data/translations.json` — a map of game name → localized titles by region. It reads all games from the SQLite DB, calls `scraper-cli search --source screenscraper` per game, and extracts `region_titles` from the best match.
+
+**Usage:**
+```bash
+export SS_DEVID=your_id
+export SS_DEVPASSWORD=your_password
+node scripts/build-translations.mjs
+```
+
+Requires a ScreenScraper contributed (free) account. Options: `--resume`, `--limit <n>`, `--delay <ms>` (default 1100).
+
+**Integration:** Server loads `data/translations.json` at startup via `routes/games.js`. Translations appear on `GET /api/games/:id` as a `translations` field (region code → title), and are displayed in GameDetail as italic chips with native language labels.

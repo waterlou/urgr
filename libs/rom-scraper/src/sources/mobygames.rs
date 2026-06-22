@@ -123,6 +123,7 @@ impl MobyGames {
             id: r.game_id.to_string(),
             title: r.title.clone(),
             alternative_titles: alt_titles,
+            region_titles: std::collections::HashMap::new(),
             platform: Platform {
                 id: platform_name.to_lowercase().replace(' ', "-"),
                 name: platform_name.to_string(),

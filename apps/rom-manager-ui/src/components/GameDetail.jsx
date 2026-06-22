@@ -16,6 +16,16 @@ function Transition(props) {
   return <Slide direction="left" {...props} />;
 }
 
+const LANG_LABELS = {
+  'ja': '日本語', 'jp': '日本語',
+  'zh-TW': '中文(台)', 'zh-CN': '中文(简)', 'zh': '中文',
+  'tw': '中文(台)', 'cn': '中文(简)',
+  'ko': '한국어',
+  'fr': 'Français', 'de': 'Deutsch', 'es': 'Español', 'it': 'Italiano',
+  'pt': 'Português', 'ru': 'Русский',
+};
+function langLabel(code) { return LANG_LABELS[code] || code.toUpperCase(); }
+
 export default function GameDetail() {
   const { id: collectionId, gameId } = useParams();
   const [searchParams] = useSearchParams();
@@ -220,6 +230,13 @@ export default function GameDetail() {
                 <Box sx={{ flex: 1, minWidth: 200 }}>
                   <Typography variant="h5" fontWeight={600} sx={{ mb: 0.5 }}>{game.description || game.name}</Typography>
                   {game.description && <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>{game.name}</Typography>}
+                  {game.translations && Object.keys(game.translations).length > 0 && (
+                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1 }}>
+                      {Object.entries(game.translations).map(([lang, title]) => (
+                        <Chip key={lang} label={`${langLabel(lang)}: ${title}`} size="small" variant="outlined" sx={{ fontStyle: 'italic' }} />
+                      ))}
+                    </Box>
+                  )}
                   <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
                     {game.source && <Chip label={game.source} size="small" />}
                     {game.region && <Chip label={game.region} size="small" variant="outlined" />}

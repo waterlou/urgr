@@ -39,6 +39,7 @@ impl crate::sources::GameScraper for SonyStore {
             id: query.to_string(),
             title: query.to_string(),
             alternative_titles: vec![],
+            region_titles: std::collections::HashMap::new(),
             platform: Platform {
                 id: "psn".into(),
                 name: "PlayStation Network".into(),
@@ -48,9 +49,9 @@ impl crate::sources::GameScraper for SonyStore {
             publisher: None,
             developer: None,
             release_date: None,
-            genres: vec![],
             players: None,
             rating: None,
+            genres: vec![],
             roms: vec![],
             media: Media::default(),
             source: ScrapeSource::SonyStore,
@@ -119,6 +120,7 @@ impl crate::sources::GameScraper for SonyStore {
             id: game_id.to_string(),
             title: String::new(),
             alternative_titles: vec![],
+            region_titles: std::collections::HashMap::new(),
             platform: Platform {
                 id: "psn".into(),
                 name: "PlayStation Network".into(),

@@ -261,6 +261,7 @@ impl Igdb {
             id: g.id.to_string(),
             title: g.name.clone(),
             alternative_titles: Vec::new(),
+            region_titles: std::collections::HashMap::new(),
             platform: Platform {
                 id: String::new(),
                 name: g.platforms.as_ref()

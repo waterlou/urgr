@@ -90,6 +90,7 @@ impl ArcadeDb {
             id: query.to_string(),
             title: if r.short_title.is_empty() { r.title.clone() } else { r.short_title.clone() },
             alternative_titles: vec![r.title.clone()],
+            region_titles: std::collections::HashMap::new(),
             platform: Platform {
                 id: "arcade".into(),
                 name: "Arcade".into(),

@@ -121,6 +121,7 @@ impl crate::sources::GameScraper for Vgmuseum {
                     id: game_id.to_string(),
                     title: title.to_string(),
                     alternative_titles: vec![],
+                    region_titles: std::collections::HashMap::new(),
                     platform: Platform {
                         id: slug.to_string(),
                         name: slug.to_string(),
@@ -190,6 +191,7 @@ impl crate::sources::GameScraper for Vgmuseum {
             id: game_id.to_string(),
             title: String::new(),
             alternative_titles: vec![],
+            region_titles: std::collections::HashMap::new(),
             platform: Platform {
                 id: platform.to_string(),
                 name: platform.to_string(),

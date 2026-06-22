@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Game {
     pub id: String,
     pub title: String,
     pub alternative_titles: Vec<String>,
+    pub region_titles: HashMap<String, String>,
     pub platform: Platform,
     pub description: String,
     pub publisher: Option<String>,

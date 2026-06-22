@@ -130,6 +130,7 @@ impl SteamGridDB {
                 id: game.id.to_string(),
                 title: game.name.clone(),
                 alternative_titles: vec![],
+                region_titles: std::collections::HashMap::new(),
                 platform: Platform {
                     id: String::new(),
                     name: String::new(),
@@ -194,6 +195,7 @@ impl crate::sources::GameScraper for SteamGridDB {
             id: game_id.to_string(),
             title: game_resp.data.name.clone(),
             alternative_titles: vec![],
+            region_titles: std::collections::HashMap::new(),
             platform: Platform {
                 id: String::new(),
                 name: String::new(),
