@@ -328,7 +328,6 @@ export default function GameBrowser() {
           }}>
             {games.map(g => (
               <GameGridCard key={g.id} game={g} onSelect={(game) => navigate(`${location.pathname}/game/${game.id}${selectedVersionId ? `?version=${selectedVersionId}` : ''}`)}
-                onRating={(id, patch) => updateGame(id, patch)}
                 onFavourite={(id, patch) => updateGame(id, patch)}
                 onAddToGameSet={addToGameSet} onRemoveFromGameSet={removeFromGameSet}
                 gameSets={gameSets} listImageMode={listImageMode} onPlay={playGame} />
