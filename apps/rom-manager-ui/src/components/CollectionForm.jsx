@@ -169,7 +169,15 @@ export default function CollectionForm() {
         ) && (
           <TextField select label="Platform" fullWidth
             value={platform}
-            onChange={e => setPlatform(e.target.value)}
+            onChange={e => {
+              const v = e.target.value;
+              setPlatform(v);
+              if (selectedPreset?.isNps && v) {
+                const s = `nps-${v.toLowerCase()}`;
+                setSlug(s);
+                setFolder(s);
+              }
+            }}
             sx={{ mb: 2 }}
           >
             <MenuItem value=""><em>None</em></MenuItem>
