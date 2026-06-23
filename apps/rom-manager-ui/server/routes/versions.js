@@ -1080,6 +1080,8 @@ router.get('/api/versions/available', async (req, res) => {
         hasDlcs: NPS_PLATFORM_MAP[p].hasDlcs,
         hasUpdates: NPS_PLATFORM_MAP[p].hasUpdates,
       }));
+      const imported = all("SELECT sv.id, sv.version, sv.created_at FROM set_versions sv JOIN collections c ON c.id = sv.collection_id WHERE c.dataset_preset = 'nps' ORDER BY sv.version");
+      const importedSet = new Set(imported.map(v => v.version));
       const missing = available.filter(v => !importedSet.has(v.version));
       return res.json({
         source: 'NPS',
