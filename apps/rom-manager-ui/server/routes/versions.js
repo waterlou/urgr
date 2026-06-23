@@ -364,17 +364,24 @@ const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
  * 3. POST the Download... button on the result page → get ZIP file
  */
 function checkDatomicBlock(html, systemId) {
+  const errorIdMatch = html.match(/Error id:\s*(\d+)/i);
+  const emailMatch = html.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+  const errorId = errorIdMatch ? errorIdMatch[1] : '';
+  const adminEmail = emailMatch ? emailMatch[1] : 'shippa6@hotmail.com';
+
   const blockPatterns = [
     /too many unevaded download tickets/i,
     /please contact.*admin/i,
     /you have been banned/i,
     /your ip.*blocked/i,
     /temporary.*block/i,
-    /email.*to.*unban/i,
+    /email.*unban/i,
+    /something went wrong with your client/i,
   ];
   for (const p of blockPatterns) {
     if (p.test(html)) {
-      throw new Error(`DAT-O-MATIC is rate-limiting this IP (system ${systemId}). Wait a few minutes and try again. If the issue persists, contact DAT-O-MATIC admin to request an unban.`);
+      const details = errorId ? ` (Error ID: ${errorId})` : '';
+      throw new Error(`DAT-O-MATIC has banned this IP (system ${systemId}). The ban is permanent and requires manual unban. Email ${adminEmail}${details} to request removal. Your email will not be saved or shared.`);
     }
   }
 }
