@@ -435,7 +435,8 @@ async function downloadDatomicDat(systemId) {
   }
 
   // Step 3: GET the manager/download page
-  const managerUrl = location.startsWith('http') ? location : `https://datomatic.no-intro.org/${location}`;
+  const managerUrl = location.startsWith('http') ? location
+    : `https://datomatic.no-intro.org/${location.startsWith('/') ? location.slice(1) : location}`;
   let resp3;
   try {
     resp3 = await fetch(managerUrl, {
@@ -477,7 +478,8 @@ async function downloadDatomicDat(systemId) {
   // Step 4: POST the Download button to get the ZIP file
   let resp4;
   try {
-    resp4 = await fetch(managerUrl, {
+    const dlPostUrl = managerUrl.startsWith('http') ? managerUrl : `https://datomatic.no-intro.org/${managerUrl}`;
+    resp4 = await fetch(dlPostUrl, {
       method: 'POST',
       headers: {
         'User-Agent': UA,
@@ -513,7 +515,36 @@ async function downloadDatomicDat(systemId) {
       }
       return Buffer.from(await resp5.arrayBuffer());
     }
-    throw new Error(`[DAT-O-MATIC step4] Expected ZIP but got ${contentType} for system ${systemId}. HTTP ${resp4.status}`);
+
+    // Try direct download via the download page with op=dat (the "Back" link target)
+    const dlPageUrl = `https://datomatic.no-intro.org/index.php?page=download&s=${systemId}&op=dat`;
+    const dlPageResp = await fetch(dlPageUrl, {
+      headers: { 'User-Agent': UA, 'Cookie': cookieHeader() },
+      redirect: 'follow',
+    });
+    const dlPageCtype = dlPageResp.headers.get('content-type') || '';
+    if (dlPageCtype.includes('zip') || dlPageCtype.includes('octet-stream')) {
+      return Buffer.from(await dlPageResp.arrayBuffer());
+    }
+
+    // Try with the download ID extracted from the manager URL
+    const dlIdMatch = managerUrl.match(/download=(\d+)/);
+    if (dlIdMatch) {
+      const dlId = dlIdMatch[1];
+      const dlIdUrl = `https://datomatic.no-intro.org/index.php?page=download&s=${systemId}&op=dat&download=${dlId}`;
+      const dlIdResp = await fetch(dlIdUrl, {
+        headers: { 'User-Agent': UA, 'Cookie': cookieHeader() },
+        redirect: 'follow',
+      });
+      const dlIdCtype = dlIdResp.headers.get('content-type') || '';
+      if (dlIdCtype.includes('zip') || dlIdCtype.includes('octet-stream')) {
+        return Buffer.from(await dlIdResp.arrayBuffer());
+      }
+    }
+
+    const resp4Text = await resp4.text();
+    const resp4Snippet = resp4Text.replace(/\s+/g, ' ').substring(0, 2500);
+    throw new Error(`[DAT-O-MATIC step4] Expected ZIP but got ${contentType} for system ${systemId}. HTTP ${resp4.status}. POST URL=${managerUrl}. Page: ${resp4Snippet}`);
   }
 
   return Buffer.from(await resp4.arrayBuffer());
