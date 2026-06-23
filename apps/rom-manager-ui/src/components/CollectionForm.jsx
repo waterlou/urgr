@@ -32,7 +32,6 @@ export default function CollectionForm() {
   const [availableDats, setAvailableDats] = useState([]);
   const [knownPlatforms, setKnownPlatforms] = useState([]);
   const [npsPlatforms, setNpsPlatforms] = useState([]);
-  const [selectedNpsPlatforms, setSelectedNpsPlatforms] = useState([]);
   const [scrapeMode, setScrapeMode] = useState(targetData?.scrape_mode || 'parent');
   const fileRef = useRef(null);
 
@@ -77,19 +76,15 @@ export default function CollectionForm() {
     setUploading(true);
     setFormError('');
     try {
-      if (datasetMode === 'preset' && selectedPreset?.isNps && selectedNpsPlatforms.length > 0) {
-        // Create one collection per selected NPS platform
-        for (const plat of selectedNpsPlatforms) {
-          const npsInfo = npsPlatforms.find(p => p.version === plat);
-          const platName = npsInfo?.name || plat;
-          const platSlug = `nps-${plat.toLowerCase()}`;
-          const payload = {
-            name: platName, slug: platSlug, platform: plat,
-            logo: logo || 'folder', folder: platSlug,
-            dataset_preset: 'nps',
-          };
-          await saveCollection(payload, null);
-        }
+      if (datasetMode === 'preset' && selectedPreset?.isNps && platform) {
+        const npsInfo = npsPlatforms.find(p => p.version === platform);
+        const platName = npsInfo?.name || platform;
+        const platSlug = `nps-${platform.toLowerCase()}`;
+        await saveCollection({
+          name: platName, slug: platSlug, platform,
+          logo: logo || 'folder', folder: platSlug,
+          dataset_preset: 'nps',
+        }, null);
       } else {
         const payload = { name: name.trim(), slug, platform, logo: logo || 'folder', folder: folder || slug, scrape_mode: scrapeMode };
         if (datasetMode === 'preset' && selectedPreset) {
@@ -135,35 +130,12 @@ export default function CollectionForm() {
                   {POPULAR_DATASETS.map(p => (
                     <Chip key={p.slug} label={p.name}
                       color={selectedPreset?.slug === p.slug ? 'primary' : 'default'}
-                      onClick={() => {
-                        if (selectedPreset?.slug !== p.slug) setSelectedNpsPlatforms([]);
-                        handlePresetChange(p);
-                      }}
+                      onClick={() => handlePresetChange(p)}
                       variant={selectedPreset?.slug === p.slug ? 'filled' : 'outlined'}
                     />
                   ))}
                 </Box>
-                {selectedPreset?.isNps && npsPlatforms.length > 0 && (
-                  <Box sx={{ mb: 2 }}>
-                    <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
-                      Select platforms to import:
-                    </Typography>
-                    <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                      {npsPlatforms.map(p => (
-                        <Chip key={p.version} label={p.name || p.version} size="small"
-                          color={selectedNpsPlatforms.includes(p.version) ? 'primary' : 'default'}
-                          onClick={() => {
-                            setSelectedNpsPlatforms(prev =>
-                              prev.includes(p.version)
-                                ? prev.filter(v => v !== p.version)
-                                : [...prev, p.version]
-                            );
-                          }}
-                        />
-                      ))}
-                    </Box>
-                  </Box>
-                )}
+
                 {availableDats.length > 0 && !selectedPreset?.noVersionSelect && (
                   <TextField select label="Select version" fullWidth value=""
                     onChange={e => setSelectedPreset({ ...selectedPreset, selectedVer: e.target.value })}
