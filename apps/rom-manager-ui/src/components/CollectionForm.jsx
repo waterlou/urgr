@@ -5,7 +5,7 @@ import {
   Box, Typography, CircularProgress, Alert, FormControl, FormLabel, Select, MenuItem,
 } from '@mui/material';
 import {
-  getAvailableVersions, getPlatforms, importDat,
+  getAvailableVersions, getPlatforms, importDat, importNps, importOnlineVersion,
 } from '../api.js';
 import { useUI } from '../contexts/UIContext.jsx';
 import { useCollections } from '../contexts/CollectionContext.jsx';
@@ -81,21 +81,24 @@ export default function CollectionForm() {
         const npsInfo = npsPlatforms.find(p => p.version === platform);
         const platName = npsInfo?.name || platform;
         const platSlug = `nps-${platform.toLowerCase()}`;
-        await saveCollection({
+        const col = await saveCollection({
           name: platName, slug: platSlug, platform,
           logo: logo || 'folder', folder: platSlug,
           dataset_preset: 'nps',
         }, null);
+        if (col?.id) await importNps(col.id, platform);
       } else {
         const payload = { name: name.trim(), slug, platform, logo: logo || 'folder', folder: folder || slug, scrape_mode: scrapeMode };
         if (datasetMode === 'preset' && selectedPreset) {
           payload.dataset_preset = selectedPreset.slug;
         }
+        const col = await saveCollection(payload, isEdit ? targetData.id : null);
         if (datasetMode === 'dataset' && datFile) {
           const text = await datFile.text();
           await importDat(text);
+        } else if (selectedPreset?.slug === 'datomatic' && col?.id) {
+          await importOnlineVersion(col.id, platform, 'datomatic');
         }
-        await saveCollection(payload, isEdit ? targetData.id : null);
       }
       closeCollectionForm();
     } catch (e) {

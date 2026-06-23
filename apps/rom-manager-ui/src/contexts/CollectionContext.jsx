@@ -134,12 +134,14 @@ export function CollectionProvider({ children }) {
   }, [loadSidebar]);
 
   const handleSaveCollection = useCallback(async (data, editTargetId) => {
+    let col;
     if (editTargetId) {
       await updateCollection(editTargetId, data);
     } else {
-      await createCollection(data);
+      col = await createCollection(data);
     }
     await loadSidebar();
+    return col;
   }, [loadSidebar]);
 
   const handleSaveGameSet = useCallback(async (data, editTargetId) => {
