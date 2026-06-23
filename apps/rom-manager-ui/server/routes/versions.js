@@ -363,6 +363,22 @@ const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
  * 2. POST with system_selection + dat_dl button → redirect to download page
  * 3. POST the Download... button on the result page → get ZIP file
  */
+function checkDatomicBlock(html, systemId) {
+  const blockPatterns = [
+    /too many unevaded download tickets/i,
+    /please contact.*admin/i,
+    /you have been banned/i,
+    /your ip.*blocked/i,
+    /temporary.*block/i,
+    /email.*to.*unban/i,
+  ];
+  for (const p of blockPatterns) {
+    if (p.test(html)) {
+      throw new Error(`DAT-O-MATIC is rate-limiting this IP (system ${systemId}). Wait a few minutes and try again. If the issue persists, contact DAT-O-MATIC admin to request an unban.`);
+    }
+  }
+}
+
 async function downloadDatomicDat(systemId) {
   const cookieJar = {};
 
@@ -395,6 +411,7 @@ async function downloadDatomicDat(systemId) {
   }
   parseCookies(Object.fromEntries(resp1.headers.entries()));
   const html1 = await resp1.text();
+  checkDatomicBlock(html1, systemId);
 
   // Find the dat_dl_<hash> button
   const buttonMatch = html1.match(/name="(dat_dl_[a-f0-9-]+)"\s+value="Prepare"/);
@@ -431,6 +448,8 @@ async function downloadDatomicDat(systemId) {
 
   const location = resp2.headers.get('location');
   if (!location) {
+    const resp2Content = resp2.headers.get('content-type')?.includes('text') ? await resp2.text() : '';
+    if (resp2Content) checkDatomicBlock(resp2Content, systemId);
     throw new Error(`[DAT-O-MATIC step2] No redirect after Prepare for system ${systemId}. HTTP ${resp2.status}`);
   }
 
@@ -454,6 +473,7 @@ async function downloadDatomicDat(systemId) {
   }
 
   const html3 = await resp3.text();
+  checkDatomicBlock(html3, systemId);
 
   // Find the Download button hash (skip hidden buttons)
   const dlMatch = html3.match(/(?:name|id)="([a-f0-9]+)"\s+(?:value|title)="(Download[!.]*)"(?![^>]*style="display:\s*none")/) ||
@@ -543,6 +563,7 @@ async function downloadDatomicDat(systemId) {
     }
 
     const resp4Text = await resp4.text();
+    checkDatomicBlock(resp4Text, systemId);
     const resp4Snippet = resp4Text.replace(/\s+/g, ' ').substring(0, 2500);
     throw new Error(`[DAT-O-MATIC step4] Expected ZIP but got ${contentType} for system ${systemId}. HTTP ${resp4.status}. POST URL=${managerUrl}. Page: ${resp4Snippet}`);
   }
