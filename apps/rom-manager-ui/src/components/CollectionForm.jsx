@@ -42,9 +42,14 @@ export default function CollectionForm() {
 
   useEffect(() => {
     if (datasetMode === 'preset' && selectedPreset) {
+      setAvailableDats([]);
+      setNpsPlatforms([]);
       getAvailableVersions(selectedPreset.slug).then(data => {
-        setAvailableDats(data.available || []);
-        setNpsPlatforms(data.available || []);
+        if (selectedPreset.isNps) {
+          setNpsPlatforms(data.available || []);
+        } else {
+          setAvailableDats(data.available || []);
+        }
       }).catch(() => {});
     }
   }, [datasetMode, selectedPreset]);
@@ -159,7 +164,7 @@ export default function CollectionForm() {
                     </Box>
                   </Box>
                 )}
-                {availableDats.length > 0 && !selectedPreset?.isNps && (
+                {availableDats.length > 0 && !selectedPreset?.noVersionSelect && (
                   <TextField select label="Select version" fullWidth value=""
                     onChange={e => setSelectedPreset({ ...selectedPreset, selectedVer: e.target.value })}
                     SelectProps={{ native: true }}>

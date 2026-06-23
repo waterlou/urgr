@@ -245,7 +245,7 @@ export default function GameBrowser() {
         </Box>
 
         {collectionVersions?.length > 1 && (
-          <Box sx={{ display: 'flex', gap: 0.5, mt: 1, mb: 2, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', gap: 0.5, mt: 1, mb: 1, flexWrap: 'wrap' }}>
             <Chip label="All versions" size="small" color={!selectedVersionId ? 'primary' : 'default'}
               onClick={() => setSelectedVersionId(null)} />
             {collectionVersions.map(v => (
@@ -257,7 +257,7 @@ export default function GameBrowser() {
         )}
 
         {activeMeta?.platforms && activeMeta.platforms.length > 1 && (
-          <Box sx={{ display: 'flex', gap: 0.5, mt: 1, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', gap: 0.5, mt: 1, mb: 1, flexWrap: 'wrap' }}>
             <Chip label="All Platforms" size="small" color={!platformFilter ? 'primary' : 'default'}
               onClick={() => setPlatformFilter('')} />
             {activeMeta.platforms.map(p => (

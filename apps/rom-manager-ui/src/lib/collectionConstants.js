@@ -1,8 +1,8 @@
 export const POPULAR_DATASETS = [
-  { name: 'MAME', slug: 'mame', platform: 'Arcade' },
-  { name: 'Final Burn Neo', slug: 'fbneo', platform: 'Arcade' },
+  { name: 'MAME', slug: 'mame', platform: 'Arcade', noVersionSelect: true },
+  { name: 'Final Burn Neo', slug: 'fbneo', platform: 'Arcade', noVersionSelect: true },
   { name: 'OfflineList (No-Intro)', slug: 'offlinelist', platform: 'Console', isOfflineList: true },
-  { name: 'DAT-O-MATIC', slug: 'datomatic', platform: 'Console', isDatomic: true },
+  { name: 'DAT-O-MATIC', slug: 'datomatic', platform: 'Console', isDatomic: true, noVersionSelect: true },
   { name: 'NoPayStation', slug: 'nps', platform: 'PlayStation', isNps: true },
 ]
 
