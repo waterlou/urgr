@@ -188,7 +188,26 @@ export default function CollectionForm() {
           </>
         )}
 
-        <TextField label="Platform" fullWidth value={platform} onChange={e => setPlatform(e.target.value)} sx={{ mb: 2 }} placeholder="e.g. Arcade, Console, NES" />
+        {(
+          isEdit || !selectedPreset || selectedPreset.isNps || selectedPreset.slug === 'datomatic'
+        ) && (
+          <TextField select label="Platform" fullWidth
+            value={platform}
+            onChange={e => setPlatform(e.target.value)}
+            sx={{ mb: 2 }}
+          >
+            <MenuItem value=""><em>None</em></MenuItem>
+            {selectedPreset?.isNps && npsPlatforms.map(p => (
+              <MenuItem key={p.version} value={p.version}>{p.name || p.version}</MenuItem>
+            ))}
+            {selectedPreset?.slug === 'datomatic' && availableDats.map(d => (
+              <MenuItem key={d.version} value={d.version}>{d.version}</MenuItem>
+            ))}
+            {!selectedPreset?.isNps && selectedPreset?.slug !== 'datomatic' && knownPlatforms.map(p => (
+              <MenuItem key={p.slug || p} value={p.slug || p}>{p.name || p}</MenuItem>
+            ))}
+          </TextField>
+        )}
 
         <Typography variant="subtitle2" sx={{ mb: 1 }}>Icon</Typography>
         <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 2 }}>
