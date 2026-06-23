@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { closeDb, saveDb } from './db.js';
 import { all, run, dbReady } from './helpers.js';
+import { initUsersDb, closeUsersDb, saveUsersDb } from './db-users.js';
 import { distDir, iconsDir, dataDir, isElectron } from './paths.js';
 import collectionsRouter from './routes/collections.js';
 import gamesRouter from './routes/games.js';
@@ -105,6 +106,8 @@ let server;
 function shutdown() {
   saveDb();
   closeDb();
+  saveUsersDb();
+  closeUsersDb();
   if (!isElectron) process.exit(0);
 }
 
@@ -112,6 +115,7 @@ server = app.listen(PORT, () => {
   const actualPort = server.address().port;
   console.log(`ROM Manager API running at http://localhost:${actualPort}`);
   loadFromEnv();
+  initUsersDb().then(() => console.log('users.db ready'));
   // In Electron, signal the main process that the server is ready
   if (isElectron && process.send) {
     process.send({ type: 'server-ready', port: actualPort });

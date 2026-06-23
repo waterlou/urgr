@@ -160,6 +160,9 @@ export function getGame(id, versionId) {
 export function updateGameRating(id, data) {
   return fetchWithBody(`/games/${id}/rating`, 'PUT', data);
 }
+export function updateGameNotes(id, notes) {
+  return fetchWithBody(`/games/${id}/notes`, 'PUT', { notes });
+}
 export function coverUrl(id) { return `${BASE}/games/${id}/media?type=title`; }
 export function screenshotUrl(id) { return `${BASE}/games/${id}/media?type=ingame`; }
 export function playUrl(gameId) { return `${BASE}/games/${gameId}/play`; }
