@@ -111,15 +111,30 @@ function shutdown() {
   if (!isElectron) process.exit(0);
 }
 
-server = app.listen(PORT, () => {
-  const actualPort = server.address().port;
-  console.log(`ROM Manager API running at http://localhost:${actualPort}`);
+function logStartup(msg) {
+  const ts = new Date().toISOString();
+  try { fs.appendFileSync(path.join(dataDir, 'startup.log'), `[${ts}] ${msg}\n`); } catch {}
+  console.log(msg);
+}
+
+server = app.listen(PORT);
+server.on('listening', () => {
+  const addr = server.address();
+  if (!addr) {
+    logStartup('ERROR: server.address() returned null despite listening event');
+    return;
+  }
+  const actualPort = typeof addr === 'object' ? addr.port : addr;
+  logStartup(`ROM Manager API running at http://localhost:${actualPort}`);
   loadFromEnv();
-  initUsersDb().then(() => console.log('users.db ready'));
-  // In Electron, signal the main process that the server is ready
+  initUsersDb().then(() => logStartup('users.db ready'));
   if (isElectron && process.send) {
     process.send({ type: 'server-ready', port: actualPort });
   }
+});
+server.on('error', (err) => {
+  logStartup(`ERROR: server listen failed: ${err.code} ${err.message}`);
+  if (!isElectron) process.exit(1);
 });
 
 process.on('SIGINT', shutdown);
