@@ -4,7 +4,7 @@ import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Paper, CircularProgress, ImageList, ImageListItem, Slide,
 } from '@mui/material';
-import { ArrowBack, PlayArrow, Download, CloudDownload, Check, Close } from '@mui/icons-material';
+import { ArrowBack, PlayArrow, Download, CloudDownload, Check, Close, EditNote } from '@mui/icons-material';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { getGame, coverUrl, screenshotUrl, playUrl, scrapeGameMetadata,
   downloadGameFromIA, getIaAuthStatus, enqueueDownload, getGameAvailability,
@@ -199,6 +199,11 @@ export default function GameDetail() {
                 {showDownloadDialog ? <CircularProgress size={14} /> : 'Get ROM'}
               </Button>
             ) : null}
+            <Button variant="outlined" size="small" startIcon={<EditNote />}
+              onClick={() => navigate(`/collections/${collectionId}/game/${gameId}/notes`)}
+              sx={{ mr: 1 }}>
+              Notes
+            </Button>
             <Button variant="contained" size="small" startIcon={<PlayArrow />}
               onClick={() => setShowEmulator(true)}
               disabled={!game || (hasAvailableRoms === false && !showDownloadDialog)}>

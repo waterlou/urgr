@@ -4,6 +4,7 @@ import Dashboard from './components/Dashboard.jsx'
 import CollectionDetail from './components/CollectionDetail.jsx'
 import GameBrowser from './components/GameBrowser.jsx'
 import GameDetail from './components/GameDetail.jsx'
+import GameNotes from './components/GameNotes.jsx'
 import DownloadManager from './components/DownloadManager.jsx'
 import OperationsPage from './components/OperationsPage.jsx'
 import CollectionForm from './components/CollectionForm.jsx'
@@ -32,9 +33,12 @@ export default function App() {
           <Route path="collections/:id/settings" element={<CollectionDetail />} />
           <Route path="collections/:id/browse" element={<GameBrowser />} />
           <Route path="collections/:id/browse/game/:gameId" element={<GameDetail />} />
+          <Route path="collections/:id/browse/game/:gameId/notes" element={<GameNotes />} />
           <Route path="collections/:id/game/:gameId" element={<GameDetail />} />
+          <Route path="collections/:id/game/:gameId/notes" element={<GameNotes />} />
           <Route path="game-sets/:id" element={<GameBrowser />} />
           <Route path="game-sets/:id/game/:gameId" element={<GameDetail />} />
+          <Route path="game-sets/:id/game/:gameId/notes" element={<GameNotes />} />
           <Route path="browse" element={<GameBrowser />} />
           <Route path="downloads" element={<DownloadManager />} />
           <Route path="operations" element={<OperationsPage />} />

@@ -5,6 +5,7 @@ import path from 'path';
 import os from 'os';
 import { execSync } from 'child_process';
 import { getDb } from '../db.js';
+import { run as userRun, get as userGet } from '../db-users.js';
 import { execCli, execCliStream } from '../cli.js';
 import { createJob, updateProgress, doneJob, failJob } from '../jobs.js';
 import { all, get, run, runNow, dbReady } from '../helpers.js';
@@ -370,6 +371,10 @@ router.get('/:id', async (req, res) => {
 
     const state = get('SELECT * FROM game_state WHERE game_id = ?', [game.id]);
 
+    // Resolve canonical game ID for notes (clone games share notes with parent)
+    const canonicalRow = get('SELECT COALESCE(parent_game_id, id) as canonical_id FROM games WHERE id = ?', [game.id]);
+    const notesRow = userGet('SELECT notes FROM game_notes WHERE game_id = ?', [canonicalRow?.canonical_id]);
+
     // Clones: other games that have this game as parent, within any version
     const clones = all(`
       SELECT g.id, g.name, g.description, parent_g.name as cloneof
@@ -394,6 +399,7 @@ router.get('/:id', async (req, res) => {
       play_count: state?.play_count || 0,
       clones, parent,
       translations: getTranslations(game.name, game.description),
+      notes: notesRow?.notes || '',
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1131,6 +1137,23 @@ router.put('/:id/rating', async (req, res) => {
       if (favourite != null) run("UPDATE game_state SET favourite = ?, updated_at = datetime('now') WHERE game_id = ?", [favourite ? 1 : 0, req.params.id]);
     } else {
       run('INSERT INTO game_state (game_id, rating, favourite) VALUES (?, ?, ?)', [req.params.id, rating ?? 0, favourite ? 1 : 0]);
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/:id/notes', async (req, res) => {
+  await dbReady;
+  try {
+    const { notes } = req.body;
+    const canonical = get('SELECT COALESCE(parent_game_id, id) as canonical_id FROM games WHERE id = ?', [req.params.id]);
+    if (!canonical) return res.status(404).json({ error: 'Game not found' });
+    const cid = canonical.canonical_id;
+    const existing = userGet('SELECT game_id FROM game_notes WHERE game_id = ?', [cid]);
+    if (existing) {
+      userRun("UPDATE game_notes SET notes = ?, updated_at = datetime('now') WHERE game_id = ?", [notes, cid]);
+    } else {
+      userRun('INSERT INTO game_notes (game_id, notes) VALUES (?, ?)', [cid, notes]);
     }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
