@@ -423,6 +423,12 @@ async function downloadDatomicDat(systemId) {
   }
   parseCookies(Object.fromEntries(resp2.headers.entries()));
 
+  // Check if step 2 already returned the ZIP directly
+  const resp2ContentType = resp2.headers.get('content-type') || '';
+  if (resp2ContentType.includes('zip') || resp2ContentType.includes('octet-stream')) {
+    return Buffer.from(await resp2.arrayBuffer());
+  }
+
   const location = resp2.headers.get('location');
   if (!location) {
     throw new Error(`[DAT-O-MATIC step2] No redirect after Prepare for system ${systemId}. HTTP ${resp2.status}`);
@@ -440,15 +446,33 @@ async function downloadDatomicDat(systemId) {
     throw new Error(`[DAT-O-MATIC step3] Failed to fetch manager page (${managerUrl}): ${e.message}`);
   }
   parseCookies(Object.fromEntries(resp3.headers.entries()));
+
+  const resp3ContentType = resp3.headers.get('content-type') || '';
+  if (resp3ContentType.includes('zip') || resp3ContentType.includes('octet-stream')) {
+    return Buffer.from(await resp3.arrayBuffer());
+  }
+
   const html3 = await resp3.text();
 
-  // Find the Download... button hash
-  const dlMatch = html3.match(/name="([a-f0-9]+)"\s+value="Download\.\.\."/) ||
-                  html3.match(/name="([a-f0-9]+)"\s+value="Download"/);
+  // Find the Download button hash (skip hidden buttons)
+  const dlMatch = html3.match(/(?:name|id)="([a-f0-9]+)"\s+(?:value|title)="(Download[!.]*)"(?![^>]*style="display:\s*none")/) ||
+                  html3.match(/(?:name|id)="([a-f0-9]+)"\s+(?:value|title)="(Download[!.]*)"/);
   if (!dlMatch) {
-    throw new Error(`[DAT-O-MATIC step3] Download button not found on manager page for system ${systemId}. URL=${managerUrl}, page length=${html3.length}`);
+    // Fallback: try navigating to the download page directly (the nav link's target)
+    const fallbackUrl = `https://datomatic.no-intro.org/index.php?page=download&s=${systemId}`;
+    const fallbackResp = await fetch(fallbackUrl, {
+      headers: { 'User-Agent': UA, 'Cookie': cookieHeader() },
+      redirect: 'follow',
+    });
+    const fallbackCtype = fallbackResp.headers.get('content-type') || '';
+    if (fallbackCtype.includes('zip') || fallbackCtype.includes('octet-stream')) {
+      return Buffer.from(await fallbackResp.arrayBuffer());
+    }
+    const snippet = html3.replace(/\s+/g, ' ').substring(0, 3000);
+    throw new Error(`[DAT-O-MATIC step3] Download button not found for system ${systemId}. URL=${managerUrl}. Fallback also not ZIP. HTML: ${snippet}`);
   }
   const dlHash = dlMatch[1];
+  const dlValue = dlMatch[2] || 'Download...';
 
   // Step 4: POST the Download button to get the ZIP file
   let resp4;
@@ -460,7 +484,7 @@ async function downloadDatomicDat(systemId) {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Cookie': cookieHeader(),
       },
-      body: `${dlHash}=Download...`,
+      body: `${dlHash}=${encodeURIComponent(dlValue)}`,
       redirect: 'manual',
     });
   } catch (e) {
