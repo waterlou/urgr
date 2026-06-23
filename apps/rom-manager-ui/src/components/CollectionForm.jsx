@@ -73,8 +73,7 @@ export default function CollectionForm() {
 
   async function handleSave() {
     if (!name.trim()) { setFormError('Name is required'); return; }
-    if (selectedPreset?.isNps && !platform) { setFormError('Please select an NPS platform'); return; }
-    if (selectedPreset?.slug === 'datomatic' && !platform) { setFormError('Please select a DAT-O-MATIC system'); return; }
+    if (!platform) { setFormError('Please select a platform'); return; }
     setUploading(true);
     setFormError('');
     try {
