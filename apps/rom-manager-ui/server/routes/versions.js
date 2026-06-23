@@ -364,26 +364,26 @@ const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
  * 3. POST the Download... button on the result page → get ZIP file
  */
 function checkDatomicBlock(html, systemId) {
-  const errorIdMatch = html.match(/Error id:\s*(\d+)/i);
-  const emailMatch = html.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-  const errorId = errorIdMatch ? errorIdMatch[1] : '';
-  const adminEmail = emailMatch ? emailMatch[1] : 'shippa6@hotmail.com';
-
-  const blockPatterns = [
+  // Detect if this is an error/block page (not the normal DAT-O-MATIC form page)
+  const blockIndicators = [
     /too many unevaded download tickets/i,
-    /please contact.*admin/i,
-    /you have been banned/i,
-    /your ip.*blocked/i,
-    /temporary.*block/i,
-    /email.*unban/i,
     /something went wrong with your client/i,
+    /you have been banned/i,
+    /your (IP|ip).*blocked/i,
+    /the ban won.*t be lifted/i,
   ];
-  for (const p of blockPatterns) {
-    if (p.test(html)) {
-      const details = errorId ? ` (Error ID: ${errorId})` : '';
-      throw new Error(`DAT-O-MATIC has banned this IP (system ${systemId}). The ban is permanent and requires manual unban. Email ${adminEmail}${details} to request removal. Your email will not be saved or shared.`);
-    }
-  }
+  const isBlocked = blockIndicators.some(p => p.test(html));
+  if (!isBlocked) return;
+
+  // Extract meaningful text from the page — strip HTML tags and collapse whitespace
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+  const bodyText = bodyMatch ? bodyMatch[1] : html;
+  const text = bodyText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // Trim to the relevant error portion — up to ~500 chars, preferably at the error message
+  const relevant = text.length > 600 ? text.substring(0, 600) : text;
+
+  throw new Error(`DAT-O-MATIC blocked this request (system ${systemId}):\n${relevant}`);
 }
 
 async function downloadDatomicDat(systemId) {
