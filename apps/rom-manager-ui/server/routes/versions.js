@@ -482,10 +482,17 @@ async function downloadDatomicDat(systemId) {
   const html3 = await resp3.text();
   checkDatomicBlock(html3, systemId);
 
-  // Find the Download button hash (skip hidden buttons)
-  const dlMatch = html3.match(/(?:name|id)="([a-f0-9]+)"\s+(?:value|title)="(Download[!.]*)"(?![^>]*style="display:\s*none")/) ||
-                  html3.match(/(?:name|id)="([a-f0-9]+)"\s+(?:value|title)="(Download[!.]*)"/);
-  if (!dlMatch) {
+  // Find the visible Download button hash (not hidden)
+  // DAT-O-MATIC now has a hidden duplicate button — skip it.
+  // Collect all Download!! buttons, then pick the first one without display:none
+  const allDlButtons = [...html3.matchAll(/(?:name|id)="([a-f0-9]+)"\s+(?:value|title)="(Download[!.]*)"/g)];
+  const dlButton = allDlButtons.find(b => {
+    const after = html3.slice(b.index);
+    const tagEnd = after.indexOf('>');
+    const fullTag = tagEnd === -1 ? after : after.slice(0, tagEnd + 1);
+    return !fullTag.includes('display:none') && !fullTag.includes('display: none');
+  });
+  if (!dlButton) {
     // Fallback: try navigating to the download page directly (the nav link's target)
     const fallbackUrl = `https://datomatic.no-intro.org/index.php?page=download&s=${systemId}`;
     const fallbackResp = await fetch(fallbackUrl, {
@@ -499,8 +506,8 @@ async function downloadDatomicDat(systemId) {
     const snippet = html3.replace(/\s+/g, ' ').substring(0, 3000);
     throw new Error(`[DAT-O-MATIC step3] Download button not found for system ${systemId}. URL=${managerUrl}. Fallback also not ZIP. HTML: ${snippet}`);
   }
-  const dlHash = dlMatch[1];
-  const dlValue = dlMatch[2] || 'Download...';
+  const dlHash = dlButton[1];
+  const dlValue = dlButton[2] || 'Download...';
 
   // Step 4: POST the Download button to get the ZIP file
   let resp4;
