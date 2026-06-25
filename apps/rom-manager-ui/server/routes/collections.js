@@ -10,6 +10,19 @@ import { createJob, getJob, updateProgress, doneJob, failJob, cancelJob } from '
 import { all, get, run, runNow, unescapeXml, KNOWN_PLATFORMS, dbReady } from '../helpers.js';
 import { getCookieHeader } from '../ia-auth.js';
 import { sortVersions } from '../versionSort.js';
+
+// Shared SQL subquery: counts games available in this version OR inherited from prior versions
+const AVAILABLE_GAMES_SQL = `(SELECT COUNT(*) FROM game_rom_sets grs WHERE grs.version_id = sv.id
+  AND (grs.available = 1
+    OR EXISTS (
+      SELECT 1 FROM game_rom_sets grs2
+      JOIN set_versions sv2 ON sv2.id = grs2.version_id
+      WHERE sv2.collection_id = sv.collection_id
+        AND sv2.id < sv.id
+        AND grs2.game_id = grs.game_id
+        AND grs2.available = 1
+    ))
+) as available_games`;
 import { scanNpsDir, buildNps } from '../nps.js';
 import { scrapeSingleGame } from './games.js';
 import { romsDir, dataDir } from '../paths.js';
@@ -38,7 +51,8 @@ router.get('/api/collections', async (req, res) => {
     const rows = all('SELECT c.* FROM collections c ORDER BY c.name');
     const result = rows.map(c => {
       const versions = all(`SELECT sv.id, c.dataset_preset as source, sv.version, sv.dir, sv.created_at,
-          (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games
+          (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games,
+          ${AVAILABLE_GAMES_SQL}
         FROM set_versions sv
         JOIN collections c ON c.id = sv.collection_id
         WHERE sv.collection_id = ?
@@ -288,7 +302,7 @@ router.get('/api/collections/:id/versions', async (req, res) => {
     const versions = all(`
       SELECT sv.*, c.dataset_preset as source,
         (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games,
-        (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id AND available = 1) as available_games
+        ${AVAILABLE_GAMES_SQL}
       FROM set_versions sv
       JOIN collections c ON c.id = sv.collection_id
       WHERE sv.collection_id = ?
