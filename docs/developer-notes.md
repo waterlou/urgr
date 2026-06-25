@@ -60,6 +60,50 @@ This design exists in two places in `collections.js`:
 
 `game_state.available` is **derived** from `game_rom_sets.available` via `syncGameAvailability(gameIds)` in `server/operations/syncAvailability.js`. Never write to `game_state.available` directly — always write to `game_rom_sets.available` and call `syncGameAvailability()` afterward.
 
+`syncGameAvailability` does an `INSERT OR IGNORE` for available games (creates rows only when `game_rom_sets.available = 1`), then `UPDATE`s the `available` flag for all existing rows — preserving `rating`, `favourite`, and `play_count` set by user actions.
+
+## Version Tab Counts
+
+The versions tab shows `available_games / total_games` per version. `total_games` is `COUNT(*) FROM game_rom_sets`. `available_games` uses `AVAILABLE_GAMES_SQL` which counts games where `game_rom_sets.available = 1` OR the same `game_id` has `available = 1` in any older version of the same collection:
+
+```sql
+(SELECT COUNT(*) FROM game_rom_sets grs WHERE grs.version_id = sv.id
+  AND (grs.available = 1
+    OR EXISTS (
+      SELECT 1 FROM game_rom_sets grs2
+      JOIN set_versions sv2 ON sv2.id = grs2.version_id
+      WHERE sv2.collection_id = sv.collection_id
+        AND sv2.id < sv.id
+        AND grs2.game_id = grs.game_id
+        AND grs2.available = 1
+    ))
+)
+```
+
+This ensures versions don't appear to lose games when they inherit ROMs from prior versions via `find_in_fallback`. The `AVAILABLE_GAMES_SQL` constant is shared between three endpoints (`GET /api/collections`, `GET /api/collections/:id/versions`, `GET /api/collections/:id/games`) to prevent drift.
+
+## Neo Geo → Arcade Linking (`rom_source_id`)
+
+Neo Geo games are arcade games stored in `roms/arcade/`. To avoid duplicate rows and zips, the import process links Neo Geo entries to their arcade counterparts via `games.rom_source_id`.
+
+**How it works:**
+- The combined FBNeo arcade DAT and the Neo Geo split DAT are both imported normally
+- After import, a SQL UPDATE links Neo Geo games to their arcade counterpart:
+  ```sql
+  UPDATE games SET rom_source_id = (
+    SELECT g2.id FROM games g2
+    WHERE g2.collection_id = games.collection_id
+      AND g2.name = games.name AND g2.platform = 'arcade'
+      AND games.platform = 'neogeo' AND g2.id != games.id
+  ) WHERE platform = 'neogeo' AND EXISTS (...)
+  ```
+- The builder skips linked games — they count as "existed" if the source game's zip exists
+- The scanner finds zips in `roms/arcade/` and marks both the arcade and neogeo game_ids as available
+- The UI can filter by `platform = 'neogeo'` while ROMs stay in `roms/arcade/`
+- Listing queries use `COALESCE(rom_source_id, id)` to deduplicate
+
+**Schema**: `games.rom_source_id INTEGER REFERENCES games(id)` — added via migration in both Rust (`schema.rs`) and JS (`db.js`).
+
 ## Build Progress Reporting
 
 ### Frontend field name

@@ -49,26 +49,36 @@ Known platform list.
 
 ### GET /api/collections
 
-Lists all collections sorted by name, with computed game count from linked versions.
+Lists all collections sorted by name. Each collection includes its versions with
+`total_games` (game_rom_sets count) and `available_games` (games with ROMs in
+this version OR inherited from a prior version in the same collection).
 
 **Response `200`**
 ```json
 [
   {
-    "id": 1,
-    "name": "MAME",
-    "slug": "mame",
+    "id": 2,
+    "name": "Final Burn Neo",
+    "slug": "fbneo",
     "platform": "Arcade",
-    "logo": "🕹️",
-    "folder": "mame",
-    "dataset_preset": null,
+    "folder": "fbneo",
+    "dataset_preset": "fbneo",
     "has_dataset": 1,
-    "created_at": "2026-05-23 03:24:22",
-    "updated_at": "2026-05-23 03:24:22",
-    "total_games": 0
+    "created_at": "2026-06-25 03:39:47",
+    "updated_at": "2026-06-25 03:39:47",
+    "total_games": 23518,
+    "available_games": 21920,
+    "versions": [
+      { "version": "0.2.97.43", "total_games": 11285, "available_games": 10899 },
+      { "version": "0.2.97.44", "total_games": 12201, "available_games": 11021 }
+    ]
   }
 ]
 ```
+
+The `available_games` count includes games whose ROM is present directly (`game_rom_sets.available = 1`)
+OR whose same game_id is available in any older version of the same collection (prior-version
+inheritance). This avoids inflating the count when versions share ROMs via fallback.
 
 ---
 
@@ -172,6 +182,41 @@ Paginated games for a collection. Games are gathered from all versions linked to
   "offset": 0
 }
 ```
+
+---
+
+### GET /api/collections/:id/versions
+
+Returns all versions linked to a collection, with game counts and availability.
+
+**Response `200`**
+```json
+[
+  {
+    "id": 10,
+    "collection_id": 2,
+    "version": "0.2.97.43",
+    "dir": null,
+    "created_at": "2026-06-25 03:39:47",
+    "source": "fbneo",
+    "total_games": 11285,
+    "available_games": 10899
+  },
+  {
+    "id": 11,
+    "collection_id": 2,
+    "version": "0.2.97.44",
+    "dir": null,
+    "created_at": "2026-06-25 05:15:44",
+    "source": "fbneo",
+    "total_games": 12201,
+    "available_games": 11021
+  }
+]
+```
+
+`available_games` counts game_rom_sets rows where `available = 1` OR the same game_id
+has `available = 1` in any older version of the same collection (prior-version inheritance).
 
 ---
 

@@ -49,40 +49,63 @@ A retro game ROM collection manager. Import DAT files, scrape metadata from onli
 
 ```
 set_versions
-  id          INTEGER PRIMARY KEY
-  source      TEXT NOT NULL           -- e.g. "mame", "fbneo", "nps", "offlinelist", "datomatic"
-  version     TEXT NOT NULL           -- e.g. "0.261", "PSV", "nightly"
-  dir         TEXT                    -- ROM directory path
-  created_at  TEXT
-  UNIQUE(source, version)
+  id              INTEGER PRIMARY KEY
+  collection_id   INTEGER → collections
+  version         TEXT NOT NULL           -- e.g. "0.261", "0.2.97.43", "nightly"
+  dir             TEXT                    -- ROM directory path
+  created_at      TEXT
+  UNIQUE(collection_id, version)
 
-game_entries
-  id          INTEGER PRIMARY KEY
-  version_id  INTEGER → set_versions
-  name        TEXT NOT NULL           -- game short name (e.g. "sf2")
-  description TEXT
-  year        TEXT
-  manufacturer TEXT
-  cloneof     TEXT                    -- parent game name (MAME/FBNeo/NPS hierarchy)
-  platform    TEXT                    -- platform folder (e.g. "PSV" for NPS)
-  title_id    TEXT                    -- PSN title ID (NPS)
-  content_id  TEXT                    -- PSN content ID (NPS)
-  region      TEXT                    -- region code (NPS: "US", "EU", "JP", etc.)
-  covers      TEXT DEFAULT '[]'       -- JSON array of cover URLs
-  screenshots TEXT DEFAULT '[]'       -- JSON array of screenshot URLs
-  synopsis    TEXT
-  UNIQUE(version_id, name, region)
+games
+  id              INTEGER PRIMARY KEY
+  collection_id   INTEGER → collections
+  name            TEXT NOT NULL           -- game short name (e.g. "sf2", "btime")
+  description     TEXT
+  year            TEXT
+  manufacturer    TEXT
+  platform        TEXT                    -- platform folder (e.g. "arcade", "coleco", "PSV")
+  parent_game_id  INTEGER → games(id)    -- cloneof parent (within same platform)
+  synopsis        TEXT
+  isbios          INTEGER DEFAULT 0
+  isdevice        INTEGER DEFAULT 0
+  runnable        INTEGER
+  driver_status   TEXT
+  driver_emulation TEXT
+  sampleof        TEXT
+  rom_source_id   INTEGER → games(id)    -- links neogeo game to its arcade source
+  created_at      TEXT
+  UNIQUE(collection_id, name, platform)
 
-rom_entries
-  id           INTEGER PRIMARY KEY
-  game_entry_id INTEGER → game_entries
-  filename     TEXT NOT NULL          -- PKG filename (NPS) or ROM file inside zip (DAT)
-  size         INTEGER
-  crc32        TEXT
-  md5          TEXT
-  sha1         TEXT
-  status       TEXT                   -- "good", "nodump", etc.
-  merge_target TEXT
+game_rom_sets
+  id              INTEGER PRIMARY KEY
+  game_id         INTEGER → games
+  version_id      INTEGER → set_versions
+  romof           TEXT                    -- parent rom set name for split sets
+  status          TEXT NOT NULL DEFAULT 'good'
+  available       INTEGER NOT NULL DEFAULT 0
+  UNIQUE(game_id, version_id)
+
+game_rom_files
+  id              INTEGER PRIMARY KEY
+  rom_set_id      INTEGER → game_rom_sets
+  filename        TEXT NOT NULL           -- ROM file inside zip (or PKG filename for NPS)
+  size            INTEGER
+  crc32           TEXT
+  md5             TEXT
+  sha1            TEXT
+  status          TEXT                    -- "good", "nodump", etc.
+  merge_target    TEXT                    -- if set, this rom lives in the merge_target's zip
+  subtype         TEXT DEFAULT 'game'     -- "game", "sample", "dlc", "update"
+  pkg_url         TEXT DEFAULT ''         -- full PKG download URL (NPS)
+  UNIQUE(rom_set_id, filename)
+
+game_state
+  game_id         INTEGER PRIMARY KEY → games
+  available       INTEGER NOT NULL DEFAULT 0
+  rating          INTEGER NOT NULL DEFAULT 0
+  favourite       INTEGER NOT NULL DEFAULT 0
+  play_count      INTEGER NOT NULL DEFAULT 0
+  updated_at      TEXT
   subtype      TEXT DEFAULT 'game'    -- "game", "dlc", "update" (NPS)
   pkg_url      TEXT                   -- full PKG download URL (NPS)
   UNIQUE(game_entry_id, filename)
