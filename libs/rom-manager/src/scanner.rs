@@ -6,15 +6,16 @@ use crate::error::Result;
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ScanMatch {
     pub name: String,
+    pub game_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filename: Option<String>,
 }
 
 /// Scan a directory for .zip files, matching against expected game names and CRC32 values.
-/// `expected_crcs` maps game name → list of expected CRC32 strings (uppercase hex).
+/// `expected_crcs` maps game name → (game_id, list of expected CRC32 strings).
 /// If a game has no CRC list (empty or missing), filename-only matching is used.
 pub fn scan_directory(
-    expected_crcs: &HashMap<String, Vec<String>>,
+    expected_crcs: &HashMap<String, (i64, Vec<String>)>,
     dir: &Path,
 ) -> Result<Vec<ScanMatch>> {
     let mut matches = Vec::new();
@@ -29,31 +30,33 @@ pub fn scan_directory(
             if !expected_crcs.contains_key(&stem) {
                 continue;
             }
-            let expected = &expected_crcs[&stem];
+            let (game_id, expected) = &expected_crcs[&stem];
             // If no expected CRCs, match by name only
             if expected.is_empty() {
-                matches.push(ScanMatch {
-                    name: stem,
-                    filename: Some(entry.to_string_lossy().to_string()),
-                });
-                continue;
-            }
-            // Verify CRC from zip entry headers (no decompression)
-            if let Ok(file) = std::fs::File::open(&entry) {
-                if let Ok(mut archive) = zip::ZipArchive::new(file) {
-                    let mut zip_crcs = HashSet::new();
-                    for i in 0..archive.len() {
-                        if let Ok(e) = archive.by_index_raw(i) {
-                            if !e.is_dir() {
-                                zip_crcs.insert(format!("{:08X}", e.crc32()));
+                    matches.push(ScanMatch {
+                        name: stem,
+                        game_id: Some(*game_id),
+                        filename: Some(entry.to_string_lossy().to_string()),
+                    });
+                    continue;
+                }
+                // Verify CRC from zip entry headers (no decompression)
+                if let Ok(file) = std::fs::File::open(&entry) {
+                    if let Ok(mut archive) = zip::ZipArchive::new(file) {
+                        let mut zip_crcs = HashSet::new();
+                        for i in 0..archive.len() {
+                            if let Ok(e) = archive.by_index_raw(i) {
+                                if !e.is_dir() {
+                                    zip_crcs.insert(format!("{:08X}", e.crc32()));
+                                }
                             }
                         }
-                    }
-                    if expected.iter().all(|crc| zip_crcs.contains(crc)) {
-                        matches.push(ScanMatch {
-                            name: stem,
-                            filename: Some(entry.to_string_lossy().to_string()),
-                        });
+                        if expected.iter().all(|crc| zip_crcs.contains(crc)) {
+                            matches.push(ScanMatch {
+                                name: stem,
+                                game_id: Some(*game_id),
+                                filename: Some(entry.to_string_lossy().to_string()),
+                            });
                     }
                 }
             }
@@ -97,6 +100,7 @@ pub fn scan_nps_directory(
                 if let Some(game_name) = title_to_game.get(&tid) {
                     matches.push(ScanMatch {
                         name: game_name.clone(),
+                        game_id: None,
                         filename: Some(full_path),
                     });
                 }
@@ -137,8 +141,8 @@ mod tests {
         zip.finish().unwrap();
     }
 
-    fn make_crc_map(names: &[&str]) -> HashMap<String, Vec<String>> {
-        names.iter().map(|s| (s.to_string(), Vec::new())).collect()
+    fn make_crc_map(names: &[&str]) -> HashMap<String, (i64, Vec<String>)> {
+        names.iter().enumerate().map(|(i, s)| (s.to_string(), (i as i64, Vec::new()))).collect()
     }
 
     #[test]
@@ -198,5 +202,25 @@ mod tests {
 
         let result = scan_directory(&crcs, tmp.path()).unwrap();
         assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_scanner_returns_game_id() {
+        let tmp = TempDir::new().unwrap();
+        let mut crcs: HashMap<String, (i64, Vec<String>)> = HashMap::new();
+        crcs.insert("game_a".to_string(), (42, vec![]));
+        crcs.insert("game_b".to_string(), (99, vec![]));
+        create_test_zip(&tmp.path().join("game_a.zip"), b"data_a");
+        create_test_zip(&tmp.path().join("game_b.zip"), b"data_b");
+
+        let result = scan_directory(&crcs, tmp.path()).unwrap();
+        assert_eq!(result.len(), 2);
+        for m in &result {
+            assert!(m.game_id.is_some(), "ScanMatch should have game_id set");
+        }
+        let a = result.iter().find(|m| m.name == "game_a").unwrap();
+        let b = result.iter().find(|m| m.name == "game_b").unwrap();
+        assert_eq!(a.game_id, Some(42));
+        assert_eq!(b.game_id, Some(99));
     }
 }

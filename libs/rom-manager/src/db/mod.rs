@@ -236,30 +236,32 @@ impl Database {
     /// Resolve cloneof → parent_game_id for all games with a non-empty cloneof.
     /// romof is NOT stored in parent_game_id (it's per-version on game_rom_sets
     /// and resolved at build time by compute_game_roms).
+    /// Uses (collection_id, name, platform) to uniquely identify games.
     pub fn resolve_parents(&self, games: &[ParsedGame]) -> Result<()> {
-        let mut name_to_id: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        let mut name_plat_to_id: std::collections::HashMap<(String, String), i64> = std::collections::HashMap::new();
         for chunk in games.chunks(500) {
             let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-            let sql = format!("SELECT name, id FROM games WHERE name IN ({})", placeholders);
+            let sql = format!("SELECT name, platform, id FROM games WHERE name IN ({})", placeholders);
             let mut stmt = self.conn.prepare(&sql)?;
             let params: Vec<&dyn rusqlite::ToSql> = chunk.iter().map(|g| &g.name as &dyn rusqlite::ToSql).collect();
             let rows = stmt.query_map(params.as_slice(), |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
             })?;
             for row in rows {
-                let (name, id) = row?;
-                name_to_id.insert(name, id);
+                let (name, platform, id) = row?;
+                name_plat_to_id.insert((name, platform), id);
             }
         }
 
         for game in games {
             let Some(ref cloneof) = game.cloneof else { continue };
             if cloneof.is_empty() { continue; }
-            let parent_id = match name_to_id.get(cloneof) {
+            let parent_key = (cloneof.clone(), game.platform.clone());
+            let parent_id = match name_plat_to_id.get(&parent_key) {
                 Some(&id) => id,
                 None => match self.conn.query_row(
-                    "SELECT id FROM games WHERE name = ?1",
-                    params![cloneof],
+                    "SELECT id FROM games WHERE name = ?1 AND platform = ?2",
+                    params![cloneof, game.platform],
                     |r| r.get::<_, i64>(0),
                 ) {
                     Ok(id) => id,
@@ -267,7 +269,8 @@ impl Database {
                     Err(e) => return Err(crate::Error::Source(format!("Parent lookup error: {}", e))),
                 },
             };
-            let Some(&child_id) = name_to_id.get(&game.name) else { continue };
+            let child_key = (game.name.clone(), game.platform.clone());
+            let Some(&child_id) = name_plat_to_id.get(&child_key) else { continue };
             self.conn.execute(
                 "UPDATE games SET parent_game_id = ?1 WHERE id = ?2",
                 params![parent_id, child_id],
@@ -512,26 +515,33 @@ impl Database {
         let va = self.get_version(version_id_a)?.unwrap();
         let vb = self.get_version(version_id_b)?.unwrap();
 
-        // Closure: list all game names in a version, sorted.
-        let list_game_names = |version_id: i64| -> Result<std::collections::BTreeSet<String>> {
+        // Closure: list all game IDs in a version, sorted.
+        let list_game_ids = |version_id: i64| -> Result<std::collections::BTreeSet<i64>> {
             let mut stmt = self.conn.prepare(
-                "SELECT g.name FROM games g
-                 JOIN game_rom_sets grs ON grs.game_id = g.id
-                 WHERE grs.version_id = ?1 ORDER BY g.name",
+                "SELECT grs.game_id FROM game_rom_sets grs
+                 WHERE grs.version_id = ?1 ORDER BY grs.game_id",
             )?;
-            let names = stmt.query_map(params![version_id], |r| r.get::<_, String>(0))?
+            let ids = stmt.query_map(params![version_id], |r| r.get::<_, i64>(0))?
                 .filter_map(|r| r.ok())
                 .collect();
-            Ok(names)
+            Ok(ids)
         };
 
-        // Closure: get the rom_set id for a (version, game_name) pair.
-        let rom_set_id = |version_id: i64, name: &str| -> Result<i64> {
+        // Closure: get the rom_set id for a (version, game_id) pair.
+        let rom_set_id = |version_id: i64, game_id: i64| -> Result<i64> {
             self.conn.query_row(
                 "SELECT grs.id FROM game_rom_sets grs
-                 JOIN games g ON g.id = grs.game_id
-                 WHERE grs.version_id = ?1 AND g.name = ?2",
-                params![version_id, name],
+                 WHERE grs.version_id = ?1 AND grs.game_id = ?2",
+                params![version_id, game_id],
+                |r| r.get(0),
+            ).map_err(Into::into)
+        };
+
+        // Closure: get game name for a game_id.
+        let game_name = |game_id: i64| -> Result<String> {
+            self.conn.query_row(
+                "SELECT name FROM games WHERE id = ?1",
+                params![game_id],
                 |r| r.get(0),
             ).map_err(Into::into)
         };
@@ -547,22 +557,26 @@ impl Database {
             Ok(hashes)
         };
 
-        let games_a = list_game_names(version_id_a)?;
-        let games_b = list_game_names(version_id_b)?;
+        let games_a = list_game_ids(version_id_a)?;
+        let games_b = list_game_ids(version_id_b)?;
 
-        let added: Vec<String> = games_b.difference(&games_a).cloned().collect();
-        let removed: Vec<String> = games_a.difference(&games_b).cloned().collect();
-        let common: Vec<&String> = games_a.intersection(&games_b).collect();
+        let added_ids: Vec<i64> = games_b.difference(&games_a).cloned().collect();
+        let removed_ids: Vec<i64> = games_a.difference(&games_b).cloned().collect();
+        let added: Vec<String> = added_ids.iter().filter_map(|id| game_name(*id).ok()).collect();
+        let removed: Vec<String> = removed_ids.iter().filter_map(|id| game_name(*id).ok()).collect();
+        let common: Vec<&i64> = games_a.intersection(&games_b).collect();
 
         let mut changed = Vec::new();
-        for name in &common {
-            let rs_a = rom_set_id(version_id_a, name)?;
-            let rs_b = rom_set_id(version_id_b, name)?;
+        for game_id in &common {
+            let rs_a = rom_set_id(version_id_a, **game_id)?;
+            let rs_b = rom_set_id(version_id_b, **game_id)?;
             let hashes_a = collect_hashes(rs_a)?;
             let hashes_b = collect_hashes(rs_b)?;
 
             if hashes_a != hashes_b {
-                changed.push(name.to_string());
+                if let Ok(name) = game_name(**game_id) {
+                    changed.push(name);
+                }
             }
         }
 
@@ -644,10 +658,10 @@ impl Database {
     }
 
     /// Check if a game exists in this version and collection
-    pub fn game_exists(&self, name: &str, version_id: i64, collection_id: i64) -> Result<bool> {
+    pub fn game_exists(&self, name: &str, platform: &str, version_id: i64, collection_id: i64) -> Result<bool> {
         let result = self.conn.query_row(
-            "SELECT 1 FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE g.collection_id = ?1 AND g.name = ?2 AND grs.version_id = ?3",
-            params![collection_id, name, version_id],
+            "SELECT 1 FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE g.collection_id = ?1 AND g.name = ?2 AND g.platform = ?3 AND grs.version_id = ?4",
+            params![collection_id, name, platform, version_id],
             |r| r.get::<_, i64>(0),
         );
         match result {
@@ -1106,5 +1120,107 @@ mod tests {
         let gid_a_third = db.insert_game(0, &sample_game("shared")).unwrap();
         assert_eq!(gid_a_third, gid_a,
             "insert_game must return original rowid even after other table inserts");
+    }
+
+    #[test]
+    fn test_resolve_parents_cross_platform_duplicate_name() {
+        // Regression: same game name across platforms should not collide in resolve_parents.
+        // Set up: "btime" on arcade (collection 0), "btime" on coleco (collection 0).
+        // A clone "btime_hack" on coleco has cloneof="btime" — should resolve to coleco btime.
+        let db = make_db();
+        let cid = 0i64;
+
+        let mut btime_arcade = sample_game("btime");
+        btime_arcade.platform = "arcade".to_string();
+        let gid_btime_arcade = db.insert_game(cid, &btime_arcade).unwrap();
+
+        let mut btime_coleco = sample_game("btime");
+        btime_coleco.platform = "coleco".to_string();
+        let gid_btime_coleco = db.insert_game(cid, &btime_coleco).unwrap();
+
+        let mut clone = sample_game("btime_hack");
+        clone.platform = "coleco".to_string();
+        clone.cloneof = Some("btime".to_string());
+        let gid_clone = db.insert_game(cid, &clone).unwrap();
+
+        assert!(db.resolve_parents(&[clone]).is_ok());
+
+        let parent_id = db.conn.query_row(
+            "SELECT parent_game_id FROM games WHERE id = ?1",
+            params![gid_clone],
+            |r| r.get::<_, Option<i64>>(0),
+        ).unwrap();
+
+        assert_eq!(parent_id, Some(gid_btime_coleco),
+            "clone on coleco should resolve to btime on coleco, not arcade");
+    }
+
+    #[test]
+    fn test_resolve_parents_unknown_cross_platform_parent() {
+        // Regression: a clone references a parent name that only exists on a DIFFERENT platform.
+        // "btime_child" on coleco has cloneof="btime_parent", but btime_parent only exists on arcade.
+        // Should leave parent_game_id as NULL (no match within same platform).
+        let db = make_db();
+        let cid = 0i64;
+
+        let mut parent = sample_game("btime_parent");
+        parent.platform = "arcade".to_string();
+        db.insert_game(cid, &parent).unwrap();
+
+        let mut clone = sample_game("btime_child");
+        clone.platform = "coleco".to_string();
+        clone.cloneof = Some("btime_parent".to_string());
+        let gid_clone = db.insert_game(cid, &clone).unwrap();
+
+        assert!(db.resolve_parents(&[clone]).is_ok());
+
+        let parent_id = db.conn.query_row(
+            "SELECT parent_game_id FROM games WHERE id = ?1",
+            params![gid_clone],
+            |r| r.get::<_, Option<i64>>(0),
+        ).unwrap();
+
+        assert_eq!(parent_id, None,
+            "clone on coleco should have NULL parent when parent only exists on arcade");
+    }
+
+    #[test]
+    fn test_diff_versions_cross_platform_duplicate_names() {
+        // Regression: diff_versions should use game_id, not game name.
+        // Version A: "btime" on arcade (sha1=X), "btime" on coleco (sha1=Y)
+        // Version B: "btime" on arcade (sha1=Z, changed), "btime" on coleco (sha1=Y, unchanged)
+        // diff should report 1 changed (arcade), 1 unchanged (coleco).
+        let db = make_db();
+        let va = db.import_version(Some(0), "1.0", None).unwrap();
+        let vb = db.import_version(Some(0), "2.0", None).unwrap();
+
+        // Version A: btime on arcade + coleco
+        let mut ga1 = sample_game("btime");
+        ga1.platform = "arcade".to_string();
+        let gid_a_arc = db.insert_game(0, &ga1).unwrap();
+        let rs_a_arc = db.insert_rom_set(gid_a_arc, va, None).unwrap();
+        db.insert_rom_files_batch(rs_a_arc, &[sample_rom("rom1", &"A".repeat(40))]).unwrap();
+
+        let mut ga2 = sample_game("btime");
+        ga2.platform = "coleco".to_string();
+        let gid_a_col = db.insert_game(0, &ga2).unwrap();
+        let rs_a_col = db.insert_rom_set(gid_a_col, va, None).unwrap();
+        db.insert_rom_files_batch(rs_a_col, &[sample_rom("rom2", &"B".repeat(40))]).unwrap();
+
+        // Version B: same names, arcade changed sha1, coleco same
+        let _gid_b_arc = db.insert_game(0, &ga1).unwrap();
+        let rs_b_arc = db.insert_rom_set(gid_a_arc, vb, None).unwrap();
+        db.insert_rom_files_batch(rs_b_arc, &[sample_rom("rom1", &"C".repeat(40))]).unwrap();
+
+        let _gid_b_col = db.insert_game(0, &ga2).unwrap();
+        let rs_b_col = db.insert_rom_set(gid_a_col, vb, None).unwrap();
+        db.insert_rom_files_batch(rs_b_col, &[sample_rom("rom2", &"B".repeat(40))]).unwrap();
+
+        let diff = db.diff_versions(va, vb).unwrap();
+
+        assert_eq!(diff.added.len(), 0, "no games added");
+        assert_eq!(diff.removed.len(), 0, "no games removed");
+        assert_eq!(diff.changed.len(), 1, "arcade btime should be changed");
+        assert_eq!(diff.unchanged, 1, "coleco btime should be unchanged");
     }
 }

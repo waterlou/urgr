@@ -187,45 +187,67 @@ export default function BuildManager({ collectionId, collection }) {
 }
 
 function MissingGamesTable({ missingReasons, collectionId, onRowClick }) {
+  const byPlat = {};
+  for (const r of missingReasons) {
+    const p = r.platform || 'unknown';
+    if (!byPlat[p]) byPlat[p] = [];
+    byPlat[p].push(r);
+  }
+  const sortedPlats = Object.entries(byPlat).sort((a, b) => b[1].length - a[1].length);
+  let globalIdx = 0;
   return (
     <Box sx={{ mt: 1.5 }}>
       <Typography variant="caption" fontWeight={600} sx={{ mb: 0.5, display: 'block' }}>
         Missing games ({missingReasons.length})
       </Typography>
-      <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 300 }}>
+      <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 400 }}>
         <Table size="small" stickyHeader>
           <TableHead>
               <TableRow>
                 <TableCell sx={{ width: 40 }}>#</TableCell>
                 <TableCell>Game</TableCell>
-                <TableCell sx={{ width: 100 }}>Status</TableCell>
-                <TableCell sx={{ width: 180 }}>Details</TableCell>
+                <TableCell sx={{ width: 80 }}>Platform</TableCell>
+                <TableCell sx={{ width: 90 }}>Status</TableCell>
+                <TableCell sx={{ width: 170 }}>Details</TableCell>
               </TableRow>
           </TableHead>
           <TableBody>
-            {missingReasons.map((r, i) => {
-              const fnf = typeof r.reason === 'string' && r.reason === 'FileNotFound';
-              const crc = r.reason?.CrcMismatch;
-              return (
-                  <TableRow key={r.name} hover sx={{ cursor: 'pointer' }}
+            {sortedPlats.map(([plat, games]) => [
+              <TableRow key={'h-' + plat}>
+                <TableCell colSpan={5} sx={{ bgcolor: 'action.selected', py: 0.5 }}>
+                  <Typography variant="caption" fontWeight={700}>
+                    {plat} ({games.length})
+                  </Typography>
+                </TableCell>
+              </TableRow>,
+              ...games.map((r) => {
+                globalIdx++;
+                const fnf = typeof r.reason === 'string' && r.reason === 'FileNotFound';
+                const crc = r.reason?.CrcMismatch;
+                return (
+                  <TableRow key={r.name + plat} hover sx={{ cursor: 'pointer' }}
                     onClick={() => onRowClick(r)}>
-                    <TableCell><Typography variant="caption" color="text.secondary">{i + 1}</Typography></TableCell>
+                    <TableCell><Typography variant="caption" color="text.secondary">{globalIdx}</Typography></TableCell>
                     <TableCell>
-                    <Typography variant="body2" fontFamily="monospace" fontSize={13}>{r.name}</Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Chip label={fnf ? 'Missing' : 'CRC Error'} size="small"
-                      color={fnf ? 'error' : 'warning'} />
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="caption" color="text.secondary">
-                      {fnf ? 'File not found in import' :
-                       crc ? `${crc.matched}/${crc.expected} ROMs verified` : ''}
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
+                      <Typography variant="body2" fontFamily="monospace" fontSize={13}>{r.name}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip label={plat} size="small" variant="outlined" sx={{ fontSize: 11 }} />
+                    </TableCell>
+                    <TableCell>
+                      <Chip label={fnf ? 'Missing' : 'CRC Error'} size="small"
+                        color={fnf ? 'error' : 'warning'} />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="caption" color="text.secondary">
+                        {fnf ? 'File not found' :
+                         crc ? `${crc.matched}/${crc.expected} ROMs verified` : ''}
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                );
+              }),
+            ])}
           </TableBody>
         </Table>
       </TableContainer>

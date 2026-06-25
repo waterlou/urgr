@@ -179,7 +179,7 @@ fn main() -> ExitCode {
     // Apply MAME filters before insertion
     let filtered: Vec<ParsedGame> = games.into_iter().filter(|game| {
         if existing_only {
-            let exists = db.game_exists(&game.name, version_id, cid).unwrap_or(false);
+            let exists = db.game_exists(&game.name, &game.platform, version_id, cid).unwrap_or(false);
             if !exists { return false; }
         }
         if let Some(ref status) = status_filter {

@@ -20,13 +20,11 @@ export class ScanOperation extends Operation {
 
       run('UPDATE game_rom_sets SET available = 0 WHERE version_id = ?', [version_id]);
 
-      const matchedNames = (result?.matches || []).map(m => m.name);
-      if (matchedNames.length > 0) {
-        const ph = matchedNames.map(() => '?').join(',');
+      const matchedIds = [...new Set((result?.matches || []).map(m => m.game_id).filter(id => id != null))];
+      if (matchedIds.length > 0) {
+        const ph = matchedIds.map(() => '?').join(',');
         run(`UPDATE game_rom_sets SET available = 1
-          WHERE version_id = ? AND game_id IN (
-            SELECT g.id FROM games g WHERE g.name IN (${ph})
-          )`, [version_id, ...matchedNames]);
+          WHERE version_id = ? AND game_id IN (${ph})`, [version_id, ...matchedIds]);
       }
 
       const gameIds = all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [version_id]).map(r => r.game_id);

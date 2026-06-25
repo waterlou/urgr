@@ -758,10 +758,13 @@ export async function scrapeSingleGame(gameId, versionId) {
     : null;
 
   function trySearch(query, platform) {
-    const args = ['search', query];
-    if (platform) args.push('--platform', platform);
-    const r = execCli(args, { binary: 'scraper' });
-    if (r?.results?.length) return r;
+    const defaultSources = ['no-intro-pictures', 'thegamesdb', 'igdb', 'libretro-thumbnails', 'arcadedb', 'mobygames'];
+    for (const src of defaultSources) {
+      const args = ['search', query, '--source', src];
+      if (platform) args.push('--platform', platform);
+      const r = execCli(args, { binary: 'scraper' });
+      if (r?.results?.length) return r;
+    }
     return null;
   }
 
@@ -854,13 +857,15 @@ export async function scrapeSingleGame(gameId, versionId) {
   // Try ArcadeDB first with the MAME short name (only when enabled or no priority set)
   if (!enabledSet || enabledSet.has('arcadedb')) {
     if (scrapeMode === 'individual' || (game.name && (game.platform === 'arcade' || !game.platform))) {
-      const r = execCli(['search', searchName, '--source', 'arcadedb'], { binary: 'scraper' });
-      if (r?.results?.length) {
-        const ranked = rankResults(r.results, game.name, game.name, game.platform);
-        const best = ranked[0];
-        searchResult = { results: [best] };
-        matchedTitle = best.title;
-      }
+      try {
+        const r = execCli(['search', searchName, '--source', 'arcadedb'], { binary: 'scraper' });
+        if (r?.results?.length) {
+          const ranked = rankResults(r.results, game.name, game.name, game.platform);
+          const best = ranked[0];
+          searchResult = { results: [best] };
+          matchedTitle = best.title;
+        }
+      } catch {}
     }
   }
 
@@ -908,6 +913,7 @@ export async function scrapeSingleGame(gameId, versionId) {
   }
 
   const first = searchResult.results[0];
+  // first result
   let detailResult;
   try {
     const detailArgs = ['detail', first.id];
@@ -923,10 +929,10 @@ export async function scrapeSingleGame(gameId, versionId) {
     return { scraped: false, error: 'Detail fetch failed', gameId };
   }
 
-  const synopsis = detailResult.synopsis || '';
-  const rawDate = (detailResult.release_date || '').trim();
-  const year = (rawDate && !rawDate.startsWith('1970')) ? rawDate.substring(0, 4) : null;
-  const manufacturer = detailResult.publisher || detailResult.developer || null;
+  let synopsis = detailResult.synopsis || '';
+  let rawDate = detailResult.release_date || game.year || '';
+  let year = (rawDate && !rawDate.startsWith('1970')) ? rawDate.substring(0, 4) : null;
+  let manufacturer = detailResult.publisher || detailResult.developer || null;
 
   function upgradeCovers(urls) {
     return (urls || []).map(u => {
@@ -961,18 +967,48 @@ export async function scrapeSingleGame(gameId, versionId) {
       [canonical, mediaPlat, synopsis || '', covers, screenshots, fanarts, videos, first.source || '']);
   }
 
-  // Providers without synopsis (ArcadeDB, LibretroThumbnails) — try to grab one from IGDB or TheGamesDB
-  if (!synopsis && first.source && first.source !== 'screenscraper' && first.source !== 'igdb' && first.source !== 'thegamesdb') {
+  // Sources without metadata (no-intro-pictures, libretro-thumbnails) have search results
+  // but no year/manufacturer/synopsis — fallback to IGDB or TheGamesDB for real metadata
+  const fallbackSrc = first.source;
+  const fallbackQuery = ((first.title || game.name).replace(/\s*\([^)]*\)\s*/g, '') || first.title || game.name).trim();
+  // fallback log
+  if (fallbackSrc && fallbackSrc !== 'screenscraper' && fallbackSrc !== 'igdb' && fallbackSrc !== 'thegamesdb') {
     for (const src of ['igdb', 'thegamesdb']) {
       if (enabledSet && !enabledSet.has(src)) continue;
       try {
-        const srcSearch = execCli(['search', first.title || game.name, '--source', src], { binary: 'scraper' });
+        const srcSearch = execCli(['search', fallbackQuery, '--source', src], { binary: 'scraper' });
         const srcResult = srcSearch?.results?.[0];
         if (srcResult) {
           const srcDetail = execCli(['detail', srcResult.id, '--source', src], { binary: 'scraper' });
-          if (srcDetail?.synopsis) {
-            run(`UPDATE games SET synopsis = ? WHERE id = ?`, [srcDetail.synopsis, game.id]);
-            run(`UPDATE game_media SET synopsis = ? WHERE name = ? AND platform = ?`, [srcDetail.synopsis, canonical, mediaPlat]);
+          if (srcDetail) {
+            if (srcDetail.synopsis && !synopsis) {
+              run(`UPDATE games SET synopsis = ? WHERE id = ?`, [srcDetail.synopsis, game.id]);
+              run(`UPDATE game_media SET synopsis = ? WHERE name = ? AND platform = ?`, [srcDetail.synopsis, canonical, mediaPlat]);
+              synopsis = srcDetail.synopsis;
+            }
+            const fbDate = (srcDetail.release_date || '').trim();
+            const fbYear = (fbDate && !fbDate.startsWith('1970')) ? fbDate.substring(0, 4) : null;
+            const fbManufacturer = srcDetail.publisher || srcDetail.developer || null;
+            if ((fbYear && !year) || (fbManufacturer && !manufacturer)) {
+              const updates = [];
+              const upParams = [];
+              if (fbYear && !year) { updates.push('year = ?'); upParams.push(fbYear); }
+              if (fbManufacturer && !manufacturer) { updates.push('manufacturer = ?'); upParams.push(fbManufacturer); }
+              if (updates.length > 0) {
+                run(`UPDATE games SET ${updates.join(', ')} WHERE id = ?`, [...upParams, game.id]);
+                if (fbYear && !year) year = fbYear;
+                if (fbManufacturer && !manufacturer) manufacturer = fbManufacturer;
+              }
+            }
+            if (srcDetail.covers?.length || srcDetail.screenshots?.length) {
+              const allCovers = [...(srcDetail.logos || []), ...(srcDetail.covers || [])];
+              const covers = allCovers.length ? JSON.stringify(upgradeCovers(allCovers)) : '[]';
+              const screenshots = srcDetail.screenshots?.length ? JSON.stringify(upgradeScreenshots(srcDetail.screenshots)) : '[]';
+              const fanarts = srcDetail.fanarts?.length ? JSON.stringify(srcDetail.fanarts) : '[]';
+              const videos = srcDetail.videos?.length ? JSON.stringify(srcDetail.videos) : '[]';
+              run('INSERT OR REPLACE INTO game_media (name, platform, covers, screenshots, fanarts, videos, source, scraped_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime(\'now\'))',
+                [canonical, mediaPlat, covers, screenshots, fanarts, videos, src]);
+            }
             break;
           }
         }
@@ -1037,8 +1073,8 @@ export async function scrapeSingleGame(gameId, versionId) {
     `, [updated.id, updated.version_id]);
   }
 
-  const hadData = synopsis || year || manufacturer || detailResult.covers?.length || detailResult.screenshots?.length || detailResult.logos?.length;
-  return { scraped: true, saved: !!hadData, title: matchedTitle || first.title, game: updated, gameId };
+  const hadData = !!(updated.synopsis || updated.year || updated.manufacturer || mediaCovers.length > 0 || mediaScreenshots.length > 0 || mediaFanarts.length > 0);
+  return { scraped: true, saved: hadData, title: matchedTitle || first.title, game: updated, gameId };
 }
 
 router.post('/:id/scrape', async (req, res) => {

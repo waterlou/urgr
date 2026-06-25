@@ -26,33 +26,52 @@ pub fn verify_version(
     fallback_dirs: &[(i64, String, PathBuf)],
 ) -> Result<VerifyResult> {
     let games = db.list_games(version_id)?;
-    let expected_names: Vec<String> = games.iter().map(|g| g.name.clone()).collect();
     let mut details = Vec::new();
     let mut present = 0i64;
     let mut missing = 0i64;
     let mut inherited = 0i64;
     let mut mismatched = 0i64;
 
-    for name in &expected_names {
-        let expected_zip = format!("{}.zip", name);
-        let in_version_dir = version_dir.join(&expected_zip).exists() ||
-            find_zip_recursive(version_dir, &expected_zip);
+    for game in &games {
+        let expected_zip = format!("{}.zip", game.name);
+        // Check platform-specific subdirectory first (e.g. roms/arcade/{name}.zip)
+        let has_platform = !game.platform.is_empty();
+        let plat_path = if has_platform {
+            Some(version_dir.join("roms").join(&game.platform).join(&expected_zip))
+        } else {
+            None
+        };
+        let in_version_dir = plat_path.as_ref().map(|p| p.exists()).unwrap_or(false)
+            || version_dir.join(&expected_zip).exists()
+            || find_zip_recursive(version_dir, &expected_zip);
 
         if in_version_dir {
             present += 1;
+            let path = plat_path
+                .filter(|p| p.exists())
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| version_dir.join(&expected_zip).to_string_lossy().to_string());
             details.push(GameStatus::Present {
-                name: name.clone(),
-                path: version_dir.join(&expected_zip).to_string_lossy().to_string(),
+                name: game.name.clone(),
+                path,
             });
         } else {
             let mut found = false;
             for (_, fb_ver, fb_dir) in fallback_dirs {
-                let fb_path = fb_dir.join(&expected_zip);
-                if fb_path.exists() || find_zip_recursive(fb_dir, &expected_zip) {
+                let fb_plat = if has_platform {
+                    Some(fb_dir.join("roms").join(&game.platform).join(&expected_zip))
+                } else {
+                    None
+                };
+                let exists = fb_plat.as_ref().map(|p| p.exists()).unwrap_or(false)
+                    || fb_dir.join(&expected_zip).exists()
+                    || find_zip_recursive(fb_dir, &expected_zip);
+                if exists {
                     inherited += 1;
                     found = true;
+                    let fb_path = fb_plat.unwrap_or_else(|| fb_dir.join(&expected_zip));
                     details.push(GameStatus::Inherited {
-                        name: name.clone(),
+                        name: game.name.clone(),
                         from_version: fb_ver.clone(),
                         path: fb_path.to_string_lossy().to_string(),
                     });
@@ -61,13 +80,13 @@ pub fn verify_version(
             }
             if !found {
                 missing += 1;
-                details.push(GameStatus::Missing { name: name.clone() });
+                details.push(GameStatus::Missing { name: game.name.clone() });
             }
         }
     }
 
     Ok(VerifyResult {
-        total_games: expected_names.len() as i64,
+        total_games: games.len() as i64,
         present,
         missing,
         inherited,

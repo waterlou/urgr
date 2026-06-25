@@ -157,6 +157,8 @@ pub struct RomDetail {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MissingGame {
     pub name: String,
+    pub game_id: i64,
+    pub platform: String,
     pub reason: MissingReason,
     #[serde(default)]
     pub rom_details: Vec<RomDetail>,

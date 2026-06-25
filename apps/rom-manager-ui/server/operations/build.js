@@ -54,19 +54,17 @@ export class BuildOperation extends Operation {
     const collectionDir = path.resolve(import.meta.dirname, '..', '..', '..', '..', 'data', 'roms', col.folder || col.slug);
     const scanDir = dir || path.join(collectionDir, sv.version);
 
-    const matchedNames = (() => {
+    const matchedIds = [...new Set((() => {
       const result = execCli(['scan', String(version_id), scanDir]);
-      return (result?.matches || []).map(m => m.name);
-    })();
+      return (result?.matches || []).map(m => m.game_id).filter(id => id != null);
+    })())];
 
     run('UPDATE game_rom_sets SET available = 0 WHERE version_id = ?', [version_id]);
 
-    if (matchedNames.length > 0) {
-      const ph = matchedNames.map(() => '?').join(',');
+    if (matchedIds.length > 0) {
+      const ph = matchedIds.map(() => '?').join(',');
       run(`UPDATE game_rom_sets SET available = 1
-        WHERE version_id = ? AND game_id IN (
-          SELECT g.id FROM games g WHERE g.name IN (${ph})
-        )`, [version_id, ...matchedNames]);
+        WHERE version_id = ? AND game_id IN (${ph})`, [version_id, ...matchedIds]);
     }
 
     const gameIds = all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [version_id]).map(r => r.game_id);
@@ -78,23 +76,27 @@ export class BuildOperation extends Operation {
     let reused = 0;
     const priorVersions = all('SELECT DISTINCT sv.version, sv.id FROM set_versions sv WHERE sv.collection_id = ? AND sv.id < ? ORDER BY sv.id', [this.collectionId, version_id]);
     if (priorVersions.length > 0 && fs.existsSync(collectionDir)) {
-      const currentNames = new Set(all('SELECT DISTINCT g.name FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ?', [version_id]).map(r => r.name));
+      const currentIds = new Set(all('SELECT grs.game_id FROM game_rom_sets grs WHERE grs.version_id = ?', [version_id]).map(r => r.game_id));
       for (const pv of priorVersions) {
         const pvRoms = path.join(collectionDir, pv.version, 'roms');
         if (!fs.existsSync(pvRoms)) continue;
         try {
-          const readDir = (d) => {
+          const readDir = (d, plat) => {
             const results = [];
-            for (const e of fs.readdirSync(d)) {
-              const fp = path.join(d, e);
-              if (fs.statSync(fp).isDirectory()) results.push(...readDir(fp));
-              else if (e.endsWith('.zip')) results.push(path.basename(e, '.zip'));
+            for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+              const fp = path.join(d, e.name);
+              if (e.isDirectory()) results.push(...readDir(fp, e.name));
+              else if (e.name.endsWith('.zip')) {
+                const stem = path.basename(e.name, '.zip');
+                const m = get('SELECT grs.game_id FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ? AND g.name = ?' + (plat ? ' AND g.platform = ?' : ''), plat ? [pv.id, stem, plat] : [pv.id, stem]);
+                if (m) results.push(m.game_id);
+              }
             }
             return results;
           };
-          const priorFiles = readDir(pvRoms);
-          for (const stem of priorFiles) {
-            if (currentNames.has(stem)) reused++;
+          const priorGameIds = readDir(pvRoms, null);
+          for (const gid of priorGameIds) {
+            if (currentIds.has(gid)) reused++;
           }
         } catch {}
       }
@@ -128,14 +130,24 @@ export class BuildOperation extends Operation {
     run('UPDATE game_rom_sets SET available = 0 WHERE version_id = ?', [version_id]);
 
     if (dir && fs.existsSync(dir)) {
-      const files = fs.readdirSync(dir).filter(f => f.endsWith('.zip'));
-      const names = files.map(f => path.basename(f, '.zip'));
-      if (names.length > 0) {
-        const ph = names.map(() => '?').join(',');
+      const foundIds = new Set();
+      const walkDir = (d, plat) => {
+        for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+          const fp = path.join(d, e.name);
+          if (e.isDirectory()) walkDir(fp, e.name);
+          else if (e.name.endsWith('.zip')) {
+            const stem = path.basename(e.name, '.zip');
+            const m = get('SELECT g.id FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ? AND g.name = ?' + (plat ? ' AND g.platform = ?' : ''), plat ? [version_id, stem, plat] : [version_id, stem]);
+            if (m) foundIds.add(m.id);
+          }
+        }
+      };
+      walkDir(dir, null);
+      if (foundIds.size > 0) {
+        const ids = [...foundIds];
+        const ph = ids.map(() => '?').join(',');
         run(`UPDATE game_rom_sets SET available = 1
-          WHERE version_id = ? AND game_id IN (
-            SELECT g.id FROM games g WHERE g.name IN (${ph})
-          )`, [version_id, ...names]);
+          WHERE version_id = ? AND game_id IN (${ph})`, [version_id, ...ids]);
       }
     }
 

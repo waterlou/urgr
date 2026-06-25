@@ -37,10 +37,6 @@ router.post('/api/versions/:id/fill-descriptions', async (req, res) => {
     if (!Array.isArray(contents)) throw new Error('Invalid response');
 
     let datFiles = contents.filter(f => f.name.endsWith('.dat') && f.download_url);
-    if (sv.ds_preset === 'fbneo' && sv.version.includes('43')) {
-      const combined = datFiles.find(f => f.name.includes('0.2.97.43') && !f.name.includes('only'));
-      if (combined) datFiles = [combined];
-    }
 
     const datMap = new Map();
     for (const df of datFiles) {
@@ -794,11 +790,6 @@ router.post('/api/versions/import-online', async (req, res) => {
       if (!Array.isArray(contents)) throw new Error('Invalid response from GitHub contents API');
 
       let datFiles = contents.filter(f => f.name.endsWith('.dat') && f.download_url);
-
-      if (version === '0.2.97.43') {
-        const combined = datFiles.find(f => f.name.includes('0.2.97.43') && !f.name.includes('only'));
-        if (combined) datFiles = [combined];
-      }
 
       if (datFiles.length === 0) throw new Error('No DAT files found in the dats/ folder');
 
