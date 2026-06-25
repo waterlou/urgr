@@ -29,6 +29,65 @@ import { romsDir, dataDir } from '../paths.js';
 
 const router = Router();
 
+function sortVersionList(versions) {
+  versions.sort((a, b) => sortVersions([a.version, b.version])[0] === a.version ? -1 : 1);
+}
+
+function upsertBuild(colId, versionId, format, totalGames) {
+  const existing = get('SELECT id FROM collection_builds WHERE collection_id = ? AND version_id = ?', [colId, versionId]);
+  if (existing) {
+    runNow("UPDATE collection_builds SET status = 'building', format = ?, games_total = ?, started_at = datetime('now') WHERE id = ?", [format, totalGames, existing.id]);
+    return existing.id;
+  }
+  runNow("INSERT INTO collection_builds (collection_id, version_id, status, format, games_total, started_at) VALUES (?, ?, 'building', ?, ?, datetime('now'))", [colId, versionId, format, totalGames]);
+  return get('SELECT id FROM collection_builds WHERE collection_id = ? AND version_id = ?', [colId, versionId]).id;
+}
+
+// Walk the roms/ directory for the given version (and prior versions), find zip files,
+// and set game_rom_sets.available = 1 for matching games. Handles platform subdirectories.
+function setAvailableFromRomsDir(versionId, collectionDir, buildVersion) {
+  const foundGameIds = new Set();
+  const versionFilePath = path.join(collectionDir, '.version');
+  const allVersions = fs.existsSync(versionFilePath)
+    ? fs.readFileSync(versionFilePath, 'utf-8').split('\n').map(l => l.trim()).filter(l => l)
+    : [];
+  const scanVersions = [];
+  for (const v of allVersions) {
+    scanVersions.push(v);
+    if (v === buildVersion) break;
+  }
+  if (scanVersions.length === 0) scanVersions.push(buildVersion);
+  for (const ver of scanVersions) {
+    const romsDir = path.join(collectionDir, ver, 'roms');
+    if (!fs.existsSync(romsDir)) continue;
+    const walkDir = (dir, plat) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          walkDir(path.join(dir, entry.name), entry.name);
+        } else if (entry.isFile() && entry.name.endsWith('.zip')) {
+          const stem = entry.name.replace('.zip', '');
+          let row;
+          if (plat && plat !== 'roms') {
+            row = get('SELECT g.id FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ? AND g.name = ? AND g.platform = ? LIMIT 1', [versionId, stem, plat]);
+          } else {
+            row = get('SELECT g.id FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ? AND g.name = ? LIMIT 1', [versionId, stem]);
+          }
+          if (row) foundGameIds.add(row.id);
+        }
+      }
+    };
+    walkDir(romsDir, '');
+  }
+  runNow('UPDATE game_rom_sets SET available = 0 WHERE version_id = ?', [versionId]);
+  if (foundGameIds.size > 0) {
+    const ids = [...foundGameIds];
+    const ph = ids.map(() => '?').join(',');
+    runNow(`UPDATE game_rom_sets SET available = 1 WHERE version_id = ? AND game_id IN (${ph})`, [versionId, ...ids]);
+  }
+  syncGameAvailability(all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [versionId]).map(r => r.game_id));
+  return foundGameIds.size;
+}
+
 router.get('/api/status', async (req, res) => {
   await dbReady;
   try {
@@ -57,7 +116,7 @@ router.get('/api/collections', async (req, res) => {
         JOIN collections c ON c.id = sv.collection_id
         WHERE sv.collection_id = ?
         ORDER BY sv.version DESC`, [c.id]);
-      versions.sort((a, b) => sortVersions([a.version, b.version])[0] === a.version ? -1 : 1);
+      sortVersionList(versions);
       const vids = versions.map(v => v.id);
       let total = 0;
       let available = 0;
@@ -285,12 +344,13 @@ router.get('/api/collections/:id/games', async (req, res) => {
 
     const collectionVersions = all(`
       SELECT sv.id, c.dataset_preset as source, sv.version, sv.created_at,
-        (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games
+        (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games,
+        ${AVAILABLE_GAMES_SQL}
       FROM set_versions sv
       JOIN collections c ON c.id = sv.collection_id
       WHERE sv.collection_id = ?
     `, [id]);
-    collectionVersions.sort((a, b) => sortVersions([a.version, b.version])[0] === a.version ? -1 : 1);
+    sortVersionList(collectionVersions);
 
     res.json({ collection, games, platforms, total, versions: collectionVersions, limit: Number(limit), offset: Number(offset) });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -307,7 +367,7 @@ router.get('/api/collections/:id/versions', async (req, res) => {
       JOIN collections c ON c.id = sv.collection_id
       WHERE sv.collection_id = ?
     `, [req.params.id]);
-    versions.sort((a, b) => sortVersions([a.version, b.version])[0] === a.version ? -1 : 1);
+    sortVersionList(versions);
     res.json(versions);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -470,15 +530,7 @@ router.post('/api/collections/:id/build', async (req, res) => {
     // Create/update collection_builds record
     const buildFormat = scan ? 'scan' : isNps ? 'pkg' : 'split';
     const totalGames = get('SELECT COUNT(*) as c FROM game_rom_sets WHERE version_id = ?', [version_id]).c;
-    const existingBuild = get('SELECT id FROM collection_builds WHERE collection_id = ? AND version_id = ?', [col.id, version_id]);
-    let buildId;
-    if (existingBuild) {
-      runNow("UPDATE collection_builds SET status = 'building', format = ?, games_total = ?, started_at = datetime('now') WHERE id = ?", [buildFormat, totalGames, existingBuild.id]);
-      buildId = existingBuild.id;
-    } else {
-      runNow("INSERT INTO collection_builds (collection_id, version_id, status, format, games_total, started_at) VALUES (?, ?, 'building', ?, ?, datetime('now'))", [col.id, version_id, buildFormat, totalGames]);
-      buildId = get('SELECT id FROM collection_builds WHERE collection_id = ? AND version_id = ?', [col.id, version_id]).id;
-    }
+    const buildId = upsertBuild(col.id, version_id, buildFormat, totalGames);
 
     const jobId = crypto.randomUUID();
     const job = createJob(jobId);
@@ -542,48 +594,7 @@ router.post('/api/collections/:id/build', async (req, res) => {
             signal: job._abort.signal,
           }).then(result => {
             try {
-              const foundGameIds = new Set();
-              const versionFilePath = path.join(collectionDir, '.version');
-              const allVersions = (fs.existsSync(versionFilePath)
-                ? fs.readFileSync(versionFilePath, 'utf-8').split('\n').map(l => l.trim()).filter(l => l)
-                : []);
-              const scanVersions = [];
-              for (const v of allVersions) {
-                scanVersions.push(v);
-                if (v === sv.version) break;
-              }
-              if (scanVersions.length === 0) scanVersions.push(sv.version);
-              for (const ver of scanVersions) {
-                const romsDir = path.join(collectionDir, ver, 'roms');
-                if (fs.existsSync(romsDir)) {
-                  const walkDir = (dir, plat) => {
-                    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-                      const fullPath = path.join(dir, entry.name);
-                      if (entry.isDirectory()) {
-                        walkDir(fullPath, entry.name);
-                      } else if (entry.isFile() && entry.name.endsWith('.zip')) {
-                        const stem = entry.name.replace('.zip', '');
-                        let id;
-                        if (plat && plat !== 'roms') {
-                          id = get('SELECT g.id FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ? AND g.name = ? AND g.platform = ? LIMIT 1', [version_id, stem, plat]);
-                        } else {
-                          id = get('SELECT g.id FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ? AND g.name = ? LIMIT 1', [version_id, stem]);
-                        }
-                        if (id) foundGameIds.add(id.id);
-                      }
-                    }
-                  };
-                  walkDir(romsDir, '');
-                }
-              }
-              runNow('UPDATE game_rom_sets SET available = 0 WHERE version_id = ?', [version_id]);
-              if (foundGameIds.size > 0) {
-                const ids = [...foundGameIds];
-                const ph = ids.map(() => '?').join(',');
-                runNow(`UPDATE game_rom_sets SET available = 1
-                  WHERE version_id = ? AND game_id IN (${ph})`, [version_id, ...ids]);
-              }
-              syncGameAvailability(all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [version_id]).map(r => r.game_id));
+              setAvailableFromRomsDir(version_id, collectionDir, sv.version);
             } catch (_) {}
             runNow("UPDATE collection_builds SET status = 'complete', games_built = ?, completed_at = datetime('now') WHERE id = ?", [result.added || 0, buildId]);
             doneJob(jobId, result);
@@ -649,12 +660,7 @@ router.post('/api/collections/:id/builds', async (req, res) => {
     }
 
     const total = get('SELECT COUNT(*) as c FROM game_rom_sets WHERE version_id = ?', [version_id]).c;
-    const existing = get('SELECT id FROM collection_builds WHERE collection_id = ? AND version_id = ?', [colId, version_id]);
-    if (existing) {
-      runNow("UPDATE collection_builds SET status = 'building', format = ?, games_total = ?, started_at = datetime('now') WHERE id = ?", [format, total, existing.id]);
-    } else {
-      runNow("INSERT INTO collection_builds (collection_id, version_id, status, format, games_total, started_at) VALUES (?, ?, 'building', ?, ?, datetime('now'))", [colId, version_id, format, total]);
-    }
+    upsertBuild(colId, version_id, format, total);
     res.json(get('SELECT cb.*, sv.version, c.dataset_preset as source FROM collection_builds cb JOIN set_versions sv ON sv.id = cb.version_id JOIN collections c ON c.id = sv.collection_id WHERE cb.collection_id = ? AND cb.version_id = ?', [colId, version_id]));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -712,37 +718,7 @@ router.post('/api/collections/:id/builds/:buildId/run', async (req, res) => {
       // Scan output dir to set game_rom_sets.available for built games
       try {
         const buildDir = base_dir || path.join(romsDir, build.source);
-        const foundGames = new Set();
-        const versionFilePath = path.join(buildDir, '.version');
-        const allVersions = (fs.existsSync(versionFilePath)
-          ? fs.readFileSync(versionFilePath, 'utf-8').split('\n').map(l => l.trim()).filter(l => l)
-          : []);
-        const scanVersions = [];
-        for (const v of allVersions) {
-          scanVersions.push(v);
-          if (v === build.version) break;
-        }
-        if (scanVersions.length === 0) scanVersions.push(build.version);
-        for (const ver of scanVersions) {
-          const romsDir = path.join(buildDir, ver, 'roms');
-          if (fs.existsSync(romsDir)) {
-            for (const entry of fs.readdirSync(romsDir, { withFileTypes: true })) {
-              if (entry.isDirectory()) foundGames.add(entry.name);
-              else if (entry.isFile() && entry.name.endsWith('.zip')) foundGames.add(entry.name.replace('.zip', ''));
-            }
-          }
-        }
-        const versionId = build.version_id;
-        runNow('UPDATE game_rom_sets SET available = 0 WHERE version_id = ?', [versionId]);
-        if (foundGames.size > 0) {
-          const names = [...foundGames];
-          const ph = names.map(() => '?').join(',');
-          runNow(`UPDATE game_rom_sets SET available = 1
-            WHERE version_id = ? AND game_id IN (
-              SELECT g.id FROM games g WHERE g.name IN (${ph})
-            )`, [versionId, ...names]);
-        }
-        syncGameAvailability(all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [versionId]).map(r => r.game_id));
+        const totalFound = setAvailableFromRomsDir(build.version_id, buildDir, build.version);
       } catch (_) {}
       doneJob(jobId, result);
     }).catch((err) => {
