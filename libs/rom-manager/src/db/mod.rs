@@ -283,7 +283,8 @@ impl Database {
         let mut stmt = self.conn.prepare(
         "SELECT g.id, g.name, g.description, g.year, g.manufacturer, g.platform,
                 g.parent_game_id, g.synopsis, g.isbios, g.isdevice,
-                g.runnable, g.driver_status, g.driver_emulation, g.sampleof
+                g.runnable, g.driver_status, g.driver_emulation, g.sampleof,
+                g.rom_source_id
          FROM games g
          JOIN game_rom_sets grs ON grs.game_id = g.id
          WHERE grs.version_id = ?1
@@ -305,6 +306,7 @@ impl Database {
                 driver_status: r.get(11)?,
                 driver_emulation: r.get(12)?,
                 sampleof: r.get(13)?,
+                rom_source_id: r.get(14)?,
             })
         })?;
         let mut games = Vec::new();
@@ -332,7 +334,8 @@ impl Database {
         let mut stmt = self.conn.prepare(
         "SELECT id, name, description, year, manufacturer, platform,
                 parent_game_id, synopsis, isbios, isdevice,
-                runnable, driver_status, driver_emulation, sampleof
+                runnable, driver_status, driver_emulation, sampleof,
+                rom_source_id
          FROM games WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![game_id], |r| {
@@ -351,6 +354,7 @@ impl Database {
                 driver_status: r.get(11)?,
                 driver_emulation: r.get(12)?,
                 sampleof: r.get(13)?,
+                rom_source_id: r.get(14)?,
             })
         })?;
         match rows.next() {
@@ -363,7 +367,8 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT id, name, description, year, manufacturer, platform,
                     parent_game_id, synopsis, isbios, isdevice,
-                    runnable, driver_status, driver_emulation, sampleof
+                    runnable, driver_status, driver_emulation, sampleof,
+                    rom_source_id
              FROM games WHERE collection_id = ?1 AND name = ?2",
         )?;
         let mut rows = stmt.query_map(params![collection_id, name], |r| {
@@ -382,6 +387,7 @@ impl Database {
                 driver_status: r.get(11)?,
                 driver_emulation: r.get(12)?,
                 sampleof: r.get(13)?,
+                rom_source_id: r.get(14)?,
             })
         })?;
         match rows.next() {

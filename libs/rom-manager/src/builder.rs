@@ -678,6 +678,32 @@ pub fn build_version(
 
         // Determine platform subdirectory
         let platform = ge.map(|g| &g.platform).filter(|p| !p.is_empty());
+
+        // If this game links to a source game (rom_source_id), skip building
+        // — the source game's ROM handles both. Count as existed if source exists.
+        if let Some(src_id) = ge.and_then(|g| g.rom_source_id) {
+            if let Some(src_game) = game_map.get(&src_id) {
+                let src_plat = if src_game.platform.is_empty() { None } else { Some(src_game.platform.as_str()) };
+                let src_dest = if let Some(p) = src_plat {
+                    roms_dir.join(p).join(format!("{}.zip", game_name))
+                } else {
+                    roms_dir.join(format!("{}.zip", game_name))
+                };
+                if src_dest.exists() {
+                    if verbose { eprintln!("  {game_name}: existed (via rom_source_id)"); }
+                    exists += 1;
+                } else {
+                    missing.push(MissingGame {
+                        name: game_name.to_string(), game_id: gid,
+                        platform: platform.map(|s| s.to_string()).unwrap_or_default(),
+                        reason: MissingReason::FileNotFound, rom_details: vec![],
+                        sampleof: None, sample_details: vec![],
+                    });
+                }
+            }
+            continue;
+        }
+
         let dest = if let Some(p) = platform {
             roms_dir.join(p).join(format!("{}.zip", game_name))
         } else {

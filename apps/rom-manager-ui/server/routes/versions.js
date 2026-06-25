@@ -833,6 +833,26 @@ router.post('/api/versions/import-online', async (req, res) => {
         }
       }
 
+      // Link Neo Geo games to their arcade counterparts (rom_source_id)
+      // Neo Geo games are arcade games stored in roms/arcade/ but we keep
+      // the neogeo platform tag for filtering. The link tells the builder
+      // to skip building a separate copy and use the arcade ROM instead.
+      run(`UPDATE games SET rom_source_id = (
+        SELECT g2.id FROM games g2
+        WHERE g2.collection_id = games.collection_id
+          AND g2.name = games.name
+          AND g2.platform = 'arcade'
+          AND games.platform = 'neogeo'
+          AND g2.id != games.id
+        LIMIT 1
+      ) WHERE platform = 'neogeo'
+        AND EXISTS (
+          SELECT 1 FROM games g2
+          WHERE g2.collection_id = games.collection_id
+            AND g2.name = games.name
+            AND g2.platform = 'arcade'
+        )`);
+
       // set_versions already has collection_id from import; .version file for build fallback
       // Update .version file so fallback can find this version
       const col = get('SELECT c.folder FROM collections c WHERE c.id = ?', [collection_id])

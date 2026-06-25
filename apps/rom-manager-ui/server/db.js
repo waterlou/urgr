@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS games (
     driver_status   TEXT,
     driver_emulation TEXT,
     sampleof        TEXT,
+    rom_source_id   INTEGER REFERENCES games(id),
     created_at      TEXT DEFAULT (datetime('now')),
     UNIQUE(collection_id, name, platform)
 );
@@ -221,6 +222,10 @@ export function initDb(dbPath) {
   db.run('PRAGMA journal_mode=WAL');
   db.run('PRAGMA foreign_keys = ON');
   db.run(SCHEMA);
+
+  // Migrations: add columns that may not exist in older databases
+  try { db.run('ALTER TABLE games ADD COLUMN rom_source_id INTEGER REFERENCES games(id)'); } catch (_) {}
+  try { db.run('CREATE INDEX IF NOT EXISTS idx_games_rom_source ON games(rom_source_id)'); } catch (_) {}
 
   // Mark orphaned operations as failed
   try {

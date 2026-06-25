@@ -57,6 +57,7 @@ pub struct Game {
     pub driver_status: Option<String>,
     pub driver_emulation: Option<String>,
     pub sampleof: Option<String>,
+    pub rom_source_id: Option<i64>,
 }
 
 #[derive(Debug, Clone)]

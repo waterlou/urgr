@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS games (
     driver_status   TEXT,
     driver_emulation TEXT,
     sampleof        TEXT,
+    rom_source_id   INTEGER REFERENCES games(id),
     created_at      TEXT DEFAULT (datetime('now')),
     UNIQUE(collection_id, name, platform)
 );
@@ -76,8 +77,11 @@ CREATE INDEX IF NOT EXISTS idx_rom_files_sha1 ON game_rom_files(sha1);
 CREATE INDEX IF NOT EXISTS idx_games_collection ON games(collection_id);
 CREATE INDEX IF NOT EXISTS idx_games_name ON games(name);
 CREATE INDEX IF NOT EXISTS idx_games_runnable ON games(runnable);
+CREATE INDEX IF NOT EXISTS idx_games_rom_source ON games(rom_source_id);
 ";
 
 /// Individual ALTER TABLE statements for existing databases.
 /// Applied one at a time, skipping errors (column may already exist).
-pub const MIGRATIONS: &[&str] = &[];
+pub const MIGRATIONS: &[&str] = &[
+    "ALTER TABLE games ADD COLUMN rom_source_id INTEGER REFERENCES games(id)",
+];
