@@ -584,7 +584,20 @@ async function downloadDatomicDat(systemId) {
 router.get('/api/versions', async (req, res) => {
   await dbReady;
   try {
-    const versions = all('SELECT sv.*, (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games FROM set_versions sv ORDER BY sv.created_at DESC');
+    const versions = all(`SELECT sv.*,
+      (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games,
+      (SELECT COUNT(*) FROM game_rom_sets grs WHERE grs.version_id = sv.id
+        AND (grs.available = 1
+          OR EXISTS (
+            SELECT 1 FROM game_rom_sets grs2
+            JOIN set_versions sv2 ON sv2.id = grs2.version_id
+            WHERE sv2.collection_id = sv.collection_id
+              AND sv2.id < sv.id
+              AND grs2.game_id = grs.game_id
+              AND grs2.available = 1
+          ))
+      ) as available_games
+      FROM set_versions sv ORDER BY sv.created_at DESC`);
     res.json(versions);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
