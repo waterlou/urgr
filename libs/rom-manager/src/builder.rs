@@ -4,14 +4,13 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::db::Database;
 use crate::error::{Error, Result};
 use crate::models::{Game, MergeMode, MissingGame, MissingReason, RomDetail, RomFile, SampleResult, SetVersion};
 use rom_scraper::compute_hashes_from_bytes;
 
-const STATUS_FILENAME: &str = "_build_status.json";
 const MODE_FILENAME: &str = "_build_mode.json";
 const PROGRESS_FILENAME: &str = "_build_progress.json";
 pub const ROMS_DIR_NAME: &str = "roms";
@@ -250,13 +249,28 @@ impl ImportIndex {
 
         let src_path = self.name_to_path.get(matched_stem)?;
 
+        let new_path = src_path.with_file_name(format!("{game_name}.zip"));
+
+        // If the destination already exists (already renamed by a previous find_by_content
+        // for a game sharing the same CRC set), use it directly.
+        if new_path != *src_path && new_path.exists() {
+            return Some(new_path);
+        }
+
+        // If the source was consumed by a previous rename, we can't match this game.
+        if !src_path.exists() {
+            return None;
+        }
+
         // Rename the import zip to the expected game name so future runs
         // find it by name. If rename fails (e.g. cross-device), fall through
         // with the original path — the build still succeeds.
-        let new_path = src_path.with_file_name(format!("{game_name}.zip"));
         if new_path != *src_path {
-            let _ = std::fs::rename(src_path, &new_path);
-            Some(new_path)
+            if std::fs::rename(src_path, &new_path).is_ok() {
+                Some(new_path)
+            } else {
+                Some(src_path.clone())
+            }
         } else {
             Some(src_path.clone())
         }
@@ -466,6 +480,19 @@ pub fn check_game_availability(
             if src_dest.exists() && verify_game_zip_with_games(db, version_id, src_id, &src_dest, all_games)? {
                 return Ok(Availability::Existed);
             }
+            if let Some(cd) = collection_dir {
+                for pv in prior_versions {
+                    let pv_roms = cd.join(pv).join(ROMS_DIR_NAME);
+                    let pv_zip = if let Some(p) = src_plat {
+                        pv_roms.join(p).join(format!("{}.zip", game_name))
+                    } else {
+                        pv_roms.join(format!("{}.zip", game_name))
+                    };
+                    if pv_zip.exists() && verify_game_zip_with_games(db, version_id, src_id, &pv_zip, all_games)? {
+                        return Ok(Availability::Reused { from_version: pv.clone() });
+                    }
+                }
+            }
         }
         return Ok(Availability::Missing {
             reason: MissingReason::FileNotFound,
@@ -498,6 +525,43 @@ pub fn check_game_availability(
 
     let expected_roms = db.list_roms_for_game(game_id, version_id)?;
     let check = compute_game_roms(&expected_roms, Some(game), all_games, db, version_id)?;
+
+    if check.is_empty() {
+        // All ROMs are merge_target (inherited from parent via romof) — check parent zip
+        if let Ok(Some(romof_name)) = db.get_romof(game_id, version_id) {
+            if !romof_name.is_empty() {
+                if let Some(parent_game) = all_games.iter().find(|g| g.name == romof_name) {
+                    let parent_plat = if parent_game.platform.is_empty() { None } else { Some(parent_game.platform.as_str()) };
+                    let parent_dest = if let Some(p) = parent_plat {
+                        roms_dir.join(p).join(format!("{}.zip", romof_name))
+                    } else {
+                        roms_dir.join(format!("{}.zip", romof_name))
+                    };
+                    if parent_dest.exists() && verify_game_zip_with_games(db, version_id, parent_game.id, &parent_dest, all_games)? {
+                        return Ok(Availability::Existed);
+                    }
+                    if let Some(cd) = collection_dir {
+                        for pv in prior_versions {
+                            let pv_roms = cd.join(pv).join(ROMS_DIR_NAME);
+                            let pv_zip = if let Some(p) = parent_plat {
+                                pv_roms.join(p).join(format!("{}.zip", romof_name))
+                            } else {
+                                pv_roms.join(format!("{}.zip", romof_name))
+                            };
+                            if pv_zip.exists() && verify_game_zip_with_games(db, version_id, parent_game.id, &pv_zip, all_games)? {
+                                return Ok(Availability::Reused { from_version: pv.clone() });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return Ok(Availability::Missing {
+            reason: MissingReason::FileNotFound,
+            rom_details: vec![],
+        });
+    }
+
     let details: Vec<RomDetail> = check.iter().map(|r| RomDetail {
         filename: r.filename.clone(),
         expected_crc: r.crc32.clone().unwrap_or_default(),
@@ -586,7 +650,6 @@ pub fn build_version(
         base_dir.join(&source_dir).join(&latest.version)
     };
     let deleted_dir = base_dir.join(DELETED_DIR_NAME);
-    let status_path = version_dir.join(STATUS_FILENAME);
     let mode_path = base_dir.join(&source_dir).join(MODE_FILENAME);
 
     // Check mode consistency at source level
@@ -663,7 +726,6 @@ pub fn build_version(
                         std::fs::create_dir_all(&roms_dir)?;
                         for entry in walk_files(&version_dir)? {
                             if entry.extension().and_then(|e| e.to_str()) == Some("zip")
-                                && entry.file_stem().map(|s| s != "_build_status").unwrap_or(false)
                             {
                                 let dest = roms_dir.join(entry.file_name().unwrap());
                                 std::fs::rename(&entry, &dest)?;
@@ -690,9 +752,6 @@ pub fn build_version(
                     continue;
                 }
                 let stem = entry.file_stem().unwrap_or_default().to_string_lossy().to_string();
-                if stem == "_build_status" {
-                    continue;
-                }
                 let stem_id = all_games.iter().find(|g| g.name == stem).map(|g| g.id);
                 if stem_id.map_or(true, |id| !keep.contains(&id)) {
                     move_to_deleted(&entry, &deleted_dir, &latest, prev.as_ref())?;
@@ -757,6 +816,26 @@ pub fn build_version(
     check_cancelled(cancelled)?;
     progress(on_progress, "index", 30, "Import index built", 0, need_copy.len(), need_copy.len() + unchanged, &progress_path);
 
+    // Pre-create platform subdirectories for all games (resolving rom_source_id)
+    // so they exist before any verification or copy step tries to use them,
+    // but avoid creating dirs for platforms that resolve to another (e.g. neogeo→arcade).
+    if !dry_run {
+        let mut platform_dirs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for game in &all_games {
+            let plat = if let Some(src_id) = game.rom_source_id {
+                game_map.get(&src_id).map(|sg| sg.platform.as_str()).unwrap_or(game.platform.as_str())
+            } else {
+                game.platform.as_str()
+            };
+            if !plat.is_empty() {
+                platform_dirs.insert(plat.to_string());
+            }
+        }
+        for plat in &platform_dirs {
+            std::fs::create_dir_all(roms_dir.join(plat))?;
+        }
+    }
+
     // ── Phase 5: Copy matching ROMs + CHDs ──
 
     // Read prior versions for fallback chain (only older versions, not newer ones)
@@ -806,9 +885,6 @@ pub fn build_version(
         } else {
             roms_dir.join(format!("{}.zip", game_name))
         };
-        if let Some(parent) = dest.parent() {
-            if !dry_run { std::fs::create_dir_all(parent)?; }
-        }
 
         // Periodic progress + cancellation check
         let progress_interval = (need_copy.len() / 100).max(1);
@@ -833,16 +909,19 @@ pub fn build_version(
         let plat_str = platform.map(|s| s.as_str());
         if let Some(src_path) = index.find_match(game_name, plat_str, &check_roms) {
             if verbose { eprintln!("  {game_name}: added (copying from {})", src_path.display()); }
-            if !dry_run {
-                if !src_path.exists() {
-                    info!("  {game_name}: source {} missing, skipping", src_path.display());
-                    let (reason, rom_details) = index.explain_missing(game_name, &check_roms);
-                    let miss_plat = ge.map(|g| g.platform.clone()).unwrap_or_default();
-                    missing.push(MissingGame { name: game_name.to_string(), game_id: game_id.unwrap_or(0), platform: miss_plat, reason, rom_details, sampleof: None, sample_details: vec![] });
-                    continue;
-                }
-                info!("  Copying {} → {}", src_path.display(), dest.display());
-                std::fs::copy(&src_path, &dest)?;
+                if !dry_run {
+                    if !src_path.exists() {
+                        info!("  {game_name}: source {} missing, skipping", src_path.display());
+                        let (reason, rom_details) = index.explain_missing(game_name, &check_roms);
+                        let miss_plat = ge.map(|g| g.platform.clone()).unwrap_or_default();
+                        missing.push(MissingGame { name: game_name.to_string(), game_id: game_id.unwrap_or(0), platform: miss_plat, reason, rom_details, sampleof: None, sample_details: vec![] });
+                        continue;
+                    }
+                    info!("  Copying {} → {}", src_path.display(), dest.display());
+                    std::fs::create_dir_all(dest.parent().unwrap())
+                        .map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("create_dir_all {}: {}", dest.parent().unwrap().display(), e))))?;
+                    std::fs::copy(&src_path, &dest)
+                        .map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("copy {} → {}: {}", src_path.display(), dest.display(), e))))?;
 
                 // Copy CHD files alongside the game zip (if any)
                 let chds = find_chd_files(&src_path);
@@ -850,9 +929,11 @@ pub fn build_version(
                     let chd_dest_base = version_dir.join(CHD_DIR_NAME).join(game_name);
                     for chd_src in &chds {
                         let chd_dest = chd_dest_base.join(chd_src.file_name().unwrap_or_default());
-                        std::fs::create_dir_all(chd_dest.parent().unwrap())?;
-                        std::fs::copy(chd_src, &chd_dest)?;
-                        info!("  CHD {} → {}", chd_src.display(), chd_dest.display());
+                std::fs::create_dir_all(chd_dest.parent().unwrap())
+                    .map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("create_dir_all {}: {}", chd_dest.parent().unwrap().display(), e))))?;
+                std::fs::copy(chd_src, &chd_dest)
+                    .map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("copy {} → {}: {}", chd_src.display(), chd_dest.display(), e))))?;
+                info!("  CHD {} → {}", chd_src.display(), chd_dest.display());
                     }
                 }
             }
@@ -861,14 +942,19 @@ pub fn build_version(
             // Found by content hash (not by name) — rename already done by find_by_content
             if verbose { eprintln!("  {game_name}: matched by content hash (renamed from {})", src_path.display()); }
             if !dry_run {
-                std::fs::copy(&src_path, &dest)?;
+                std::fs::create_dir_all(dest.parent().unwrap())
+                    .map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("create_dir_all {}: {}", dest.parent().unwrap().display(), e))))?;
+                std::fs::copy(&src_path, &dest)
+                    .map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("copy {} → {}: {}", src_path.display(), dest.display(), e))))?;
                 let chds = find_chd_files(&src_path);
                 if !chds.is_empty() {
                     let chd_dest_base = version_dir.join(CHD_DIR_NAME).join(game_name);
                     for chd_src in &chds {
                         let chd_dest = chd_dest_base.join(chd_src.file_name().unwrap_or_default());
-                        std::fs::create_dir_all(chd_dest.parent().unwrap())?;
-                        std::fs::copy(chd_src, &chd_dest)?;
+                        std::fs::create_dir_all(chd_dest.parent().unwrap())
+                            .map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("create_dir_all {}: {}", chd_dest.parent().unwrap().display(), e))))?;
+                        std::fs::copy(chd_src, &chd_dest)
+                            .map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("copy {} → {}: {}", chd_src.display(), chd_dest.display(), e))))?;
                     }
                 }
             }
@@ -1119,9 +1205,6 @@ pub fn build_version(
     status.samples_missing = samples_missing;
     status.missing_samples = missing_samples.clone();
     status.last_run = Some(chrono_now());
-    if !dry_run {
-        write_status(&status_path, &status)?;
-    }
 
     let missing_ids: std::collections::HashSet<i64> = status.missing_reasons.iter().map(|m| m.game_id).collect();
     let matched_ids: Vec<i64> = all_games.iter().map(|g| g.id).filter(|id| !missing_ids.contains(id)).collect();
@@ -1272,16 +1355,6 @@ fn write_progress(path: &Path, progress: &BuildProgress) -> Result<()> {
     Ok(())
 }
 
-fn write_status(path: &Path, status: &BuildStatus) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string(status)
-        .map_err(|e| Error::Parse(format!("Failed to serialize status: {}", e)))?;
-    std::fs::write(path, json)?;
-    Ok(())
-}
-
 fn read_mode(path: &Path) -> Option<String> {
     let data = std::fs::read_to_string(path).ok()?;
     serde_json::from_str::<serde_json::Value>(&data)
@@ -1371,11 +1444,27 @@ fn walk_files(dir: &Path) -> Result<Vec<std::path::PathBuf>> {
     if !dir.is_dir() {
         return Ok(entries);
     }
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
+    let read_dir = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(e) => {
+            warn!("walk_files: cannot read {}: {}", dir.display(), e);
+            return Ok(entries);
+        }
+    };
+    for entry in read_dir {
+        let e = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                warn!("walk_files: skipping dir entry in {}: {}", dir.display(), e);
+                continue;
+            }
+        };
+        let path = e.path();
         if path.is_dir() {
-            entries.extend(walk_files(&path)?);
+            match walk_files(&path) {
+                Ok(sub) => entries.extend(sub),
+                Err(e) => warn!("walk_files: error walking {}: {}", path.display(), e),
+            }
         } else {
             entries.push(path);
         }
@@ -1390,15 +1479,24 @@ fn move_to_deleted(
     version: &SetVersion,
     prev_version: Option<&SetVersion>,
 ) -> Result<()> {
-    let v_label = prev_version.map(|p| p.version.as_str()).unwrap_or(&version.version);
-    let stem = src.file_stem().unwrap_or_default().to_string_lossy().to_string();
-    let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("zip");
-    let mut dest = deleted_dir.join(format!("{}_v{}.{}", stem, v_label, ext));
+    let fname = src.file_name().unwrap_or_default().to_string_lossy().to_string();
 
-    // If destination already exists, try with source+version
+    let mut dest = deleted_dir.join(&fname);
     if dest.exists() {
-        let v = &version.version;
-        dest = deleted_dir.join(format!("{}_{}_v{}.{}", stem, version.collection_id, v, ext));
+        let v_label = prev_version.map(|p| p.version.as_str()).unwrap_or(&version.version);
+        let ver_dir = deleted_dir.join(format!("v{}", v_label));
+        dest = ver_dir.join(&fname);
+        if dest.exists() {
+            for i in 1.. {
+                let ver_dir = deleted_dir.join(format!("v{}-{}", v_label, i));
+                dest = ver_dir.join(&fname);
+                if !dest.exists() { break; }
+            }
+        }
+    }
+
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
     }
 
     info!("  Moving to deleted: {} → {}", src.display(), dest.display());

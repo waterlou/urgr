@@ -126,22 +126,42 @@ export default function BuildManager({ collectionId, collection }) {
           ) : (
             <Box>
               <Typography variant="body2" sx={{ mb: 1 }}>
-                {buildMode === 'scan'
-                  ? `Found: ${buildResult.found} · Missing: ${buildResult.missing} · Total: ${buildResult.total}`
-                  : `Added: ${buildResult.added} · Existed: ${buildResult.exists} · Reused: ${buildResult.reused} · Missing: ${buildResult.missing}`
-                }
-                {buildMode === 'scan'
-                  ? ` · Samples: Found: ${buildResult.samples_found ?? 0} · Missing: ${buildResult.samples_missing ?? 0}`
-                  : (buildResult.samples_added || buildResult.samples_existed || buildResult.samples_reused || buildResult.samples_missing)
-                    ? (() => {
-                        const parts = [];
-                        if (buildResult.samples_added) parts.push(`${buildResult.samples_added} added`);
-                        if (buildResult.samples_existed) parts.push(`${buildResult.samples_existed} existed`);
-                        if (buildResult.samples_reused) parts.push(`${buildResult.samples_reused} reused`);
-                        if (buildResult.samples_missing) parts.push(`${buildResult.samples_missing} missing`);
-                        return ` · Samples: ${parts.join(' · ')}`;
-                      })()
-                    : ''}
+                {(() => {
+                  if (buildMode === 'scan') {
+                    const scanParts = [];
+                    if (buildResult.found) scanParts.push(`Found: ${buildResult.found}`);
+                    if (buildResult.missing) scanParts.push(`Missing: ${buildResult.missing}`);
+                    scanParts.push(`Total: ${buildResult.total}`);
+                    return `[ROMs] ${scanParts.join(' · ')}`;
+                  }
+                  const romParts = [];
+                  if (buildResult.added) romParts.push(`Added: ${buildResult.added}`);
+                  if (buildResult.exists) romParts.push(`Existed: ${buildResult.exists}`);
+                  if (buildResult.reused) romParts.push(`Reused: ${buildResult.reused}`);
+                  if (buildResult.missing) romParts.push(`Missing: ${buildResult.missing}`);
+                  romParts.push(`Total: ${buildResult.total_games}`);
+                  return `[ROMs] ${romParts.join(' · ')}`;
+                })()}
+                {(() => {
+                  if (buildMode === 'scan') {
+                    if (buildResult.samples_found == null && buildResult.samples_missing == null) return '';
+                    const scanParts = [];
+                    if (buildResult.samples_found) scanParts.push(`Found: ${buildResult.samples_found}`);
+                    if (buildResult.samples_missing) scanParts.push(`Missing: ${buildResult.samples_missing}`);
+                    const total = (buildResult.samples_found ?? 0) + (buildResult.samples_missing ?? 0);
+                    scanParts.push(`Total: ${total}`);
+                    return ` · [Samples] ${scanParts.join(' · ')}`;
+                  }
+                  const parts = [];
+                  if (buildResult.samples_added) parts.push(`Added: ${buildResult.samples_added}`);
+                  if (buildResult.samples_existed) parts.push(`Existed: ${buildResult.samples_existed}`);
+                  if (buildResult.samples_reused) parts.push(`Reused: ${buildResult.samples_reused}`);
+                  if (buildResult.samples_missing) parts.push(`Missing: ${buildResult.samples_missing}`);
+                  if (parts.length === 0) return '';
+                  const total = (buildResult.samples_existed ?? 0) + (buildResult.samples_added ?? 0) + (buildResult.samples_reused ?? 0) + (buildResult.samples_missing ?? 0);
+                  parts.push(`Total: ${total}`);
+                  return ` · [Samples] ${parts.join(' · ')}`;
+                })()}
               </Typography>
               {(buildResult.missing_reasons?.length > 0) && (
                 <MissingGamesTable

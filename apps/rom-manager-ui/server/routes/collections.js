@@ -11,17 +11,10 @@ import { all, get, run, runNow, unescapeXml, KNOWN_PLATFORMS, dbReady } from '..
 import { getCookieHeader } from '../ia-auth.js';
 import { sortVersions } from '../versionSort.js';
 
-// Shared SQL subquery: counts games available in this version OR inherited from prior versions
+// Shared SQL subquery: counts games with CRC-verified available flag set in this version
+// (Reused games from prior versions are already flagged by the scan/build CLI)
 const AVAILABLE_GAMES_SQL = `(SELECT COUNT(*) FROM game_rom_sets grs WHERE grs.version_id = sv.id
-  AND (grs.available = 1
-    OR EXISTS (
-      SELECT 1 FROM game_rom_sets grs2
-      JOIN set_versions sv2 ON sv2.id = grs2.version_id
-      WHERE sv2.collection_id = sv.collection_id
-        AND sv2.id < sv.id
-        AND grs2.game_id = grs.game_id
-        AND grs2.available = 1
-    ))
+  AND grs.available = 1
 ) as available_games`;
 import { scanNpsDir, buildNps } from '../nps.js';
 import { scrapeSingleGame } from './games.js';
@@ -79,8 +72,8 @@ router.get('/api/collections', async (req, res) => {
       let available = 0;
       if (vids.length) {
         const ph = vids.map(() => '?').join(',');
-        total = get(`SELECT COUNT(*) as c FROM game_rom_sets WHERE version_id IN (${ph})`, vids).c;
-        available = get(`SELECT COUNT(*) as c FROM game_rom_sets WHERE version_id IN (${ph}) AND available = 1`, vids).c;
+        total = get(`SELECT COUNT(DISTINCT game_id) as c FROM game_rom_sets WHERE version_id IN (${ph})`, vids).c;
+        available = get(`SELECT COUNT(DISTINCT game_id) as c FROM game_rom_sets WHERE version_id IN (${ph}) AND available = 1`, vids).c;
       }
       return { ...c, total_games: total, available_games: available, versions };
     });
