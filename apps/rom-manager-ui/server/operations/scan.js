@@ -1,8 +1,10 @@
+import path from 'path';
 import { Operation } from './index.js';
 import { execCli } from '../cli.js';
-import { all, run } from '../helpers.js';
+import { all, get, run } from '../helpers.js';
 import { reloadDb } from '../db.js';
 import { syncGameAvailability } from './syncAvailability.js';
+import { romsDir } from '../paths.js';
 
 export class ScanOperation extends Operation {
   constructor(collectionId, params) {
@@ -16,7 +18,11 @@ export class ScanOperation extends Operation {
     this.updateProgress(0, 'Scanning ROMs...');
 
     try {
-      const result = execCli(['scan', version_id, dir]);
+      const col = this.collectionId ? get('SELECT folder, slug FROM collections WHERE id = ?', [this.collectionId]) : null;
+      const collectionDir = col ? path.join(romsDir, col.folder || col.slug) : null;
+      const scanArgs = ['scan', version_id, dir];
+      if (collectionDir) scanArgs.push('--collection-dir', collectionDir);
+      const result = execCli(scanArgs);
 
       run('UPDATE game_rom_sets SET available = 0 WHERE version_id = ?', [version_id]);
 

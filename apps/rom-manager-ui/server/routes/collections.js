@@ -45,49 +45,6 @@ function upsertBuild(colId, versionId, format, totalGames) {
 
 // Walk the roms/ directory for the given version (and prior versions), find zip files,
 // and set game_rom_sets.available = 1 for matching games. Handles platform subdirectories.
-function setAvailableFromRomsDir(versionId, collectionDir, buildVersion) {
-  const foundGameIds = new Set();
-  const versionFilePath = path.join(collectionDir, '.version');
-  const allVersions = fs.existsSync(versionFilePath)
-    ? fs.readFileSync(versionFilePath, 'utf-8').split('\n').map(l => l.trim()).filter(l => l)
-    : [];
-  const scanVersions = [];
-  for (const v of allVersions) {
-    scanVersions.push(v);
-    if (v === buildVersion) break;
-  }
-  if (scanVersions.length === 0) scanVersions.push(buildVersion);
-  for (const ver of scanVersions) {
-    const romsDir = path.join(collectionDir, ver, 'roms');
-    if (!fs.existsSync(romsDir)) continue;
-    const walkDir = (dir, plat) => {
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (entry.isDirectory()) {
-          walkDir(path.join(dir, entry.name), entry.name);
-        } else if (entry.isFile() && entry.name.endsWith('.zip')) {
-          const stem = entry.name.replace('.zip', '');
-          let row;
-          if (plat && plat !== 'roms') {
-            row = get('SELECT g.id FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ? AND g.name = ? AND g.platform = ? LIMIT 1', [versionId, stem, plat]);
-          } else {
-            row = get('SELECT g.id FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ? AND g.name = ? LIMIT 1', [versionId, stem]);
-          }
-          if (row) foundGameIds.add(row.id);
-        }
-      }
-    };
-    walkDir(romsDir, '');
-  }
-  runNow('UPDATE game_rom_sets SET available = 0 WHERE version_id = ?', [versionId]);
-  if (foundGameIds.size > 0) {
-    const ids = [...foundGameIds];
-    const ph = ids.map(() => '?').join(',');
-    runNow(`UPDATE game_rom_sets SET available = 1 WHERE version_id = ? AND game_id IN (${ph})`, [versionId, ...ids]);
-  }
-  syncGameAvailability(all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [versionId]).map(r => r.game_id));
-  return foundGameIds.size;
-}
-
 router.get('/api/status', async (req, res) => {
   await dbReady;
   try {
@@ -419,19 +376,24 @@ router.post('/api/collections/:id/scan', async (req, res) => {
   try {
     const { version_id, dir } = req.body;
     if (!version_id || !dir) return res.status(400).json({ error: 'version_id and dir required' });
+    const col = get('SELECT id, folder FROM collections WHERE id = ?', [req.params.id]);
+    if (!col) return res.status(404).json({ error: 'Collection not found' });
+    const collectionDir = path.join(romsDir, col.folder || col.slug);
     const jobId = crypto.randomUUID();
     const job = createJob(jobId);
     setTimeout(() => {
       try {
-        const result = execCli(['scan', String(version_id), dir]);
+        const result = execCli(['scan', String(version_id), dir, '--collection-dir', collectionDir]);
         runNow('UPDATE game_rom_sets SET available = 0 WHERE version_id = ?', [version_id]);
-        const matchedNames = (result?.matches || []).map(m => m.name);
-        if (matchedNames.length > 0) {
-          const ph = matchedNames.map(() => '?').join(',');
-          runNow(`UPDATE game_rom_sets SET available = 1
-            WHERE version_id = ? AND game_id IN (
-              SELECT g.id FROM games g WHERE g.name IN (${ph})
-            )`, [version_id, ...matchedNames]);
+        const matchedIds = [...new Set((result?.matches || []).map(m => m.game_id).filter(id => id != null))];
+        if (matchedIds.length > 0) {
+          const CHUNK = 500;
+          for (let i = 0; i < matchedIds.length; i += CHUNK) {
+            const chunk = matchedIds.slice(i, i + CHUNK);
+            const ph = chunk.map(() => '?').join(',');
+            runNow(`UPDATE game_rom_sets SET available = 1
+              WHERE version_id = ? AND game_id IN (${ph})`, [version_id, ...chunk]);
+          }
         }
         const affectedIds = all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [version_id]).map(r => r.game_id);
         syncGameAvailability(affectedIds);
@@ -483,8 +445,8 @@ function finalizeScan(scanResult, col, version_id, collectionDir, sv, buildId, j
   }
   syncGameAvailability(all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [version_id]).map(r => r.game_id));
 
-  const totalDb = get('SELECT COUNT(DISTINCT g.name) as c FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ?', [version_id]).c;
-  const matched = get('SELECT COUNT(DISTINCT g.name) as c FROM games g JOIN game_rom_sets grs ON grs.game_id = g.id WHERE grs.version_id = ? AND grs.available = 1', [version_id]).c;
+  const totalDb = get('SELECT COUNT(*) as c FROM game_rom_sets WHERE version_id = ?', [version_id]).c;
+  const matched = get('SELECT COUNT(*) as c FROM game_rom_sets WHERE version_id = ? AND available = 1', [version_id]).c;
   let reused = 0;
   const priorVersions = all('SELECT DISTINCT sv.version, sv.id FROM set_versions sv WHERE sv.collection_id = ? AND sv.id < ? ORDER BY sv.id', [col.id, version_id]);
   if (priorVersions.length > 0 && fs.existsSync(collectionDir)) {
@@ -548,7 +510,7 @@ router.post('/api/collections/:id/build', async (req, res) => {
           } else {
             // DAT scan with streaming progress
             const scanDir = path.join(collectionDir, sv.version);
-            const args = ['scan', String(version_id), scanDir, '--progress'];
+            const args = ['scan', String(version_id), scanDir, '--progress', '--collection-dir', collectionDir];
             execCliStream(args, {
               binary: 'build',
               onProgress: (p) => updateProgress(jobId, p.pct || 0, p.msg || ''),
@@ -594,7 +556,13 @@ router.post('/api/collections/:id/build', async (req, res) => {
             signal: job._abort.signal,
           }).then(result => {
             try {
-              setAvailableFromRomsDir(version_id, collectionDir, sv.version);
+              runNow('UPDATE game_rom_sets SET available = 0 WHERE version_id = ?', [version_id]);
+              const matchedIds = result.matched_ids || [];
+              if (matchedIds.length > 0) {
+                const ph = matchedIds.map(() => '?').join(',');
+                runNow(`UPDATE game_rom_sets SET available = 1 WHERE version_id = ? AND game_id IN (${ph})`, [version_id, ...matchedIds]);
+              }
+              syncGameAvailability(all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [version_id]).map(r => r.game_id));
             } catch (_) {}
             runNow("UPDATE collection_builds SET status = 'complete', games_built = ?, completed_at = datetime('now') WHERE id = ?", [result.added || 0, buildId]);
             doneJob(jobId, result);
@@ -715,10 +683,14 @@ router.post('/api/collections/:id/builds/:buildId/run', async (req, res) => {
     }).then((result) => {
       runNow("UPDATE collection_builds SET status = 'complete', games_built = ?, games_missing = ?, completed_at = datetime('now') WHERE id = ?",
         [result.added || 0, result.missing || 0, buildId]);
-      // Scan output dir to set game_rom_sets.available for built games
       try {
-        const buildDir = base_dir || path.join(romsDir, build.source);
-        const totalFound = setAvailableFromRomsDir(build.version_id, buildDir, build.version);
+        runNow('UPDATE game_rom_sets SET available = 0 WHERE version_id = ?', [build.version_id]);
+        const matchedIds = result.matched_ids || [];
+        if (matchedIds.length > 0) {
+          const ph = matchedIds.map(() => '?').join(',');
+          runNow(`UPDATE game_rom_sets SET available = 1 WHERE version_id = ? AND game_id IN (${ph})`, [build.version_id, ...matchedIds]);
+        }
+        syncGameAvailability(all('SELECT game_id FROM game_rom_sets WHERE version_id = ?', [build.version_id]).map(r => r.game_id));
       } catch (_) {}
       doneJob(jobId, result);
     }).catch((err) => {

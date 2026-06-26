@@ -3,10 +3,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use rom_manager::builder::{build_version, compute_game_roms, explain_missing_from_dir, export_version, scan_samples};
+use rom_manager::builder::{build_version, check_game_availability, export_version, scan_samples, Availability};
 use rom_manager::dat::write::{write_logiqx_dat, ExportGame, ExportRom};
-use rom_manager::models::{Game, MergeMode, MissingGame, MissingReason, RomDetail, RomFile, SampleResult};
-use rom_manager::scanner::{scan_directory, ScanMatch};
+use rom_manager::models::{MergeMode, MissingGame, SampleResult};
+use rom_manager::scanner::ScanMatch;
 use rom_manager::verifier::{verify_version, GameStatus};
 use rom_manager::Database;
 use serde::Serialize;
@@ -95,6 +95,8 @@ struct BuildOutput {
     exists: usize,
     reused: usize,
     missing: usize,
+    #[serde(default)]
+    matched_ids: Vec<i64>,
     cleaned: usize,
     matched_by_hash: usize,
     missing_games: Vec<String>,
@@ -295,49 +297,9 @@ fn cmd_dat_info(args: &[String], json: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn build_missing_reasons(
-    missing_names: &[String],
-    games: &[rom_manager::models::Game],
-    db: &Database,
-    version_id: i64,
-    dir: &std::path::Path,
-) -> Vec<MissingGame> {
-    let game_map: HashMap<&str, &rom_manager::models::Game> = games.iter().map(|g| (g.name.as_str(), g)).collect();
-    let mut reasons = Vec::new();
-    for name in missing_names {
-        let ge = game_map.get(name.as_str()).copied();
-        let expected_roms: Vec<RomFile> = ge
-            .map(|g| db.list_roms_for_game(g.id, version_id))
-            .transpose()
-            .unwrap_or_default()
-            .unwrap_or_default();
-        let sampleof = ge.and_then(|g| g.sampleof.as_deref());
-        let gid = ge.map(|g| g.id).unwrap_or(0);
-        let gplat = ge.map(|g| g.platform.clone()).unwrap_or_default();
-        match explain_missing_from_dir(name, &expected_roms, ge, games, db, version_id, dir) {
-            Ok((reason, details, sample_details)) => reasons.push(MissingGame {
-                name: name.clone(), game_id: gid, platform: gplat.clone(), reason, rom_details: details,
-                sampleof: sampleof.map(|s| s.to_string()), sample_details,
-            }),
-            Err(_) => {
-                let details = expected_roms.iter().filter(|r| r.merge_target.is_none()).map(|r| RomDetail {
-                    filename: r.filename.clone(),
-                    expected_crc: r.crc32.clone().unwrap_or_default(),
-                    actual_crc: None,
-                    status: "missing".to_string(),
-                }).collect();
-                reasons.push(MissingGame {
-                    name: name.clone(), game_id: gid, platform: gplat, reason: MissingReason::FileNotFound, rom_details: details,
-                    sampleof: sampleof.map(|s| s.to_string()), sample_details: Vec::new(),
-                });
-            }
-        }
-    }
-    reasons
-}
-
 fn cmd_scan(args: &[String], json: bool) -> ExitCode {
     let mut game_id: Option<i64> = None;
+    let mut collection_dir_arg: Option<std::path::PathBuf> = None;
     let mut clean_args: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -346,12 +308,17 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
             i += 2;
             continue;
         }
+        if args[i] == "--collection-dir" && i + 1 < args.len() {
+            collection_dir_arg = Some(std::path::PathBuf::from(&args[i + 1]));
+            i += 2;
+            continue;
+        }
         clean_args.push(args[i].clone());
         i += 1;
     }
 
     if clean_args.len() < 3 {
-        eprintln!("Usage: build-cli scan <version-id> <dir> [--game-id <id>] [--progress]");
+        eprintln!("Usage: build-cli scan <version-id> <dir> [--collection-dir <dir>] [--game-id <id>] [--progress]");
         return ExitCode::FAILURE;
     }
     let show_progress = clean_args.iter().any(|a| a == "--progress");
@@ -369,129 +336,150 @@ fn cmd_scan(args: &[String], json: bool) -> ExitCode {
 
     emit_progress(0, "Loading games...");
     let db = match open_db() { Ok(d) => d, Err(e) => { eprintln!("{}", e); return ExitCode::FAILURE; } };
-    let games = match db.list_games(version_id) {
+    let all_games = match db.list_games(version_id) {
         Ok(g) => g, Err(e) => { eprintln!("Database error: {}", e); return ExitCode::FAILURE; }
     };
+    let game_map: HashMap<i64, &rom_manager::models::Game> = all_games.iter().map(|g| (g.id, g)).collect();
 
-    emit_progress(10, "Building CRC map...");
-    // Build CRC map per platform: platform → game_name → (game_id, [expected CRC32 strings])
-    // Using per-platform maps avoids name collisions when the same game name exists
-    // across multiple platforms (e.g. 'btime' in arcade, coleco, msx).
-    let mut platform_crcs: HashMap<String, HashMap<String, (i64, Vec<String>)>> = HashMap::new();
-    for game in &games {
-        if let Ok(roms) = db.list_roms_for_game(game.id, version_id) {
-            let filtered = compute_game_roms(&roms, Some(game), &games, &db, version_id).unwrap_or(roms);
-            let crcs: Vec<String> = filtered.iter()
-                .filter_map(|r| r.crc32.as_deref())
-                .filter(|c| !c.is_empty())
-                .map(|c| c.to_string())
-                .collect();
-            let entry = (game.id, crcs);
-            platform_crcs.entry(game.platform.clone()).or_default().insert(game.name.clone(), entry);
+    emit_progress(10, "Checking prior versions...");
+    let (collection_dir, prior_versions) = if let Some(cd) = &collection_dir_arg {
+        let version_file = cd.join(".version");
+        let versions = if version_file.exists() {
+            std::fs::read_to_string(&version_file).ok()
+                .map(|content| content.lines().map(|l| l.trim().to_string()).collect())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let current_version = db.get_version(version_id).ok().flatten().map(|v| v.version);
+        let prior = current_version.as_ref()
+            .map(|cv| rom_manager::builder::filter_prior_versions(&versions, cv))
+            .unwrap_or_default();
+        (Some(cd.as_path()), prior)
+    } else {
+        (None, vec![])
+    };
+
+    let roms_dir = dir.join(rom_manager::builder::ROMS_DIR_NAME);
+    struct ScanEntry {
+        name: String,
+        game_id: i64,
+        source: String,
+    }
+
+    let mut matched_entries: Vec<ScanEntry> = Vec::new();
+    let mut missing: Vec<MissingGame> = Vec::new();
+    let total = all_games.len();
+
+    emit_progress(15, "Checking games...");
+    for (idx, game) in all_games.iter().enumerate() {
+        if let Some(gid) = game_id {
+            if game.id != gid { continue; }
+        }
+
+        match check_game_availability(&db, version_id, game.id, &game_map, &roms_dir, collection_dir, &prior_versions, &all_games) {
+            Ok(Availability::Existed) => {
+                matched_entries.push(ScanEntry {
+                    name: game.name.clone(),
+                    game_id: game.id,
+                    source: "existed".to_string(),
+                });
+            }
+            Ok(Availability::Reused { .. }) => {
+                matched_entries.push(ScanEntry {
+                    name: game.name.clone(),
+                    game_id: game.id,
+                    source: "reused".to_string(),
+                });
+            }
+            Ok(Availability::Missing { reason, rom_details }) => {
+                missing.push(MissingGame {
+                    name: game.name.clone(),
+                    game_id: game.id,
+                    platform: game.platform.clone(),
+                    reason,
+                    rom_details,
+                    sampleof: game.sampleof.clone(),
+                    sample_details: vec![],
+                });
+            }
+            Err(e) => {
+                eprintln!("  error checking {}: {}", game.name, e);
+                missing.push(MissingGame {
+                    name: game.name.clone(),
+                    game_id: game.id,
+                    platform: game.platform.clone(),
+                    reason: rom_manager::models::MissingReason::FileNotFound,
+                    rom_details: vec![],
+                    sampleof: game.sampleof.clone(),
+                    sample_details: vec![],
+                });
+            }
+        }
+
+        if idx % 100 == 0 {
+            emit_progress(15 + ((idx as u64 * 40) / total.max(1) as u64) as u32, &format!("Checking games ({}/{})", idx + 1, total));
         }
     }
 
-    if let Some(gid) = game_id {
-        // Single game scan
-        emit_progress(15, "Scanning files...");
-        let game = match games.iter().find(|g| g.id == gid) {
-            Some(g) => g.clone(),
-            None => { eprintln!("Game not found: {}", gid); return ExitCode::FAILURE; }
-        };
-        let single_crcs: HashMap<String, (i64, Vec<String>)> = platform_crcs.get(&game.platform)
-            .and_then(|m| {
-                m.get(&game.name).map(|(id, crcs)| {
-                    [(game.name.clone(), (*id, crcs.clone()))].into()
-                })
-            })
-            .unwrap_or_else(|| {
-                [(game.name.clone(), (game.id, vec![]))].into()
-            });
-        let matches = match scan_directory(&single_crcs, dir) {
-            Ok(m) => m, Err(e) => { eprintln!("Scan error: {}", e); return ExitCode::FAILURE; }
-        };
-        emit_progress(60, "Analyzing missing games...");
-        let matched = matches.len();
-        let missing_names: Vec<String> = if matched == 0 { vec![game.name.clone()] } else { vec![] };
-        let missing_reasons = build_missing_reasons(&missing_names, &games, &db, version_id, dir);
-        let samples_dir = dir.join("samples");
-        let sr = if samples_dir.is_dir() {
-            scan_samples(&games, &db, version_id, &samples_dir).unwrap_or(SampleResult { samples_found: 0, samples_missing: 0, missing_samples: Vec::new() })
-        } else { SampleResult { samples_found: 0, samples_missing: 0, missing_samples: Vec::new() } };
-        emit_progress(100, "Scan complete");
-        let result = ScanOutput { total: 1, matched, missing: 1 - matched, matches, missing_names, missing_by_platform: std::collections::HashMap::new(), missing_reasons, samples_found: sr.samples_found, samples_missing: sr.samples_missing, missing_samples: sr.missing_samples };
-        if json { print_json(&result); }
-        else { println!("Scan complete: {} matched, {} missing", matched, 1 - matched); }
+    matched_entries.sort_by(|a, b| a.name.cmp(&b.name));
+    missing.sort_by(|a, b| a.name.cmp(&b.name));
+
+    emit_progress(60, "Building results...");
+    let matches: Vec<ScanMatch> = matched_entries.iter().map(|e| ScanMatch {
+        name: e.name.clone(),
+        game_id: Some(e.game_id),
+        filename: None,
+    }).collect();
+
+    let matched_names: HashSet<String> = matched_entries.iter().map(|e| e.name.clone()).collect();
+    let expected_names: HashSet<String> = all_games.iter().map(|g| g.name.clone()).collect();
+    let mut missing_names: Vec<String> = expected_names.difference(&matched_names).cloned().collect();
+    missing_names.sort();
+
+    let mut missing_by_platform: HashMap<String, Vec<String>> = HashMap::new();
+    for game in &all_games {
+        if !matched_names.contains(&game.name) {
+            let plat = if game.platform.is_empty() { "unknown".to_string() } else { game.platform.clone() };
+            missing_by_platform.entry(plat).or_default().push(game.name.clone());
+        }
+    }
+    for v in missing_by_platform.values_mut() {
+        v.sort();
+        v.dedup();
+    }
+
+    let matched_count = matched_entries.len();
+    let reused_count = matched_entries.iter().filter(|e| e.source == "reused").count();
+
+    let samples_dir = dir.join("samples");
+    let sr = if samples_dir.is_dir() {
+        scan_samples(&all_games, &db, version_id, &samples_dir).unwrap_or(SampleResult { samples_found: 0, samples_missing: 0, missing_samples: Vec::new() })
+    } else { SampleResult { samples_found: 0, samples_missing: 0, missing_samples: Vec::new() } };
+
+    emit_progress(100, "Scan complete");
+    let result = ScanOutput {
+        total: all_games.len(),
+        matched: matched_count,
+        missing: missing.len(),
+        matches,
+        missing_names: missing_names.clone(),
+        missing_by_platform,
+        missing_reasons: missing.clone(),
+        samples_found: sr.samples_found,
+        samples_missing: sr.samples_missing,
+        missing_samples: sr.missing_samples,
+    };
+
+    if json {
+        print_json(&result);
     } else {
-        // Full scan — scan each platform subdirectory separately with platform-specific CRC maps
-        emit_progress(15, "Scanning files...");
-        let mut all_matches: Vec<ScanMatch> = Vec::new();
-        let roms_dir = dir.join("roms");
-        if roms_dir.is_dir() {
-            if let Ok(entries) = std::fs::read_dir(&roms_dir) {
-                for entry in entries.flatten() {
-                    if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                        let plat = entry.file_name().to_string_lossy().to_string();
-                        if let Some(plat_crcs) = platform_crcs.get(&plat) {
-                            if let Ok(m) = scan_directory(plat_crcs, &entry.path()) {
-                                all_matches.extend(m);
-                            }
-                        }
-                    }
-                }
-            }
+        print!("Scan complete: {} total, {} matched ({} current + {} reused), {} missing",
+            total, matched_count, matched_count - reused_count, reused_count, missing.len());
+        if sr.samples_found > 0 || sr.samples_missing > 0 {
+            print!(" (samples: {} found, {} missing)", sr.samples_found, sr.samples_missing);
         }
-        // Also scan the root dir (for zips placed directly in the version dir, not under roms/)
-        // Use all platformed games as a fallback flat map
-        let root_crcs: HashMap<String, (i64, Vec<String>)> = games.iter()
-            .filter_map(|g| {
-                platform_crcs.get(&g.platform)
-                    .and_then(|m| m.get(&g.name))
-                    .map(|(id, crcs)| (g.name.clone(), (*id, crcs.clone())))
-            })
-            .collect();
-        if let Ok(m) = scan_directory(&root_crcs, dir) {
-            for match_ in m {
-                if !all_matches.iter().any(|existing| existing.name == match_.name) {
-                    all_matches.push(match_);
-                }
-            }
-        }
-        let matches = all_matches;
-        emit_progress(60, "Analyzing missing games...");
-        let matched_names: HashSet<String> = matches.iter().map(|m| m.name.clone()).collect();
-        let expected_names: HashSet<String> = games.iter().map(|g| g.name.clone()).collect();
-        let mut missing_names: Vec<String> = expected_names.difference(&matched_names).cloned().collect();
-        missing_names.sort();
-        // Group missing games by platform
-        let mut missing_by_platform: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-        for game in &games {
-            if !matched_names.contains(&game.name) {
-                let plat = if game.platform.is_empty() { "unknown".to_string() } else { game.platform.clone() };
-                missing_by_platform.entry(plat).or_default().push(game.name.clone());
-            }
-        }
-        for v in missing_by_platform.values_mut() {
-            v.sort();
-            v.dedup();
-        }
-        let matched = matches.len();
-        let missing_reasons = build_missing_reasons(&missing_names, &games, &db, version_id, dir);
-        let samples_dir = dir.join("samples");
-        let sr = if samples_dir.is_dir() {
-            scan_samples(&games, &db, version_id, &samples_dir).unwrap_or(SampleResult { samples_found: 0, samples_missing: 0, missing_samples: Vec::new() })
-        } else { SampleResult { samples_found: 0, samples_missing: 0, missing_samples: Vec::new() } };
-        emit_progress(100, "Scan complete");
-        let result = ScanOutput { total: expected_names.len(), matched, missing: missing_names.len(), matches, missing_names: missing_names.clone(), missing_by_platform, missing_reasons, samples_found: sr.samples_found, samples_missing: sr.samples_missing, missing_samples: sr.missing_samples };
-        if json {
-            print_json(&result);
-        } else {
-            print!("Scan complete: {} files, {} matched, {} missing", expected_names.len(), matched, missing_names.len());
-            if sr.samples_found > 0 || sr.samples_missing > 0 {
-                print!(" (samples: {} found, {} missing)", sr.samples_found, sr.samples_missing);
-            }
-            println!();
-        }
+        println!();
     }
     ExitCode::SUCCESS
 }
@@ -833,6 +821,7 @@ fn cmd_build(args: &[String], json: bool) -> ExitCode {
                     missing: result.missing,
                     cleaned: result.cleaned,
                     matched_by_hash: result.matched_by_hash,
+                    matched_ids: result.matched_ids,
                     missing_games: result.missing_games,
                     missing_reasons: result.missing_reasons,
                     samples_added: result.samples_added,
