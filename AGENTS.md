@@ -1,4 +1,4 @@
-# ROM Manager
+# URGR - Ultimate Retro Game Room
 
 > ## ⚠️ Before any code change, read the checklist below
 

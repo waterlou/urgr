@@ -233,7 +233,7 @@ export default function Settings() {
 
             {mainTab === 2 && (
               <Box>
-                <Typography variant="h6" sx={{ mb: 1 }}>ROM Manager</Typography>
+                <Typography variant="h6" sx={{ mb: 1 }}>URGR</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                   A retro game ROM collection manager with DAT parsing, metadata scraping, ROM building, game set playlists, and in-browser emulation via EmulatorJS.
                 </Typography>

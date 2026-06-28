@@ -1,4 +1,4 @@
-# ROM Manager
+# URGR - Ultimate Retro Game Room
 
 A retro game ROM collection manager with DAT parsing, metadata scraping, ROM building, game set playlists, and in-browser emulation via EmulatorJS.
 

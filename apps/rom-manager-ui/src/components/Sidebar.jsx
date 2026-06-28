@@ -54,9 +54,8 @@ export default function Sidebar() {
         '& .MuiDrawer-paper': { width: DRAWER_WIDTH, boxSizing: 'border-box' },
       }}
     >
-      <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-        <SportsEsports color="primary" />
-        <Typography variant="h6" fontWeight={700} color="primary">ROM Manager</Typography>
+      <Box sx={{ px: 2, py: 0.5, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <Box component="img" src="/logo.png" sx={{ width: 120, height: 'auto' }} alt="URGR" />
       </Box>
       <Divider />
       <List dense>

@@ -81,7 +81,7 @@ function createWindow() {
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    title: 'ROM Manager',
+    title: 'URGR - Ultimate Retro Game Room',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,

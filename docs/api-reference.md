@@ -1,4 +1,4 @@
-# ROM Manager UI — API Documentation
+# URGR — API Documentation
 
 Base URL: `http://localhost:3001/api`
 

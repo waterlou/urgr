@@ -50,6 +50,8 @@ app.use((err, req, res, next) => {
 // =============================================================================
 app.use('/assets', express.static(path.join(distDir, 'assets')));
 
+app.use('/', express.static(distDir));
+
 app.use('/icons', express.static(iconsDir));
 
 const arcadeMediaDir = path.join(dataDir, 'media', 'arcadedb');
@@ -77,7 +79,7 @@ app.use((req, res) => {
   if (fs.existsSync(filePath)) {
     res.sendFile(filePath);
   } else {
-    res.status(200).json({ message: 'ROM Manager API' });
+    res.status(200).json({ message: 'URGR API' });
   }
 });
 
@@ -125,7 +127,7 @@ server.on('listening', () => {
     return;
   }
   const actualPort = typeof addr === 'object' ? addr.port : addr;
-  logStartup(`ROM Manager API running at http://localhost:${actualPort}`);
+  logStartup(`URGR API running at http://localhost:${actualPort}`);
   loadFromEnv();
   initUsersDb().then(() => logStartup('users.db ready'));
   if (isElectron && process.send) {

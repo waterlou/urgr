@@ -18,7 +18,8 @@ export default function AppLayout() {
             <IconButton edge="start" color="inherit" onClick={toggleSidebar} sx={{ mr: 1 }}>
               <MenuIcon />
             </IconButton>
-            <Typography variant="h6" noWrap fontWeight={700}>ROM Manager</Typography>
+            <Box component="img" src="/logo.png" sx={{ width: 28, height: 28, mr: 1 }} alt="URGR" />
+            <Typography variant="h6" noWrap fontWeight={700}>URGR</Typography>
           </Toolbar>
         </AppBar>
       )}
