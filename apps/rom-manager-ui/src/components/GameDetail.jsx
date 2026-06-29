@@ -350,7 +350,7 @@ export default function GameDetail() {
                                 );
                               })()}
                             </TableCell>
-                            <TableCell>{rom.subtype === 'chd' ? 'CHD' : rom.subtype === 'sample' ? 'Sample' : rom.merge_target ? 'Split' : 'ROM'}</TableCell>
+                            <TableCell>{rom.subtype === 'chd' ? 'CHD' : rom.subtype === 'sample' ? 'Sample' : rom.subtype === 'dlc' ? 'DLC' : rom.subtype === 'update' ? 'Update' : rom.subtype === 'game' ? 'Game' : rom.merge_target ? 'Split' : 'ROM'}</TableCell>
                             <TableCell>{rom.size ? `${(rom.size / 1024).toFixed(0)}KB` : ''}</TableCell>
                             <TableCell>
                               <Chip label={rom.status || 'unknown'} size="small" color={
