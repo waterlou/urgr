@@ -144,7 +144,7 @@ export async function importNps(platform, versionId, collectionId) {
     run('INSERT INTO games (collection_id, name, description, platform, title_id, content_id) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(collection_id, name, platform) DO UPDATE SET description = excluded.description, platform = excluded.platform, title_id = excluded.title_id, content_id = excluded.content_id',
       [collectionId, parentName, g.originalName, info.folder, parentVariant.titleId, parentVariant.contentId]);
 
-    const gameRow = get('SELECT id FROM games WHERE name = ?', [parentName]);
+    const gameRow = get('SELECT id FROM games WHERE name = ? AND collection_id = ?', [parentName, collectionId]);
     if (!gameRow) continue;
     const gameId = gameRow.id;
 
@@ -160,16 +160,10 @@ export async function importNps(platform, versionId, collectionId) {
     if (!romSetRow) continue;
     const romSetId = romSetRow.id;
 
-    // Create one ROM file per variant
-    const seenFilenames = new Set();
-    for (const v of g.variants) {
-      if (seenFilenames.has(v.pkgFilename)) continue;
-      seenFilenames.add(v.pkgFilename);
-
-      run('INSERT INTO game_rom_files (rom_set_id, filename, size, sha1, subtype, pkg_url) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(rom_set_id, filename) DO NOTHING',
-        [romSetId, v.pkgFilename, v.fileSize || 0, v.sha256, 'game', v.pkgUrl]);
-      romsImported++;
-    }
+    // Create one ROM file for the preferred variant (US → JP → first)
+    run('INSERT INTO game_rom_files (rom_set_id, filename, size, sha1, subtype, pkg_url) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(rom_set_id, filename) DO NOTHING',
+      [romSetId, parentVariant.pkgFilename, parentVariant.fileSize || 0, parentVariant.sha256, 'game', parentVariant.pkgUrl]);
+    romsImported++;
   }
 
   // Map titleIds to game IDs for DLC/update linking
@@ -178,7 +172,7 @@ export async function importNps(platform, versionId, collectionId) {
     const titleId = row['Title ID'] || row.title_id || '';
     const name = row.Name || row.name || '';
     if (!titleId) continue;
-    const gameRow = get('SELECT g.id FROM games g WHERE g.name = ?', [name]);
+    const gameRow = get('SELECT g.id FROM games g WHERE g.name = ? AND g.collection_id = ?', [name, collectionId]);
     if (gameRow) gameMap.set(titleId, gameRow.id);
   }
 
