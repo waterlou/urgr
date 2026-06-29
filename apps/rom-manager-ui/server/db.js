@@ -1,17 +1,9 @@
-import initSqlJs from 'sql.js';
-import fs from 'fs';
+import Database from 'better-sqlite3';
 import path from 'path';
 import { dbPath as defaultDbPath } from './paths.js';
 
 let db = null;
 let dbFilePath = null;
-let SQL = null;
-
-async function ensureSqlJs() {
-  if (!SQL) SQL = await initSqlJs();
-  return SQL;
-}
-await ensureSqlJs();
 
 const SCHEMA = `
 
@@ -212,36 +204,24 @@ export function initDb(dbPath) {
   const resolved = path.resolve(dbPath || defaultDbPath);
   dbFilePath = resolved;
 
-  if (fs.existsSync(resolved)) {
-    const buffer = fs.readFileSync(resolved);
-    db = new SQL.Database(buffer);
-  } else {
-    db = new SQL.Database();
-  }
-
-  db.run('PRAGMA journal_mode=WAL');
-  db.run('PRAGMA foreign_keys = ON');
-  db.run(SCHEMA);
+  db = new Database(resolved);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+  db.exec(SCHEMA);
 
   // Migrations: add columns that may not exist in older databases
-  try { db.run('ALTER TABLE games ADD COLUMN rom_source_id INTEGER REFERENCES games(id)'); } catch (_) {}
-  try { db.run('CREATE INDEX IF NOT EXISTS idx_games_rom_source ON games(rom_source_id)'); } catch (_) {}
+  try { db.exec('ALTER TABLE games ADD COLUMN rom_source_id INTEGER REFERENCES games(id)'); } catch (_) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_games_rom_source ON games(rom_source_id)'); } catch (_) {}
 
   // Mark orphaned operations as failed
   try {
-    db.run("UPDATE operations SET status='failed', error='Server restarted' WHERE status IN ('pending','running')");
+    db.exec("UPDATE operations SET status='failed', error='Server restarted' WHERE status IN ('pending','running')");
   } catch (_) {}
 
   return db;
 }
 
-export function saveDb() {
-  if (db && dbFilePath) {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    fs.writeFileSync(dbFilePath, buffer);
-  }
-}
+export function saveDb() {}
 
 export function getDb() {
   return db;
@@ -256,10 +236,10 @@ export function closeDb() {
 }
 
 export function reloadDb() {
-  if (db && dbFilePath && fs.existsSync(dbFilePath)) {
+  if (db && dbFilePath) {
     db.close();
-    const buffer = fs.readFileSync(dbFilePath);
-    db = new SQL.Database(buffer);
-    db.run('PRAGMA foreign_keys = ON');
+    db = new Database(dbFilePath);
+    db.pragma('foreign_keys = ON');
+    db.pragma('journal_mode = WAL');
   }
 }

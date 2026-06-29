@@ -1142,23 +1142,16 @@ router.post('/api/versions/import-dat', async (req, res) => {
     if (gameNames.length === 0) return res.status(400).json({ error: 'No games found in DAT file.' });
 
     const db = getDb();
-    db.run('INSERT INTO set_versions (collection_id, version) VALUES (?, ?)', [collectionId, version]);
-    const idResult = db.exec('SELECT last_insert_rowid() as id');
-    const versionId = idResult[0]?.values[0]?.[0];
+    const info = db.prepare('INSERT INTO set_versions (collection_id, version) VALUES (?, ?)').run(collectionId, version);
+    const versionId = info.lastInsertRowid;
     if (!versionId) return res.status(500).json({ error: 'Failed to create version' });
 
     const gameInsert = db.prepare('INSERT OR IGNORE INTO games (name, description) VALUES (?, ?)');
     const setInsert = db.prepare('INSERT OR IGNORE INTO game_rom_sets (game_id, version_id) VALUES ((SELECT id FROM games WHERE name = ?), ?)');
     for (const name of gameNames) {
-      gameInsert.bind([name, '']);
-      gameInsert.step();
-      gameInsert.reset();
-      setInsert.bind([name, versionId]);
-      setInsert.step();
-      setInsert.reset();
+      gameInsert.run(name, '');
+      setInsert.run(name, versionId);
     }
-    gameInsert.free();
-    setInsert.free();
     saveDb();
 
     res.json({ ok: true, version_id: versionId, source, version, total_games: gameNames.length });
@@ -1285,9 +1278,8 @@ router.post('/api/versions/import-nps', async (req, res) => {
     if (!NPS_PLATFORM_MAP[platform]) return res.status(400).json({ error: `Invalid platform: ${platform}. Valid: ${NPS_PLATFORMS.join(', ')}` });
 
     const db = getDb();
-    db.run('INSERT INTO set_versions (collection_id, version) VALUES (?, ?)', [collection_id, platform]);
-    const idResult = db.exec('SELECT last_insert_rowid() as id');
-    const versionId = idResult[0]?.values[0]?.[0];
+    const info = db.prepare('INSERT INTO set_versions (collection_id, version) VALUES (?, ?)').run(collection_id, platform);
+    const versionId = info.lastInsertRowid;
     if (!versionId) return res.status(500).json({ error: 'Failed to create version' });
 
     const result = await importNps(platform, versionId, collection_id);

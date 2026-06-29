@@ -2,9 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
-import { closeDb, saveDb } from './db.js';
+import { closeDb } from './db.js';
 import { all, run, dbReady } from './helpers.js';
-import { initUsersDb, closeUsersDb, saveUsersDb } from './db-users.js';
+import { initUsersDb, closeUsersDb } from './db-users.js';
 import { distDir, iconsDir, dataDir, isElectron } from './paths.js';
 import collectionsRouter from './routes/collections.js';
 import gamesRouter from './routes/games.js';
@@ -106,9 +106,7 @@ dbReady.then(() => {
 
 let server;
 function shutdown() {
-  saveDb();
   closeDb();
-  saveUsersDb();
   closeUsersDb();
   if (!isElectron) process.exit(0);
 }
@@ -129,7 +127,8 @@ server.on('listening', () => {
   const actualPort = typeof addr === 'object' ? addr.port : addr;
   logStartup(`URGR API running at http://localhost:${actualPort}`);
   loadFromEnv();
-  initUsersDb().then(() => logStartup('users.db ready'));
+  initUsersDb();
+  logStartup('users.db ready');
   if (isElectron && process.send) {
     process.send({ type: 'server-ready', port: actualPort });
   }

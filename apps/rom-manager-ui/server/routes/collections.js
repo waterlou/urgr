@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { execSync } from 'child_process';
-import { getDb, reloadDb } from '../db.js';
+import { reloadDb } from '../db.js';
 import { syncGameAvailability } from '../operations/syncAvailability.js';
 import { execCli, execCliStream } from '../cli.js';
 import { createJob, getJob, updateProgress, doneJob, failJob, cancelJob } from '../jobs.js';
@@ -41,13 +41,12 @@ function upsertBuild(colId, versionId, format, totalGames) {
 router.get('/api/status', async (req, res) => {
   await dbReady;
   try {
-    const db = getDb();
-    const v = db.exec("SELECT COUNT(*) as c FROM set_versions")[0].values[0][0];
-    const g = db.exec("SELECT COUNT(*) as c FROM games")[0].values[0][0];
-    const r = db.exec("SELECT COUNT(*) as c FROM game_rom_files")[0].values[0][0];
-    const c = db.exec("SELECT COUNT(*) as c FROM collections")[0].values[0][0];
-    const gs = db.exec("SELECT COUNT(*) as c FROM game_sets")[0].values[0][0];
-    const rs = db.exec("SELECT COUNT(*) as c FROM game_rom_sets")[0].values[0][0];
+    const v = get("SELECT COUNT(*) as c FROM set_versions").c;
+    const g = get("SELECT COUNT(*) as c FROM games").c;
+    const r = get("SELECT COUNT(*) as c FROM game_rom_files").c;
+    const c = get("SELECT COUNT(*) as c FROM collections").c;
+    const gs = get("SELECT COUNT(*) as c FROM game_sets").c;
+    const rs = get("SELECT COUNT(*) as c FROM game_rom_sets").c;
     res.json({ versions: v, games: g, roms: r, collections: c, game_sets: gs, game_rom_sets: rs });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

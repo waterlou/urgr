@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import initSqlJs from 'sql.js';
+import Database from 'better-sqlite3';
 import { dataDir } from './paths.js';
 
 const USERS_DB_FILENAME = 'users.db';
@@ -15,21 +15,12 @@ CREATE TABLE IF NOT EXISTS game_notes (
 );
 `;
 
-let saveTimeout = null;
-
-export async function initUsersDb() {
-  const SQL = await initSqlJs();
+export function initUsersDb() {
   dbFilePath = path.join(dataDir, USERS_DB_FILENAME);
 
-  if (fs.existsSync(dbFilePath)) {
-    const buffer = fs.readFileSync(dbFilePath);
-    db = new SQL.Database(buffer);
-  } else {
-    db = new SQL.Database();
-  }
-
-  db.run('PRAGMA journal_mode=WAL');
-  db.run(SCHEMA);
+  db = new Database(dbFilePath);
+  db.pragma('journal_mode = WAL');
+  db.exec(SCHEMA);
 
   return db;
 }
@@ -38,44 +29,20 @@ export function getUsersDb() {
   return db;
 }
 
-function saveDebounced() {
-  if (saveTimeout) return;
-  saveTimeout = setTimeout(() => {
-    saveTimeout = null;
-    saveUsersDb();
-  }, 200);
-}
-
-export function saveUsersDb() {
-  if (db && dbFilePath) {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    fs.writeFileSync(dbFilePath, buffer);
-  }
-}
+export function saveUsersDb() {}
 
 export function closeUsersDb() {
   if (db) db.close();
 }
 
 export function all(sql, params = []) {
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
-  const rows = [];
-  while (stmt.step()) rows.push(stmt.getAsObject());
-  stmt.free();
-  return rows;
+  return db.prepare(sql).all(...params);
 }
 
 export function get(sql, params = []) {
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
-  const row = stmt.step() ? stmt.getAsObject() : null;
-  stmt.free();
-  return row;
+  return db.prepare(sql).get(...params) || null;
 }
 
 export function run(sql, params = []) {
-  db.run(sql, params);
-  saveDebounced();
+  db.prepare(sql).run(...params);
 }

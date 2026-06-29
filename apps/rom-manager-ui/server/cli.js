@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync, spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
-import { getDb, saveDb, initDb, getDbPath } from './db.js';
+import { getDb, saveDb, reloadDb, getDbPath } from './db.js';
 import { envFile, cliDir } from './paths.js';
 
 const CLI_NAMES = {
@@ -110,7 +110,7 @@ export function execCli(args, { binary = 'build' } = {}) {
     throw new Error(`${lastErr}${suffix}`);
   }
 
-  if (needsDb) initDb(dbPath);
+  if (needsDb) reloadDb();
 
   try {
     return JSON.parse(stdout.trim());
@@ -161,7 +161,7 @@ export function execCliStream(args, { binary = 'build', onProgress, signal } = {
     });
 
     child.on('close', (code) => {
-      if (needsDb) initDb(dbPath);
+      if (needsDb) reloadDb();
 
       if (signal?.aborted) {
         reject(new Error('Build cancelled'));

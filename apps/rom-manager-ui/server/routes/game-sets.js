@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getDb, saveDb } from '../db.js';
+import { getDb } from '../db.js';
 import { all, get, run, dbReady } from '../helpers.js';
 
 const router = Router();
@@ -81,9 +81,8 @@ router.post('/api/game-sets/:id/games', async (req, res) => {
     const { game_entry_ids } = req.body;
     if (!game_entry_ids?.length) return res.status(400).json({ error: 'game_entry_ids required' });
     const insert = getDb().prepare('INSERT OR IGNORE INTO game_set_games (game_set_id, game_id) VALUES (?, ?)');
-    for (const gid of game_entry_ids) { insert.bind([req.params.id, gid]); insert.step(); insert.reset(); }
-    insert.free();
-    saveDb();
+    for (const gid of game_entry_ids) { insert.run(req.params.id, gid); }
+
     res.json({ ok: true, added: game_entry_ids.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

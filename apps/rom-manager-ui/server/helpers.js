@@ -1,44 +1,23 @@
-import { getDb, saveDb, initDb } from './db.js';
+import { getDb, initDb } from './db.js';
 import { dbPath } from './paths.js';
 
 export { dbPath };
 export const dbReady = Promise.resolve(initDb(dbPath));
 
 export function all(sql, params = []) {
-  const stmt = getDb().prepare(sql);
-  stmt.bind(params);
-  const rows = [];
-  while (stmt.step()) rows.push(stmt.getAsObject());
-  stmt.free();
-  return rows;
+  return getDb().prepare(sql).all(...params);
 }
 
 export function get(sql, params = []) {
-  const stmt = getDb().prepare(sql);
-  stmt.bind(params);
-  const row = stmt.step() ? stmt.getAsObject() : null;
-  stmt.free();
-  return row;
-}
-
-let saveTimeout = null;
-function saveDebounced() {
-  if (saveTimeout) return;
-  saveTimeout = setTimeout(() => {
-    saveTimeout = null;
-    saveDb();
-  }, 200);
+  return getDb().prepare(sql).get(...params) || null;
 }
 
 export function run(sql, params = []) {
-  getDb().run(sql, params);
-  saveDebounced();
+  getDb().prepare(sql).run(...params);
 }
 
-/** Force an immediate save (for process exit / critical ops) */
 export function runNow(sql, params = []) {
-  getDb().run(sql, params);
-  saveDb();
+  getDb().prepare(sql).run(...params);
 }
 
 export function unescapeXml(s) {
