@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::process::ExitCode;
 
 use rom_manager::dat::{detect_format, parse_dat};
@@ -15,6 +14,36 @@ struct DatImportOutput {
     roms_inserted: usize,
     version_id: i64,
     warnings: Vec<String>,
+}
+
+/// Bulk-import guard: drops indexes, begins a transaction, and ensures cleanup on drop.
+struct BulkImportGuard<'a> {
+    db: &'a Database,
+    finished: bool,
+}
+
+impl<'a> BulkImportGuard<'a> {
+    fn new(db: &'a Database) -> Result<Self, Box<dyn std::error::Error>> {
+        db.begin_bulk_import()?;
+        db.conn.execute_batch("BEGIN")?;
+        Ok(Self { db, finished: false })
+    }
+
+    fn finish(mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.finished = true;
+        self.db.conn.execute_batch("COMMIT")?;
+        self.db.end_bulk_import()?;
+        Ok(())
+    }
+}
+
+impl Drop for BulkImportGuard<'_> {
+    fn drop(&mut self) {
+        if !self.finished {
+            let _ = self.db.conn.execute_batch("ROLLBACK");
+            let _ = self.db.end_bulk_import();
+        }
+    }
 }
 
 fn db_path() -> String {
@@ -111,6 +140,84 @@ EXAMPLES:
 ");
 }
 
+fn do_import(
+    db: &Database,
+    file: &str,
+    collection_id: i64,
+    version: &str,
+    dir: Option<&str>,
+    platform: Option<&str>,
+    subtype: Option<&str>,
+    existing_only: bool,
+    no_clear: bool,
+    status_filter: Option<&str>,
+    exclude_bios: bool,
+    only_runnable: bool,
+) -> Result<DatImportOutput, Box<dyn std::error::Error>> {
+    let fmt = detect_format(file)?;
+    let (games, stats) = parse_dat(file)?;
+    let warnings = stats.errors.clone();
+
+    let version_id = db.import_version(Some(collection_id), version, dir)?;
+
+    let filtered: Vec<ParsedGame> = games.into_iter().filter(|game| {
+        if existing_only {
+            let exists = db.game_exists(&game.name, &game.platform, version_id, collection_id).unwrap_or(false);
+            if !exists { return false; }
+        }
+        if let Some(status) = status_filter {
+            if game.driver_status.as_deref() != Some(status) {
+                return false;
+            }
+        }
+        if exclude_bios && game.isbios {
+            return false;
+        }
+        if only_runnable && game.runnable != Some(true) {
+            return false;
+        }
+        true
+    }).collect();
+
+    let games_inserted = filtered.len();
+    let mut rom_count = 0usize;
+    if !existing_only && !no_clear {
+        db.clear_game_roms_for_version(version_id)?;
+    }
+
+    eprintln!("[import] Importing {} games for version_id={}", games_inserted, version_id);
+    for game in &filtered {
+        eprintln!("  {}", game.name);
+        let mut game_clone = game.clone();
+        if let Some(p) = platform {
+            game_clone.platform = p.to_string();
+        }
+        let gid = db.insert_game(collection_id, &game_clone)?;
+        let rsid = db.insert_rom_set(gid, version_id, game_clone.romof.as_deref())?;
+        if !game_clone.roms.is_empty() {
+            db.insert_rom_files_batch(rsid, &game_clone.roms)?;
+            rom_count += game_clone.roms.len();
+        }
+        if let Some(st) = subtype {
+            db.set_rom_subtype(rsid, st)?;
+        }
+    }
+    // Second pass: resolve cloneof → parent_game_id
+    if let Err(e) = db.resolve_parents(&filtered) {
+        eprintln!("Warning: failed to resolve parent references: {}", e);
+    }
+
+    Ok(DatImportOutput {
+        format: format!("{:?}", fmt),
+        total_games_parsed: stats.total_games,
+        total_roms_parsed: stats.total_roms,
+        games_inserted,
+        roms_inserted: rom_count,
+        version_id,
+        warnings,
+    })
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--version") {
@@ -155,104 +262,43 @@ fn main() -> ExitCode {
         Err(e) => { eprintln!("Database error: {}", e); return ExitCode::FAILURE; }
     };
 
-    let fmt = match detect_format(file) {
-        Ok(f) => f,
-        Err(e) => { eprintln!("Format detection failed: {}", e); return ExitCode::FAILURE; }
+    let cid = match collection_id {
+        Some(id) => id,
+        None => {
+            eprintln!("Error: --collection-id <id> is required");
+            return ExitCode::FAILURE;
+        }
     };
 
-    let (games, stats) = match parse_dat(file) {
-        Ok(v) => v,
-        Err(e) => { eprintln!("Parse error: {}", e); return ExitCode::FAILURE; }
+    let guard = match BulkImportGuard::new(&db) {
+        Ok(g) => g,
+        Err(e) => { eprintln!("Failed to prepare bulk import: {}", e); return ExitCode::FAILURE; }
     };
 
-    let warnings = stats.errors.clone();
+    let result = do_import(
+        &db, file, cid, version, dir.map(|s| s.as_str()),
+        platform.map(|s| s.as_str()), subtype.map(|s| s.as_str()),
+        existing_only, no_clear,
+        status_filter.map(|s| s.as_str()), exclude_bios, only_runnable,
+    );
 
-    let cid = collection_id.unwrap_or_else(|| {
-        eprintln!("Error: --collection-id <id> is required");
-        std::process::exit(1);
-    });
-    let version_id = match db.import_version(Some(cid), version, dir.map(|s| s.as_str())) {
-        Ok(id) => id,
-        Err(e) => { eprintln!("Failed to import version: {}", e); return ExitCode::FAILURE; }
-    };
-
-    // Apply MAME filters before insertion
-    let filtered: Vec<ParsedGame> = games.into_iter().filter(|game| {
-        if existing_only {
-            let exists = db.game_exists(&game.name, &game.platform, version_id, cid).unwrap_or(false);
-            if !exists { return false; }
-        }
-        if let Some(ref status) = status_filter {
-            if game.driver_status.as_deref() != Some(status.as_str()) {
-                return false;
-            }
-        }
-        if exclude_bios && game.isbios {
-            return false;
-        }
-        if only_runnable && game.runnable != Some(true) {
-            return false;
-        }
-        true
-    }).collect();
-
-    let games_inserted = filtered.len();
-    let mut rom_count = 0usize;
-    if !existing_only && !no_clear {
-        if let Err(e) = db.clear_game_roms_for_version(version_id) {
-        eprintln!("Failed to clear existing ROM sets: {}", e);
-        return ExitCode::FAILURE;
-    }
-  }
-  eprintln!("[import] Importing {} games for version_id={}", games_inserted, version_id);
-    for game in &filtered {
-        eprintln!("  {}", game.name);
-        let mut game_clone = game.clone();
-        // If --platform was passed, override the platform field (used for FBNeo per-manufacturer dats)
-        if let Some(p) = platform {
-            game_clone.platform = p.to_string();
-        }
-        let gid = match db.insert_game(cid, &game_clone) {
-            Ok(id) => id,
-            Err(e) => { eprintln!("Failed to insert game {}: {}", game_clone.name, e); return ExitCode::FAILURE; }
-        };
-        let rsid = match db.insert_rom_set(gid, version_id, game_clone.romof.as_deref()) {
-            Ok(id) => id,
-            Err(e) => { eprintln!("Failed to create ROM set for {}: {}", game_clone.name, e); return ExitCode::FAILURE; }
-        };
-        if !game_clone.roms.is_empty() {
-            if let Err(e) = db.insert_rom_files_batch(rsid, &game_clone.roms) {
-                eprintln!("Failed to insert ROMs for {}: {}", game_clone.name, e);
+    match result {
+        Ok(output) => {
+            if let Err(e) = guard.finish() {
+                eprintln!("Failed to finalize import: {}", e);
                 return ExitCode::FAILURE;
             }
-            rom_count += game_clone.roms.len();
-        }
-        // Set subtype on all ROM files for this rom set
-        if let Some(st) = subtype {
-            if let Err(e) = db.set_rom_subtype(rsid, st) {
-                eprintln!("Failed to set subtype for {}: {}", game_clone.name, e);
-                return ExitCode::FAILURE;
+            if json {
+                print_json(&output);
+            } else {
+                println!("Imported {} games, {} ROMs (version_id: {})",
+                    output.games_inserted, output.roms_inserted, output.version_id);
             }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Import error: {}", e);
+            ExitCode::FAILURE
         }
     }
-    // Second pass: resolve cloneof → parent_game_id
-    if let Err(e) = db.resolve_parents(&filtered) {
-        eprintln!("Warning: failed to resolve parent references: {}", e);
-    }
-
-    if json {
-        print_json(&DatImportOutput {
-            format: format!("{:?}", fmt),
-            total_games_parsed: stats.total_games,
-            total_roms_parsed: stats.total_roms,
-            games_inserted,
-            roms_inserted: rom_count,
-            version_id,
-            warnings,
-        });
-    } else {
-        println!("Imported {} games, {} ROMs (version_id: {})", games_inserted, rom_count, version_id);
-    }
-
-    ExitCode::SUCCESS
 }

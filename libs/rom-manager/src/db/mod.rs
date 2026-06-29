@@ -31,6 +31,36 @@ impl Database {
         Ok(Self { conn })
     }
 
+    /// Prepare database for bulk import: drop indexes, set fast PRAGMAs.
+    /// Must be called before a bulk import, paired with end_bulk_import() afterward.
+    pub fn begin_bulk_import(&self) -> Result<()> {
+        self.conn.execute_batch(
+            "PRAGMA synchronous = OFF;
+             PRAGMA cache_size = -8000;
+             PRAGMA temp_store = MEMORY;
+             DROP INDEX IF EXISTS idx_game_rom_sets_version;
+             DROP INDEX IF EXISTS idx_game_rom_sets_game;
+             DROP INDEX IF EXISTS idx_rom_files_set;
+             DROP INDEX IF EXISTS idx_rom_files_sha1;
+             DROP INDEX IF EXISTS idx_games_collection;
+             DROP INDEX IF EXISTS idx_games_name;
+             DROP INDEX IF EXISTS idx_games_runnable;
+             DROP INDEX IF EXISTS idx_games_rom_source;"
+        )?;
+        Ok(())
+    }
+
+    /// Restore database after bulk import: recreate indexes, restore PRAGMAs.
+    pub fn end_bulk_import(&self) -> Result<()> {
+        self.conn.execute_batch(
+            "PRAGMA synchronous = NORMAL;
+             PRAGMA cache_size = -2000;
+             PRAGMA temp_store = DEFAULT;"
+        )?;
+        self.conn.execute_batch(schema::INDEXES)?;
+        Ok(())
+    }
+
     /// Apply schema migrations, skipping errors for already-existing columns.
     fn run_migrations(conn: &Connection) {
         for stmt in schema::MIGRATIONS {
