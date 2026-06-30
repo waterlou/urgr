@@ -41,10 +41,12 @@ CREATE TABLE IF NOT EXISTS games (
     year            TEXT,
     manufacturer    TEXT,
     platform        TEXT DEFAULT '',
+    region          TEXT NOT NULL DEFAULT '',
     parent_game_id  INTEGER,
     synopsis        TEXT DEFAULT '',
     title_id        TEXT,
     content_id      TEXT,
+    original_name   TEXT NOT NULL DEFAULT '',
     runnable        INTEGER,
     isbios          INTEGER NOT NULL DEFAULT 0,
     isdevice        INTEGER NOT NULL DEFAULT 0,
@@ -212,6 +214,36 @@ export function initDb(dbPath) {
   // Migrations: add columns that may not exist in older databases
   try { db.exec('ALTER TABLE games ADD COLUMN rom_source_id INTEGER REFERENCES games(id)'); } catch (_) {}
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_games_rom_source ON games(rom_source_id)'); } catch (_) {}
+  try { db.exec("ALTER TABLE games ADD COLUMN region TEXT NOT NULL DEFAULT ''"); } catch (_) {}
+  try { db.exec("ALTER TABLE games ADD COLUMN original_name TEXT NOT NULL DEFAULT ''"); } catch (_) {}
+
+  // Data migration: extract region from NPS-encoded platform (e.g. PSV__US → platform=PSV, region=US)
+  // Only processes rows that still have the __REGION suffix (new-format imports).
+  // Old-format rows (platform=PSV with title_id) are skipped — user should reimport.
+  const rowsToMigrate = db.prepare("SELECT id, title_id, name, description, platform FROM games WHERE platform LIKE '%__%' AND INSTR(platform, '__') > 0 AND title_id IS NOT NULL AND title_id != ''").all();
+  if (rowsToMigrate.length > 0) {
+    // Group by (collection_id, platform, title_id) to detect duplicates before migration
+    const migrated = { names: 0, platforms: 0 };
+    const dupCheck = new Map();
+    for (const row of rowsToMigrate) {
+      const cleanPlat = row.platform.split('__')[0];
+      const region = row.platform.split('__')[1];
+      const key = `${row.title_id}|${cleanPlat}`;
+      // Skip if another row already migrated with same name+platform (UNIQUE collision)
+      if (dupCheck.has(key)) continue;
+      dupCheck.set(key, true);
+      try {
+        db.prepare("UPDATE games SET original_name = description, description = name, name = title_id, region = ?, platform = ? WHERE id = ?").run(region, cleanPlat, row.id);
+        migrated.names++;
+        migrated.platforms++;
+      } catch (e) {
+        // Row failed - likely unique constraint collision; skip
+      }
+    }
+    if (migrated.platforms > 0 || migrated.names > 0) {
+      console.log(`[migration] Remapped ${migrated.names} NPS games to name=title_id and extracted region from ${migrated.platforms} games`);
+    }
+  }
 
   // Mark orphaned operations as failed
   try {

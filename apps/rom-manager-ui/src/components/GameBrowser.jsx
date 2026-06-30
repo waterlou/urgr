@@ -42,6 +42,7 @@ export default function GameBrowser() {
   const urlYear = searchParams.get('year') || '';
   const urlManufacturer = searchParams.get('manufacturer') || '';
   const urlPlatform = searchParams.get('platform') || '';
+  const urlRegion = searchParams.get('region') || '';
   const urlSort = searchParams.get('sort') || 'name';
   const urlOrder = searchParams.get('order') || 'asc';
   const urlParents = searchParams.get('parents_only') === 'true';
@@ -60,6 +61,7 @@ export default function GameBrowser() {
   const [yearFilter, setYearFilter] = useState(urlYear);
   const [manufacturerFilter, setManufacturerFilter] = useState(urlManufacturer);
   const [platformFilter, setPlatformFilter] = useState(urlPlatform);
+  const [regionFilter, setRegionFilter] = useState(urlRegion);
   const [listImageMode, setListImageMode] = useState(() => localStorage.getItem('rom-manager-list-image') || 'cover');
   const [batchShow, setBatchShow] = useState(false);
   const [batchOverwrite, setBatchOverwrite] = useState(false);
@@ -77,21 +79,21 @@ export default function GameBrowser() {
   useEffect(() => {
     loadGames(activeView, activeId, sortField, sortOrder, searchQuery,
       parentsOnly, favouritesOnly, romsOnly, selectedVersionId, activeView === 'collection' ? 'games' : undefined,
-      yearFilter || urlYear, manufacturerFilter || urlManufacturer, platformFilter || urlPlatform);
-  }, [activeView, activeId, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, romsOnly, selectedVersionId, loadGames, yearFilter, manufacturerFilter, urlYear, urlManufacturer, platformFilter, urlPlatform]);
+      yearFilter || urlYear, manufacturerFilter || urlManufacturer, platformFilter || urlPlatform, regionFilter || urlRegion);
+  }, [activeView, activeId, sortField, sortOrder, searchQuery, parentsOnly, favouritesOnly, romsOnly, selectedVersionId, loadGames, yearFilter, manufacturerFilter, urlYear, urlManufacturer, platformFilter, urlPlatform, regionFilter, urlRegion]);
 
   useEffect(() => {
     if (!sentinelRef.current) return;
     const observer = new IntersectionObserver(([entry]) => {
       if (entry.isIntersecting && hasMore && !loading) {
         loadMore(activeView, activeId, sortField, sortOrder, searchQuery,
-          parentsOnly, favouritesOnly, romsOnly, selectedVersionId, yearFilter || urlYear, manufacturerFilter || urlManufacturer, platformFilter || urlPlatform);
+          parentsOnly, favouritesOnly, romsOnly, selectedVersionId, yearFilter || urlYear, manufacturerFilter || urlManufacturer, platformFilter || urlPlatform, regionFilter || urlRegion);
       }
     }, { rootMargin: '200px' });
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
   }, [hasMore, loading, activeView, activeId, sortField, sortOrder, searchQuery,
-    parentsOnly, favouritesOnly, romsOnly, selectedVersionId, loadMore, yearFilter, manufacturerFilter, urlYear, urlManufacturer, platformFilter, urlPlatform]);
+    parentsOnly, favouritesOnly, romsOnly, selectedVersionId, loadMore, yearFilter, manufacturerFilter, urlYear, urlManufacturer, platformFilter, urlPlatform, regionFilter, urlRegion]);
 
   // Sync filters to URL so they survive navigation
   useEffect(() => {
@@ -106,11 +108,12 @@ export default function GameBrowser() {
     if (yearFilter) p.set('year', yearFilter); else p.delete('year');
     if (manufacturerFilter) p.set('manufacturer', manufacturerFilter); else p.delete('manufacturer');
     if (platformFilter) p.set('platform', platformFilter); else p.delete('platform');
+    if (regionFilter) p.set('region', regionFilter); else p.delete('region');
     if (selectedVersionId) p.set('version', selectedVersionId); else p.delete('version');
     const qs = p.toString();
     const current = location.search.replace(/^\?/, '');
     if (qs !== current) navigate(location.pathname + (qs ? '?' + qs : ''), { replace: true });
-  }, [searchQuery, sortField, sortOrder, parentsOnly, favouritesOnly, romsOnly, yearFilter, manufacturerFilter, platformFilter, selectedVersionId, activeView]);
+  }, [searchQuery, sortField, sortOrder, parentsOnly, favouritesOnly, romsOnly, yearFilter, manufacturerFilter, platformFilter, regionFilter, selectedVersionId, activeView]);
 
   // Sync selectedVersionId from URL version param on mount
   useEffect(() => {
@@ -193,6 +196,8 @@ export default function GameBrowser() {
             }}>
               <MenuItem value="name-asc">Name ↑</MenuItem>
               <MenuItem value="name-desc">Name ↓</MenuItem>
+              <MenuItem value="description-asc">Title ↑</MenuItem>
+              <MenuItem value="description-desc">Title ↓</MenuItem>
               <MenuItem value="rating-desc">Rating ↓</MenuItem>
               <MenuItem value="rating-asc">Rating ↑</MenuItem>
               <MenuItem value="year-desc">Year ↓</MenuItem>
@@ -264,6 +269,18 @@ export default function GameBrowser() {
               <Chip key={p} label={p} size="small"
                 color={platformFilter === p ? 'primary' : 'default'}
                 onClick={() => setPlatformFilter(p)} />
+            ))}
+          </Box>
+        )}
+
+        {activeMeta?.regions?.length > 1 && (
+          <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, mb: 1, flexWrap: 'wrap' }}>
+            <Chip label="All Regions" size="small" color={!regionFilter ? 'primary' : 'default'}
+              onClick={() => setRegionFilter('')} />
+            {activeMeta.regions.map(r => (
+              <Chip key={r} label={r} size="small"
+                color={regionFilter === r ? 'primary' : 'default'}
+                onClick={() => setRegionFilter(r)} />
             ))}
           </Box>
         )}

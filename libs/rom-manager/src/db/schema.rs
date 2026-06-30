@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS games (
     year            TEXT,
     manufacturer    TEXT,
     platform        TEXT DEFAULT '',
+    region          TEXT NOT NULL DEFAULT '',
     parent_game_id  INTEGER,
     synopsis        TEXT DEFAULT '',
     isbios          INTEGER NOT NULL DEFAULT 0,
@@ -26,7 +27,7 @@ CREATE TABLE IF NOT EXISTS games (
     sampleof        TEXT,
     rom_source_id   INTEGER REFERENCES games(id),
     created_at      TEXT DEFAULT (datetime('now')),
-    UNIQUE(collection_id, name, platform)
+                    UNIQUE(collection_id, name, platform)
 );
 
 CREATE TABLE IF NOT EXISTS game_rom_sets (
@@ -84,4 +85,5 @@ CREATE INDEX IF NOT EXISTS idx_games_rom_source ON games(rom_source_id);
 /// Applied one at a time, skipping errors (column may already exist).
 pub const MIGRATIONS: &[&str] = &[
     "ALTER TABLE games ADD COLUMN rom_source_id INTEGER REFERENCES games(id)",
+    "ALTER TABLE games ADD COLUMN region TEXT NOT NULL DEFAULT ''",
 ];

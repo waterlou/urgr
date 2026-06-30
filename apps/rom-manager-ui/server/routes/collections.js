@@ -164,16 +164,16 @@ router.get('/api/collections/:id/games', async (req, res) => {
   await dbReady;
   try {
     const { id } = req.params;
-    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, parents_only, favourites_only, roms_only, version_id, year, manufacturer, platform } = req.query;
+    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, parents_only, favourites_only, roms_only, version_id, year, manufacturer, platform, region } = req.query;
     const collection = get('SELECT * FROM collections WHERE id = ?', [id]);
     if (!collection) return res.status(404).json({ error: 'not found' });
 
     const versions = all('SELECT id as version_id FROM set_versions WHERE collection_id = ?', [id]);
-    if (!versions.length) return res.json({ collection, games: [], platforms: [], total: 0 });
+    if (!versions.length) return res.json({ collection, games: [], platforms: [], regions: [], total: 0 });
 
     const vids = version_id ? [Number(version_id)] : versions.map(v => v.version_id);
     const ph = vids.map(() => '?').join(',');
-    const sortCol = sort === 'rating' ? 'MAX(COALESCE(gs.rating, 0))' : sort === 'play_count' ? 'MAX(COALESCE(gs.play_count, 0))' : sort === 'year' ? 'CAST(g.year AS INTEGER)' : sort === 'manufacturer' ? 'g.manufacturer' : 'g.name';
+    const sortCol = sort === 'rating' ? 'MAX(COALESCE(gs.rating, 0))' : sort === 'play_count' ? 'MAX(COALESCE(gs.play_count, 0))' : sort === 'year' ? 'CAST(g.year AS INTEGER)' : sort === 'manufacturer' ? 'g.manufacturer' : sort === 'description' ? 'g.description' : 'g.name';
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
 
     let whereExtra = '';
@@ -205,6 +205,10 @@ router.get('/api/collections/:id/games', async (req, res) => {
     if (platform) {
       whereExtra += ' AND g.platform = ?';
       extraParams.push(platform);
+    }
+    if (region) {
+      whereExtra += ' AND g.region = ?';
+      extraParams.push(region);
     }
 
     // Always LEFT JOIN game_state for available/favourite/rating data
@@ -291,6 +295,13 @@ router.get('/api/collections/:id/games', async (req, res) => {
       ORDER BY g.platform
     `, vids).map(p => p.platform);
 
+    const regions = all(`
+      SELECT DISTINCT g.region as region FROM games g
+      JOIN game_rom_sets grs ON grs.game_id = g.id
+      WHERE grs.version_id IN (${ph}) AND g.region != '' AND g.region IS NOT NULL
+      ORDER BY g.region
+    `, vids).map(p => p.region);
+
     const collectionVersions = all(`
       SELECT sv.id, c.dataset_preset as source, sv.version, sv.created_at,
         (SELECT COUNT(*) FROM game_rom_sets WHERE version_id = sv.id) as total_games,
@@ -301,7 +312,7 @@ router.get('/api/collections/:id/games', async (req, res) => {
     `, [id]);
     sortVersionList(collectionVersions);
 
-    res.json({ collection, games, platforms, total, versions: collectionVersions, limit: Number(limit), offset: Number(offset) });
+    res.json({ collection, games, platforms, regions, total, versions: collectionVersions, limit: Number(limit), offset: Number(offset) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

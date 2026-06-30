@@ -51,7 +51,7 @@ router.get('/api/game-sets/:id/games', async (req, res) => {
     const { limit = 200, offset = 0, sort = 'name', order = 'asc' } = req.query;
     const gameSet = get('SELECT * FROM game_sets WHERE id = ?', [id]);
     if (!gameSet) return res.status(404).json({ error: 'not found' });
-    const sortCol = sort === 'rating' ? 'COALESCE(gs.rating, 0)' : sort === 'favourite' ? 'COALESCE(gs.favourite, 0)' : sort === 'play_count' ? 'COALESCE(gs.play_count, 0)' : 'g.name';
+    const sortCol = sort === 'rating' ? 'COALESCE(gs.rating, 0)' : sort === 'favourite' ? 'COALESCE(gs.favourite, 0)' : sort === 'play_count' ? 'COALESCE(gs.play_count, 0)' : sort === 'description' ? 'g.description' : 'g.name';
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
     const total = get('SELECT COUNT(*) as c FROM game_set_games WHERE game_set_id = ?', [id]).c;
     const games = all(`

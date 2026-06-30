@@ -44,7 +44,7 @@ export function updateScrapePriority(id, enabledSources) {
   return fetchWithBody(`/collections/${id}`, 'PUT', { scrape_source_priority: JSON.stringify(enabledSources) });
 }
 export function deleteCollection(id) { return fetchWithBody(`/collections/${id}`, 'DELETE'); }
-export function getCollectionGames(id, { limit, offset, sort, order, q, parents_only, favourites_only, roms_only, version_id, year, manufacturer, platform } = {}) {
+export function getCollectionGames(id, { limit, offset, sort, order, q, parents_only, favourites_only, roms_only, version_id, year, manufacturer, platform, region } = {}) {
   const p = new URLSearchParams();
   if (limit) p.set('limit', limit);
   if (offset) p.set('offset', offset);
@@ -58,6 +58,7 @@ export function getCollectionGames(id, { limit, offset, sort, order, q, parents_
   if (year) p.set('year', year);
   if (manufacturer) p.set('manufacturer', manufacturer);
   if (platform) p.set('platform', platform);
+  if (region) p.set('region', region);
   return fetchJson(`/collections/${id}/games${p.toString() ? '?' + p.toString() : ''}`);
 }
 

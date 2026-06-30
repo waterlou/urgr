@@ -149,7 +149,7 @@ describe('NPS import', () => {
 
       // Check games table
       const games = db.exec(`
-        SELECT g.name, g.platform, g.title_id, g.content_id
+        SELECT g.name, g.platform, g.region, g.description, g.content_id
         FROM games g
         JOIN game_rom_sets grs ON grs.game_id = g.id
         WHERE grs.version_id = ?
@@ -157,22 +157,23 @@ describe('NPS import', () => {
       const rows = games[0]?.values || []
       assert.equal(rows.length, 2)
 
-      // 10 Second Ninja X (parent = US)
-      const ninjaRow = rows.find(r => r[0] === '10 Second Ninja X')
-      assert.ok(ninjaRow, '10 Second Ninja X exists')
+      // 10 Second Ninja X (parent = US) — name is now title_id
+      const ninjaRow = rows.find(r => r[0] === 'PCSE00001')
+      assert.ok(ninjaRow, '10 Second Ninja X (PCSE00001) exists')
       assert.equal(ninjaRow[1], 'PSV', 'platform set')
-      assert.equal(ninjaRow[2], 'PCSE00001', 'title_id from US variant')
+      assert.equal(ninjaRow[2], 'US', 'region from US variant')
+      assert.equal(ninjaRow[3], '10 Second Ninja X', 'description is game name')
 
       // Persona 4 Golden (parent = US)
-      const p4Row = rows.find(r => r[0] === 'Persona 4 Golden')
-      assert.ok(p4Row, 'Persona 4 Golden exists')
+      const p4Row = rows.find(r => r[0] === 'PCSB00582')
+      assert.ok(p4Row, 'Persona 4 Golden (PCSB00582) exists')
 
       // Check ROM files for Ninja (US + EU)
       const ninjaRoms = db.exec(`
         SELECT grf.filename, grf.subtype FROM game_rom_files grf
         JOIN game_rom_sets grs ON grs.id = grf.rom_set_id
         JOIN games g ON g.id = grs.game_id
-        WHERE g.name = ? AND grs.version_id = ?
+        WHERE g.description = ? AND grs.version_id = ?
         ORDER BY grf.filename`, ['10 Second Ninja X', versionId])
       const ninjaRomRows = ninjaRoms[0]?.values || []
       assert.equal(ninjaRomRows.length, 2, 'Ninja has 2 ROM files (US + EU)')
@@ -184,7 +185,7 @@ describe('NPS import', () => {
         SELECT grf.filename, grf.subtype FROM game_rom_files grf
         JOIN game_rom_sets grs ON grs.id = grf.rom_set_id
         JOIN games g ON g.id = grs.game_id
-        WHERE g.name = 'Persona 4 Golden' AND grs.version_id = ?
+        WHERE g.description = 'Persona 4 Golden' AND grs.version_id = ?
         ORDER BY grf.filename`, [versionId])
       const p4RomRows = p4Roms[0]?.values || []
       assert.equal(p4RomRows.length, 4, 'P4G has 4 ROM files (JP+US+EU+ASIA)')
@@ -195,7 +196,7 @@ describe('NPS import', () => {
         SELECT g.name FROM games g
         JOIN game_rom_sets grs ON grs.game_id = g.id
         WHERE grs.version_id = ?
-        AND (g.name LIKE '%MISSING%' OR g.name LIKE '%Theme%' OR g.name LIKE '%Demo%')`, [versionId])
+        AND (g.description LIKE '%MISSING%' OR g.description LIKE '%Theme%' OR g.description LIKE '%Demo%')`, [versionId])
       assert.equal(excluded[0]?.values?.length || 0, 0, 'MISSING/Themes/Demos not imported')
 
       // Verify re-import skips existing

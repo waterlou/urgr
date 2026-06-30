@@ -63,11 +63,11 @@ function gameRow(row) {
     manufacturer: row.manufacturer,
     cloneof: row.cloneof || null,
     parent_game_id: row.parent_game_id,
-    platform: row.platform || '',
+    platform: row.platform,
     version_id: row.version_id,
     source: row.source || '',
     version: row.version,
-    region: '',
+    region: row.region || '',
   };
 }
 
@@ -90,7 +90,7 @@ function attachMedia(games) {
 
   return games.map(g => {
     let covers, screenshots;
-    const plat = (g.platform || '').trim() || 'arcade';
+    const plat = g.platform || 'arcade';
 
     // Prefer progettosnaps pre-downloaded files over scraped URLs
     try {
@@ -205,7 +205,7 @@ function fetchGameOptionalRomSet(gameId, versionId) {
 router.get('/', async (req, res) => {
   await dbReady;
   try {
-    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, collection_id, version_id, parents_only, favourites_only, roms_only, year, manufacturer } = req.query;
+    const { limit = 200, offset = 0, sort = 'name', order = 'asc', q, collection_id, version_id, parents_only, favourites_only, roms_only, year, manufacturer, region } = req.query;
     const sortDir = order === 'desc' ? 'DESC' : 'ASC';
 
     let where = ["(g.runnable != 0 OR g.runnable IS NULL)"];
@@ -243,6 +243,10 @@ router.get('/', async (req, res) => {
       where.push('g.manufacturer = ?');
       params.push(manufacturer);
     }
+    if (region) {
+      where.push('g.region = ?');
+      params.push(region);
+    }
 
     const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
 
@@ -253,7 +257,7 @@ router.get('/', async (req, res) => {
       ${whereClause}`;
     const total = params.length ? get(countSql, params).c : get(countSql).c;
 
-    const sortCol = sort === 'rating' ? 'MAX(COALESCE(gs.rating, 0))' : sort === 'play_count' ? 'MAX(COALESCE(gs.play_count, 0))' : sort === 'year' ? 'CAST(g.year AS INTEGER)' : sort === 'manufacturer' ? 'g.manufacturer' : 'g.name';
+    const sortCol = sort === 'rating' ? 'MAX(COALESCE(gs.rating, 0))' : sort === 'play_count' ? 'MAX(COALESCE(gs.play_count, 0))' : sort === 'year' ? 'CAST(g.year AS INTEGER)' : sort === 'manufacturer' ? 'g.manufacturer' : sort === 'description' ? 'g.description' : 'g.name';
     const pageParams = [...params, Number(limit), Number(offset)];
 
     let games = all(`
@@ -330,7 +334,7 @@ router.get('/:id', async (req, res) => {
     // Determine canonical name for game_media lookup (respects collection's scrape_mode)
     const scrapeMode = getScrapeMode(game.version_id);
     const canonical = canonicalName(game, scrapeMode);
-    const mediaPlat = (game.platform || '').trim() || 'arcade';
+    const mediaPlat = game.platform || 'arcade';
   const enabledSet = getEnabledSourceSet(game.collection_id);
     const media = get('SELECT covers, screenshots, fanarts, videos, source, synopsis as media_synopsis FROM game_media WHERE name = ? AND platform = ?', [canonical, mediaPlat]);
 
@@ -366,7 +370,14 @@ router.get('/:id', async (req, res) => {
       SELECT grf.* FROM game_rom_files grf
       JOIN game_rom_sets grs ON grs.id = grf.rom_set_id
       WHERE grs.game_id = ? AND grs.version_id = ?
-      ORDER BY grf.filename
+      ORDER BY
+        CASE grf.subtype
+          WHEN 'game' THEN 1
+          WHEN 'update' THEN 2
+          WHEN 'dlc' THEN 3
+          ELSE 9
+        END,
+        grf.filename
     `, [game.id, game.version_id]) : [];
 
     const state = get('SELECT * FROM game_state WHERE game_id = ?', [game.id]);
@@ -377,7 +388,7 @@ router.get('/:id', async (req, res) => {
 
     // Clones: other games that have this game as parent, within any version
     const clones = all(`
-      SELECT g.id, g.name, g.description, parent_g.name as cloneof
+      SELECT g.id, g.name, g.description, g.region, parent_g.name as cloneof
       FROM games g
       LEFT JOIN games parent_g ON parent_g.id = g.parent_game_id
       WHERE g.parent_game_id = ? AND g.id != ?
@@ -386,8 +397,8 @@ router.get('/:id', async (req, res) => {
 
     let parent = null;
     if (game.parent_game_id) {
-      const p = get('SELECT id, name FROM games WHERE id = ?', [game.parent_game_id]);
-      if (p) parent = { id: p.id, name: p.name, region: '' };
+      const p = get('SELECT id, name, region FROM games WHERE id = ?', [game.parent_game_id]);
+      if (p) parent = { id: p.id, name: p.name, region: p.region || '' };
     }
 
     res.json({
@@ -557,7 +568,7 @@ router.get('/:id/play', async (req, res) => {
           if (idx > 0) {
             for (const v of versions.slice(0, idx).reverse()) {
               const olderDirs = [
-                ...(game.platform ? [path.join(dataDir, 'roms', colFolder1, v, 'roms', game.platform)] : []),
+                 ...(game.platform ? [path.join(dataDir, 'roms', colFolder1, v, 'roms', game.platform)] : []),
                 path.join(dataDir, 'roms', colFolder1, v, 'roms'),
               ];
               for (const d of olderDirs) {
@@ -735,6 +746,7 @@ router.get('/:id/play', async (req, res) => {
 export async function scrapeSingleGame(gameId, versionId) {
   const game = fetchGameOptionalRomSet(gameId, versionId);
   if (!game) return { scraped: false, error: 'Game not found', gameId };
+  const scrapePlat = game.platform || '';
 
   // Get collection's scrape_mode setting
   // 'parent' (default): for clones, search by parent name — all clones share media
@@ -747,10 +759,10 @@ export async function scrapeSingleGame(gameId, versionId) {
     ? (get('SELECT description FROM games WHERE name = ?', [game.cloneof])?.description || game.description)
     : game.description;
 
-  const mediaPlatform = p => (p || '').trim() || 'arcade';
+  const mediaPlatform = p => p || 'arcade';
 
   const canonical = canonicalName(game, scrapeMode);
-  const mediaPlat = mediaPlatform(game.platform);
+  const mediaPlat = mediaPlatform(scrapePlat);
 
   const enabledSet = getEnabledSourceSet(game.collection_id);
   const datasetPreset = game.collection_id
@@ -815,7 +827,7 @@ export async function scrapeSingleGame(gameId, versionId) {
 
   const candidates = [];
 
-  if (game.platform === 'arcade' && searchName) {
+  if (scrapePlat === 'arcade' && searchName) {
     const expanded = get('SELECT description FROM games WHERE name = ? AND description IS NOT NULL AND description != name LIMIT 1', [searchName]);
     if (expanded?.description) {
       const clean = expanded.description.replace(/\s*\([^)]*\)\s*/g, '').trim();
@@ -823,7 +835,7 @@ export async function scrapeSingleGame(gameId, versionId) {
     }
   }
 
-  if (searchName && (game.platform === 'arcade' || !game.platform)) {
+  if (searchName && (scrapePlat === 'arcade' || !scrapePlat)) {
     if (!candidates.includes(searchName)) candidates.unshift(searchName);
   }
 
@@ -856,11 +868,11 @@ export async function scrapeSingleGame(gameId, versionId) {
 
   // Try ArcadeDB first with the MAME short name (only when enabled or no priority set)
   if (!enabledSet || enabledSet.has('arcadedb')) {
-    if (scrapeMode === 'individual' || (game.name && (game.platform === 'arcade' || !game.platform))) {
+    if (scrapeMode === 'individual' || (game.name && (scrapePlat === 'arcade' || !scrapePlat))) {
       try {
         const r = execCli(['search', searchName, '--source', 'arcadedb'], { binary: 'scraper' });
         if (r?.results?.length) {
-          const ranked = rankResults(r.results, game.name, game.name, game.platform);
+          const ranked = rankResults(r.results, game.name, game.name, scrapePlat);
           const best = ranked[0];
           searchResult = { results: [best] };
           matchedTitle = best.title;
@@ -870,9 +882,9 @@ export async function scrapeSingleGame(gameId, versionId) {
   }
 
   if (!searchResult) for (const q of candidates) {
-    const r = searchEnabledSources(q, game.platform, game.source);
+    const r = searchEnabledSources(q, scrapePlat, game.source);
     if (r) {
-      const ranked = rankResults(r.results, q, searchName || game.name, game.platform);
+      const ranked = rankResults(r.results, q, searchName || game.name, scrapePlat);
       const best = ranked[0];
       searchResult = { results: [best] };
       matchedTitle = best.title;
@@ -881,9 +893,9 @@ export async function scrapeSingleGame(gameId, versionId) {
     if (q === searchDesc && searchDesc && searchDesc.length > 5) {
       const parts = searchDesc.split(/\s*[\/~]\s*/).filter(p => p.length > 3);
       for (const part of parts) {
-        const pr = searchEnabledSources(part, game.platform, game.source);
+        const pr = searchEnabledSources(part, scrapePlat, game.source);
         if (pr) {
-          const ranked = rankResults(pr.results, part, searchName || game.name, game.platform);
+          const ranked = rankResults(pr.results, part, searchName || game.name, scrapePlat);
           const best = ranked[0];
           searchResult = { results: [best] };
           matchedTitle = best.title;
@@ -895,9 +907,9 @@ export async function scrapeSingleGame(gameId, versionId) {
         if (stripped && stripped !== searchDesc) {
           const head = stripped.split(/\s*[-–:]\s*/)[0].trim();
           if (head.length > 3) {
-            const pr = searchEnabledSources(head, game.platform, game.source);
+            const pr = searchEnabledSources(head, scrapePlat, game.source);
             if (pr) {
-              const ranked = rankResults(pr.results, head, searchName || game.name, game.platform);
+              const ranked = rankResults(pr.results, head, searchName || game.name, scrapePlat);
               searchResult = { results: [ranked[0]] };
               matchedTitle = ranked[0].title;
             }
@@ -1018,7 +1030,7 @@ export async function scrapeSingleGame(gameId, versionId) {
 
   if (game.source === 'nps') {
     try {
-      const contentId = game.content_id || game.title_id;
+      const contentId = game.content_id || game.title_id || game.name;
       if (contentId) {
         const sonyResult = execCli(['detail', contentId, '--source', 'sony-store'], { binary: 'scraper' });
         if (sonyResult && sonyResult.fanarts?.length > 0) {
@@ -1036,7 +1048,7 @@ export async function scrapeSingleGame(gameId, versionId) {
         const colVersion = get(`SELECT c.dataset_preset FROM collections c JOIN set_versions sv ON sv.collection_id = c.id WHERE sv.id = ? LIMIT 1`, [game.version_id]);
         if (colVersion?.dataset_preset === 'DATOMATIC') {
           const gameNameForUrl = game.description || game.name;
-          const nidResult = execCli(['detail', `${game.platform || 'unknown'}/${gameNameForUrl}`, '--source', 'no-intro-pictures'], { binary: 'scraper' });
+          const nidResult = execCli(['detail', `${scrapePlat || 'unknown'}/${gameNameForUrl}`, '--source', 'no-intro-pictures'], { binary: 'scraper' });
           if (nidResult && !nidResult.error) {
             const covers = nidResult.covers?.length ? JSON.stringify(nidResult.covers) : '[]';
             const screenshots = nidResult.screenshots?.length ? JSON.stringify(nidResult.screenshots) : '[]';
@@ -1219,7 +1231,7 @@ async function serveGameMedia(req, res, mediaType, dbField, opts = {}) {
     if (!game) return res.status(404).end();
     const scrapeMode = getScrapeMode(game.version_id);
     const canonical = canonicalName(game, scrapeMode);
-    const mediaPlat = (game.platform || '').trim() || 'arcade';
+    const mediaPlat = game.platform || 'arcade';
 
     const enabledSet = getEnabledSourceSet(game.collection_id);
 

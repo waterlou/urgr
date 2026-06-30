@@ -230,8 +230,8 @@ impl Database {
 
     pub fn insert_game(&self, collection_id: i64, game: &ParsedGame) -> Result<i64> {
         let id: i64 = self.conn.query_row(
-            "INSERT INTO games (collection_id, name, description, year, manufacturer, platform, isbios, isdevice, runnable, driver_status, driver_emulation, sampleof)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            "INSERT INTO games (collection_id, name, description, year, manufacturer, platform, region, isbios, isdevice, runnable, driver_status, driver_emulation, sampleof)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT(collection_id, name, platform) DO UPDATE SET
                description = excluded.description,
                year = excluded.year,

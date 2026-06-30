@@ -235,6 +235,11 @@ export default function GameDetail() {
                 <Box sx={{ flex: 1, minWidth: 200 }}>
                   <Typography variant="h5" fontWeight={600} sx={{ mb: 0.5 }}>{game.description || game.name}</Typography>
                   {game.description && <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>{game.name}</Typography>}
+                  {game.original_name && game.original_name !== game.description && game.original_name !== game.name && (
+                    <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontStyle: 'italic' }}>
+                      {game.original_name}
+                    </Typography>
+                  )}
                   {game.translations && Object.keys(game.translations).length > 0 && (
                     <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1 }}>
                       {Object.entries(game.translations).map(([lang, title]) => (
@@ -301,9 +306,9 @@ export default function GameDetail() {
                   <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>Variants ({game.clones.length})</Typography>
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
                     {game.clones.map(v => (
-                      <Chip key={v.id} label={v.name} size="small" variant="outlined" color="primary"
+                      <Chip key={v.id} label={`${v.description || v.name}${v.region ? ` (${v.region})` : ''}`} size="small" variant="outlined" color="primary"
                         onClick={() => navigate(`/collections/${collectionId || ''}/game/${v.id}${versionId ? `?version=${versionId}` : ''}`, { replace: true })}
-                        title={v.description}
+                        title={v.name}
                       />
                     ))}
                   </Box>
@@ -350,7 +355,14 @@ export default function GameDetail() {
                                 );
                               })()}
                             </TableCell>
-                            <TableCell>{rom.subtype === 'chd' ? 'CHD' : rom.subtype === 'sample' ? 'Sample' : rom.merge_target ? 'Split' : 'ROM'}</TableCell>
+                            <TableCell>
+                              {rom.subtype === 'chd' ? 'CHD' :
+                               rom.subtype === 'sample' ? 'Sample' :
+                               rom.subtype === 'update' ? 'Update' :
+                               rom.subtype === 'dlc' ? 'DLC' :
+                               rom.subtype === 'game' && rom.pkg_url ? 'Game' :
+                               rom.merge_target ? 'Split' : 'ROM'}
+                            </TableCell>
                             <TableCell>{rom.size ? `${(rom.size / 1024).toFixed(0)}KB` : ''}</TableCell>
                             <TableCell>
                               <Chip label={rom.status || 'unknown'} size="small" color={
